@@ -73,6 +73,4 @@ class IsAdmin(BasePermission):
     def has_permission(self, source: Any, info: Info, **kwargs: Any) -> bool:
         """Check if authenticated user has admin role."""
         role = info.context.get("user_role")
-        if role != "admin":
-            return False
-        return True
+        return role == "admin"
