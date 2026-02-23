@@ -1,0 +1,97 @@
+version: "3.9"
+
+services:
+  db:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_DB: ziona_dev
+      POSTGRES_USER: ziona
+      POSTGRES_PASSWORD: ziona_dev_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ziona"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7.2-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: >
+      bash -c "python manage.py migrate &&
+               python manage.py collectstatic --noinput &&
+               uvicorn config.asgi:application --host 0.0.0.0 --port 8000 --reload"
+    environment:
+      - DEBUG=True
+      - DJANGO_SETTINGS_MODULE=config.settings.dev
+      - DATABASE_URL=postgresql://ziona:ziona_dev_password@db:5432/ziona_dev
+      - REDIS_URL=redis://redis:6379/0
+      - DJANGO_SECRET_KEY=local-dev-secret-key-change-in-prod
+      - JWT_SECRET_KEY=local-dev-jwt-secret-key
+    ports:
+      - "8000:8000"
+    volumes:
+      - .:/app
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  celery-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: celery -A config worker -l info --concurrency=2
+    environment:
+      - DEBUG=True
+      - DJANGO_SETTINGS_MODULE=config.settings.dev
+      - DATABASE_URL=postgresql://ziona:ziona_dev_password@db:5432/ziona_dev
+      - REDIS_URL=redis://redis:6379/0
+      - DJANGO_SECRET_KEY=local-dev-secret-key-change-in-prod
+    volumes:
+      - .:/app
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  celery-beat:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: celery -A config beat -l info --scheduler django_celery_beat.schedulers:DatabaseScheduler
+    environment:
+      - DEBUG=True
+      - DJANGO_SETTINGS_MODULE=config.settings.dev
+      - DATABASE_URL=postgresql://ziona:ziona_dev_password@db:5432/ziona_dev
+      - REDIS_URL=redis://redis:6379/0
+      - DJANGO_SECRET_KEY=local-dev-secret-key-change-in-prod
+    volumes:
+      - .:/app
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
+  redis_data:

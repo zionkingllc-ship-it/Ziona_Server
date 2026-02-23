@@ -1,0 +1,71 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+dist/
+build/
+eggs/
+*.egg
+
+# Virtual Environment
+venv/
+venv_win/
+.venv/
+env/
+.env
+
+# Django
+db.sqlite3
+db.sqlite3-journal
+staticfiles/
+mediafiles/
+*.log
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+.env.local
+.env.staging
+.env.production
+
+#Coverage
+firebase-credentials.json
+gcp-credentials.json
+*.pem
+*.key
+
+htmlcov/
+.coverage
+.coverage.*
+coverage.xml
+
+# mypy
+.mypy_cache/
+.dmypy.json
+
+# pytest
+.pytest_cache/
+
+# Ruff
+.ruff_cache/
+
+# Celery
+celerybeat-schedule
+celerybeat.pid
+
+# Docker
+docker-compose.override.yml
+
+docs/MILESTONE_1_VALIDATION.md
+docs/SECURITY_DECISIONS.md
+docs/ZIONA_CONTEXT.md

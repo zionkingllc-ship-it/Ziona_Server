@@ -1,0 +1,452 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Ziona API",
+    "description": "Authentication REST API for Ziona mobile app.\n\n**GraphQL endpoint:** `/graphql/` (use GraphiQL for queries and mutations)\n\n**Auth Flow:** Register → Verify Email → Login → Use Bearer token → Refresh → Logout",
+    "version": "1.0.0",
+    "contact": {
+      "name": "Ziona Team"
+    }
+  },
+  "servers": [
+    {
+      "url": "/api",
+      "description": "API base path"
+    }
+  ],
+  "tags": [
+    {"name": "Authentication", "description": "User registration, login, and logout"},
+    {"name": "Email Verification", "description": "Email verification flow"},
+    {"name": "Password Reset", "description": "Password reset via OTP"},
+    {"name": "OAuth", "description": "Third-party authentication"}
+  ],
+  "paths": {
+    "/auth/register": {
+      "post": {
+        "tags": ["Authentication"],
+        "summary": "Register a new user",
+        "description": "Creates a new user account and sends a verification email via Ensend.",
+        "operationId": "register",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["email", "password"],
+                "properties": {
+                  "email": {"type": "string", "format": "email", "example": "user@example.com"},
+                  "password": {"type": "string", "minLength": 8, "example": "SecurePass123!"},
+                  "full_name": {"type": "string", "example": "John Doe"}
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "User registered successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {"type": "boolean", "example": true},
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "user": {"$ref": "#/components/schemas/User"},
+                        "access_token": {"type": "string"},
+                        "refresh_token": {"type": "string"}
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {"$ref": "#/components/responses/BadRequest"}
+        }
+      }
+    },
+    "/auth/login": {
+      "post": {
+        "tags": ["Authentication"],
+        "summary": "Login with email and password",
+        "description": "Authenticates user and returns JWT token pair.",
+        "operationId": "login",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["email", "password"],
+                "properties": {
+                  "email": {"type": "string", "format": "email", "example": "user@example.com"},
+                  "password": {"type": "string", "example": "SecurePass123!"}
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Login successful",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {"type": "boolean", "example": true},
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "user": {"$ref": "#/components/schemas/UserWithVerification"},
+                        "access_token": {"type": "string"},
+                        "refresh_token": {"type": "string"}
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid credentials",
+            "content": {
+              "application/json": {
+                "schema": {"$ref": "#/components/schemas/ErrorResponse"}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/refresh": {
+      "post": {
+        "tags": ["Authentication"],
+        "summary": "Refresh access token",
+        "description": "Exchange a valid refresh token for a new token pair.",
+        "operationId": "refreshToken",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["refresh_token"],
+                "properties": {
+                  "refresh_token": {"type": "string"}
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Tokens refreshed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {"type": "boolean", "example": true},
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "access_token": {"type": "string"},
+                        "refresh_token": {"type": "string"}
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid or expired refresh token",
+            "content": {
+              "application/json": {
+                "schema": {"$ref": "#/components/schemas/ErrorResponse"}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/logout": {
+      "post": {
+        "tags": ["Authentication"],
+        "summary": "Logout user",
+        "description": "Blacklists access token and revokes refresh token.",
+        "operationId": "logout",
+        "security": [{"BearerAuth": []}],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "refresh_token": {"type": "string", "description": "Optional: also revoke refresh token"}
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Logged out successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {"type": "boolean", "example": true},
+                    "message": {"type": "string", "example": "Logged out successfully"}
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid Bearer token",
+            "content": {
+              "application/json": {
+                "schema": {"$ref": "#/components/schemas/ErrorResponse"}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/verify-email": {
+      "post": {
+        "tags": ["Email Verification"],
+        "summary": "Verify email address",
+        "description": "Verifies user's email using the token sent during registration.",
+        "operationId": "verifyEmail",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["token"],
+                "properties": {
+                  "token": {"type": "string", "description": "JWT verification token from email link"}
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Email verified",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {"type": "boolean", "example": true},
+                    "message": {"type": "string", "example": "Email verified successfully"}
+                  }
+                }
+              }
+            }
+          },
+          "400": {"$ref": "#/components/responses/BadRequest"}
+        }
+      }
+    },
+    "/auth/password-reset": {
+      "post": {
+        "tags": ["Password Reset"],
+        "summary": "Request password reset",
+        "description": "Sends a 6-digit OTP to the user's email. Always returns success to prevent email enumeration.",
+        "operationId": "requestPasswordReset",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["email"],
+                "properties": {
+                  "email": {"type": "string", "format": "email", "example": "user@example.com"}
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Reset code sent (if account exists)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {"type": "boolean", "example": true},
+                    "message": {"type": "string", "example": "If an account with this email exists, a reset code has been sent."}
+                  }
+                }
+              }
+            }
+          },
+          "400": {"$ref": "#/components/responses/BadRequest"}
+        }
+      }
+    },
+    "/auth/password-reset/confirm": {
+      "post": {
+        "tags": ["Password Reset"],
+        "summary": "Confirm password reset",
+        "description": "Resets the user's password using the OTP sent to their email.",
+        "operationId": "confirmPasswordReset",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["email", "otp", "new_password"],
+                "properties": {
+                  "email": {"type": "string", "format": "email", "example": "user@example.com"},
+                  "otp": {"type": "string", "example": "123456", "description": "6-digit OTP from email"},
+                  "new_password": {"type": "string", "minLength": 8, "example": "NewSecurePass123!"}
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Password reset successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {"type": "boolean", "example": true},
+                    "message": {"type": "string", "example": "Password reset successfully"}
+                  }
+                }
+              }
+            }
+          },
+          "400": {"$ref": "#/components/responses/BadRequest"}
+        }
+      }
+    },
+    "/auth/google": {
+      "post": {
+        "tags": ["OAuth"],
+        "summary": "Login with Google",
+        "description": "Authenticates or registers a user using a Google ID token from Firebase.",
+        "operationId": "googleOAuth",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["id_token"],
+                "properties": {
+                  "id_token": {"type": "string", "description": "Google ID token from Firebase Auth"}
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Google login successful",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {"type": "boolean", "example": true},
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "user": {"$ref": "#/components/schemas/User"},
+                        "access_token": {"type": "string"},
+                        "refresh_token": {"type": "string"},
+                        "is_new_user": {"type": "boolean"}
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid Google token",
+            "content": {
+              "application/json": {
+                "schema": {"$ref": "#/components/schemas/ErrorResponse"}
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "BearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+        "description": "JWT access token from login or register"
+      }
+    },
+    "schemas": {
+      "User": {
+        "type": "object",
+        "properties": {
+          "id": {"type": "string", "format": "uuid"},
+          "email": {"type": "string", "format": "email"},
+          "username": {"type": "string", "nullable": true},
+          "role": {"type": "string", "enum": ["user", "admin"]}
+        }
+      },
+      "UserWithVerification": {
+        "allOf": [
+          {"$ref": "#/components/schemas/User"},
+          {
+            "type": "object",
+            "properties": {
+              "is_email_verified": {"type": "boolean"}
+            }
+          }
+        ]
+      },
+      "ErrorResponse": {
+        "type": "object",
+        "properties": {
+          "success": {"type": "boolean", "example": false},
+          "error": {
+            "type": "object",
+            "properties": {
+              "code": {"type": "string", "example": "INVALID_CREDENTIALS"},
+              "message": {"type": "string", "example": "Invalid email or password"}
+            }
+          }
+        }
+      }
+    },
+    "responses": {
+      "BadRequest": {
+        "description": "Bad request",
+        "content": {
+          "application/json": {
+            "schema": {"$ref": "#/components/schemas/ErrorResponse"}
+          }
+        }
+      }
+    }
+  }
+}

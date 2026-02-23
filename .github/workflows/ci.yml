@@ -1,0 +1,147 @@
+name: Ziona CI/CD
+
+on:
+  push:
+    branches: [main, staging, dev]
+  pull_request:
+    branches: [main, staging]
+
+env:
+  PYTHON_VERSION: "3.12"
+  DJANGO_SETTINGS_MODULE: config.settings.dev
+
+jobs:
+  # ============================================================
+  # Lint & Format Check
+  # ============================================================
+  lint:
+    name: Lint & Format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      - name: Install dependencies
+        run: pip install ruff mypy django-stubs
+
+      - name: Run Ruff linter
+        run: ruff check . --output-format=github
+
+      - name: Run Ruff formatter check
+        run: ruff format --check .
+
+  # ============================================================
+  # Tests
+  # ============================================================
+  test:
+    name: Test Suite
+    runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7.2-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run migrations
+        env:
+          DATABASE_URL: sqlite:///db.sqlite3
+          REDIS_URL: redis://localhost:6379/0
+          DJANGO_SECRET_KEY: ci-test-secret-key
+        run: python manage.py migrate --noinput
+
+      - name: Run tests with coverage
+        env:
+          DATABASE_URL: sqlite:///db.sqlite3
+          REDIS_URL: redis://localhost:6379/0
+          DJANGO_SECRET_KEY: ci-test-secret-key
+        run: |
+          pytest --cov=core --cov-report=xml --cov-report=term-missing -v
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage.xml
+
+  # ============================================================
+  # Security Check
+  # ============================================================
+  security:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Check for secrets in code
+        run: |
+          pip install detect-secrets
+          detect-secrets scan --all-files --exclude-files '.git/.*' > .secrets.baseline || true
+          if detect-secrets audit .secrets.baseline --report --json 2>/dev/null | grep -q '"verified": true'; then
+            echo "::error::Secrets detected in codebase!"
+            exit 1
+          fi
+
+      - name: Check for .env files
+        run: |
+          if find . -name ".env" -not -name ".env.example" -not -path "./.git/*" | grep -q .; then
+            echo "::error::.env file found in repository!"
+            exit 1
+          fi
+
+  deploy-staging:
+    name: Deploy to Staging
+    runs-on: ubuntu-latest
+    needs: [lint, test, security]
+    if: github.ref == 'refs/heads/staging' && github.event_name == 'push'
+    steps:
+      - name: Deploy to Render
+        env:
+          RENDER_DEPLOY_HOOK_URL: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
+        run: |
+          if [ -n "$RENDER_DEPLOY_HOOK_URL" ]; then
+            curl -X POST "$RENDER_DEPLOY_HOOK_URL"
+            echo "Deployment triggered on Render"
+          else
+            echo "::warning::RENDER_DEPLOY_HOOK_URL not set, skipping deployment"
+          fi

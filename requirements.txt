@@ -1,0 +1,57 @@
+# Django Core
+Django==5.0.1
+django-environ==0.11.2
+django-cors-headers==4.3.1
+django-health-check==3.18.1
+django-filter==23.5
+
+# GraphQL
+strawberry-graphql==0.227.3
+strawberry-graphql-django==0.39.2
+
+# Database
+psycopg2-binary==2.9.9
+dj-database-url==2.1.0
+
+# Authentication
+PyJWT==2.8.0
+bcrypt==4.1.2
+firebase-admin==6.3.0
+cryptography==42.0.2
+
+# Redis & Celery
+redis==5.0.1
+django-redis==5.4.0
+celery==5.3.4
+django-celery-beat==2.6.0
+
+# GCP Storage
+google-cloud-storage==2.14.0
+
+# ASGI Server
+uvicorn[standard]==0.27.0
+gunicorn==21.2.0
+
+# Monitoring
+sentry-sdk[django]==1.40.0
+structlog==24.1.0
+django-structlog==6.0.1
+
+# Input Sanitization
+bleach==6.1.0
+
+# Code Quality
+ruff==0.2.0
+mypy==1.8.0
+django-stubs==4.2.7
+
+# Testing
+pytest==8.0.0
+pytest-django==4.8.0
+pytest-asyncio==0.23.3
+pytest-cov==4.1.0
+factory-boy==3.3.0
+faker==22.4.0
+
+# Email (Ensend REST API)
+requests==2.31.0
