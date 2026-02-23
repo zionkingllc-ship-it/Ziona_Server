@@ -7,15 +7,14 @@ Resolver/View → Service → Selector → ORM
 """
 
 import logging
-import random
+import secrets
 import string
+from datetime import UTC
 from typing import Any
 
-import bcrypt
 from django.conf import settings
-from django.template.loader import render_to_string
 
-from core.authentication.tokens import TokenService, TokenError
+from core.authentication.tokens import TokenError, TokenService
 from core.shared.logging import log_security_event, mask_email
 from core.users.models import User
 
@@ -100,9 +99,7 @@ class AuthService:
         AuthService._send_verification_email(user)
 
         # Generate tokens
-        access_token = TokenService.generate_access_token(
-            str(user.id), user.role
-        )
+        access_token = TokenService.generate_access_token(str(user.id), user.role)
         refresh_token, _ = TokenService.generate_refresh_token(str(user.id))
 
         log_security_event(
@@ -152,7 +149,7 @@ class AuthService:
             raise AuthenticationError(
                 "Invalid email or password",
                 code="INVALID_CREDENTIALS",
-            )
+            ) from None
 
         if not user.check_password(password):
             log_security_event(
@@ -184,9 +181,7 @@ class AuthService:
         user.save(update_fields=["last_login_ip", "updated_at"])
 
         # Generate tokens
-        access_token = TokenService.generate_access_token(
-            str(user.id), user.role
-        )
+        access_token = TokenService.generate_access_token(str(user.id), user.role)
         refresh_token, _ = TokenService.generate_refresh_token(str(user.id))
 
         log_security_event(
@@ -227,7 +222,7 @@ class AuthService:
             raise AuthenticationError(
                 "Invalid or expired verification link",
                 code="INVALID_VERIFICATION_TOKEN",
-            )
+            ) from None
 
         if payload.get("type") != "email_verification":
             raise AuthenticationError(
@@ -241,7 +236,7 @@ class AuthService:
             raise AuthenticationError(
                 "User not found",
                 code="USER_NOT_FOUND",
-            )
+            ) from None
 
         user.is_email_verified = True
         user.save(update_fields=["is_email_verified", "updated_at"])
@@ -276,7 +271,7 @@ class AuthService:
             return True
 
         # Generate 6-digit OTP
-        otp = "".join(random.choices(string.digits, k=6))
+        otp = "".join(secrets.choice(string.digits) for _ in range(6))
 
         # Store OTP in Redis (10min TTL)
         try:
@@ -290,7 +285,7 @@ class AuthService:
             raise AuthenticationError(
                 "Failed to send reset code. Please try again.",
                 code="OTP_STORAGE_FAILED",
-            )
+            ) from e
 
         # Send email with OTP (async via Celery - non-blocking)
         from core.shared.tasks.email_tasks import send_email_async
@@ -340,7 +335,7 @@ class AuthService:
             raise AuthenticationError(
                 "Invalid email or OTP",
                 code="INVALID_OTP",
-            )
+            ) from None
 
         # Validate OTP from Redis
         try:
@@ -372,7 +367,7 @@ class AuthService:
             raise AuthenticationError(
                 "Failed to validate reset code. Please try again.",
                 code="OTP_VALIDATION_FAILED",
-            )
+            ) from e
 
         # Validate and set new password
         _validate_password(new_password)
@@ -419,7 +414,7 @@ class AuthService:
             raise AuthenticationError(
                 "Invalid Google authentication token",
                 code="INVALID_OAUTH_TOKEN",
-            )
+            ) from e
 
         firebase_uid = decoded_token["uid"]
         email = decoded_token.get("email", "")
@@ -439,10 +434,14 @@ class AuthService:
                 user.firebase_uid = firebase_uid
                 user.auth_provider = "google"
                 user.is_email_verified = True
-                user.save(update_fields=[
-                    "firebase_uid", "auth_provider",
-                    "is_email_verified", "updated_at",
-                ])
+                user.save(
+                    update_fields=[
+                        "firebase_uid",
+                        "auth_provider",
+                        "is_email_verified",
+                        "updated_at",
+                    ]
+                )
             except User.DoesNotExist:
                 # Create new user
                 username = _generate_unique_username(email, name)
@@ -463,9 +462,7 @@ class AuthService:
         user.save(update_fields=["last_login_ip", "updated_at"])
 
         # Generate tokens
-        access_token = TokenService.generate_access_token(
-            str(user.id), user.role
-        )
+        access_token = TokenService.generate_access_token(str(user.id), user.role)
         refresh_token, _ = TokenService.generate_refresh_token(str(user.id))
 
         log_security_event(
@@ -503,11 +500,10 @@ class AuthService:
                 user = User.objects.get(id=user_id)
                 role = user.role
             except User.DoesNotExist:
-                raise TokenError("User not found")
-
+                raise TokenError("User not found") from None
             return TokenService.rotate_refresh_token(refresh_token, role)
         except TokenError as e:
-            raise AuthenticationError(str(e), code="INVALID_REFRESH_TOKEN")
+            raise AuthenticationError(str(e), code="INVALID_REFRESH_TOKEN") from e
 
     @staticmethod
     def logout(
@@ -539,7 +535,7 @@ class AuthService:
                 jti = payload["jti"]
                 redis_conn.delete(f"refresh:{uid}:{jti}")
             except Exception:
-                pass
+                logger.debug("Failed to revoke refresh token on logout", exc_info=True)
 
         log_security_event(
             "auth.logout",
@@ -555,15 +551,17 @@ class AuthService:
         Args:
             user: User instance to send verification to.
         """
+        from datetime import datetime, timedelta
+
         import jwt as pyjwt
-        from datetime import datetime, timezone, timedelta
+
         from core.shared.tasks.email_tasks import send_email_async
 
         token = pyjwt.encode(
             {
                 "user_id": str(user.id),
                 "type": "email_verification",
-                "exp": datetime.now(timezone.utc) + timedelta(hours=24),
+                "exp": datetime.now(UTC) + timedelta(hours=24),
             },
             settings.JWT_SECRET_KEY,
             algorithm=settings.JWT_ALGORITHM,

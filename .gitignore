@@ -69,3 +69,4 @@ docker-compose.override.yml
 docs/MILESTONE_1_VALIDATION.md
 docs/SECURITY_DECISIONS.md
 docs/ZIONA_CONTEXT.md
+uv.lock

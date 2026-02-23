@@ -1,6 +1,4 @@
 from django.contrib.auth.models import BaseUserManager
-from django.db import models
-from django.utils import timezone
 
 
 class UserManager(BaseUserManager):
@@ -70,12 +68,11 @@ class UserManager(BaseUserManager):
         if extra_fields.get("is_superuser") is not True:
             raise ValueError("Superuser must have is_superuser=True")
 
-       
         username = extra_fields.pop("username", None)
         if not username:
             base = email.split("@")[0].replace(".", "_").replace("+", "_")
             username = base
-            
+
             counter = 1
             while self.model.all_objects.filter(username=username).exists():
                 username = f"{base}_{counter}"

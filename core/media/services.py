@@ -129,7 +129,9 @@ class MediaService:
         except Exception as e:
             logger.error(f"Failed to generate signed URL: {e}")
             # For development, return a placeholder URL
-            upload_url = f"https://storage.googleapis.com/{settings.GCP_STORAGE_BUCKET}/{storage_path}"
+            upload_url = (
+                f"https://storage.googleapis.com/{settings.GCP_STORAGE_BUCKET}/{storage_path}"
+            )
 
         logger.info(
             "Upload URL generated",
@@ -167,13 +169,13 @@ class MediaService:
             raise MediaError(
                 "Media file not found",
                 code="MEDIA_NOT_FOUND",
-            )
+            ) from None
 
         if media_file.status != MediaStatus.PENDING:
             raise MediaError(
                 f"Media file is already {media_file.status}",
                 code="INVALID_STATUS",
-            )
+            ) from None
 
         media_file.status = MediaStatus.PROCESSING
         media_file.save(update_fields=["status", "updated_at"])
@@ -207,13 +209,13 @@ class MediaService:
             raise MediaError(
                 "Media file not found",
                 code="MEDIA_NOT_FOUND",
-            )
+            ) from None
 
         if media_file.status != MediaStatus.READY:
             raise MediaError(
                 "Media file is not ready for download",
                 code="MEDIA_NOT_READY",
-            )
+            ) from None
 
         try:
             return _generate_gcp_signed_url(
@@ -260,14 +262,12 @@ def _generate_gcp_signed_url(
     bucket_obj = client.bucket(bucket)
     blob = bucket_obj.blob(blob_path)
 
-    url = blob.generate_signed_url(
+    return blob.generate_signed_url(
         version="v4",
         expiration=timedelta(seconds=expiry_seconds),
         method=method,
         content_type=content_type if method == "PUT" else None,
     )
-
-    return url
 
 
 def validate_magic_bytes(file_content: bytes, declared_type: str) -> bool:

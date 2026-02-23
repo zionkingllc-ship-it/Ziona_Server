@@ -1,24 +1,24 @@
 """GraphQL types and mutations for the media domain."""
 
 import strawberry
-from typing import Optional
-
 
 # --- Types ---
+
 
 @strawberry.type
 class MediaUploadPayload:
     """Response type for media upload mutations."""
 
     success: bool
-    upload_url: Optional[str] = None
-    media_id: Optional[str] = None
-    expires_in: Optional[int] = None
-    message: Optional[str] = None
-    error_code: Optional[str] = None
+    upload_url: str | None = None
+    media_id: str | None = None
+    expires_in: int | None = None
+    message: str | None = None
+    error_code: str | None = None
 
 
 # --- Mutations ---
+
 
 @strawberry.type
 class MediaMutations:
@@ -33,7 +33,7 @@ class MediaMutations:
         file_size: int,
     ) -> MediaUploadPayload:
         """Generate a signed URL for direct file upload to GCP."""
-        from core.media.services import MediaService, MediaError
+        from core.media.services import MediaError, MediaService
 
         # Check auth
         request = info.context["request"]

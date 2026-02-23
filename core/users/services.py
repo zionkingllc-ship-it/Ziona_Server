@@ -1,17 +1,15 @@
 import logging
-from datetime import datetime
-from typing import Any
+from datetime import UTC, date, datetime
 
 from cryptography.fernet import Fernet
 from django.conf import settings
 
 from core.shared.logging import log_security_event
 from core.users.models import User
-from core.users.selectors import check_username_availability
 from core.users.validators import (
+    UsernameValidationError,
     validate_username_format,
     validate_username_not_reserved,
-    UsernameValidationError,
 )
 
 logger = logging.getLogger("core.users")
@@ -58,13 +56,11 @@ class UserService:
             validate_username_format(username)
             validate_username_not_reserved(username)
         except UsernameValidationError as e:
-            raise UserServiceError(e.message, code=e.code)
-
+            raise UserServiceError(e.message, code=e.code) from None
         try:
             user = User.objects.get(id=user_id)
         except User.DoesNotExist:
-            raise UserServiceError("User not found", code="USER_NOT_FOUND")
-
+            raise UserServiceError("User not found", code="USER_NOT_FOUND") from None
         if user.username == username:
             return user
 
@@ -100,16 +96,16 @@ class UserService:
         Raises:
             UserServiceError: If date is invalid or user is under 13.
         """
-       
+
         try:
-            birth_date = datetime.strptime(dob, "%Y-%m-%d").date()
+            birth_date = date.fromisoformat(dob)
         except ValueError:
             raise UserServiceError(
                 "Invalid date format. Use YYYY-MM-DD.",
                 code="INVALID_DATE_FORMAT",
-            )
+            ) from None
 
-        today = datetime.now().date()
+        today = datetime.now(UTC).date()
         age = (today - birth_date).days / 365.25
 
         if age < 13:
@@ -132,13 +128,12 @@ class UserService:
             raise UserServiceError(
                 "Failed to store date of birth",
                 code="ENCRYPTION_FAILED",
-            )
+            ) from e
 
         try:
             user = User.objects.get(id=user_id)
         except User.DoesNotExist:
-            raise UserServiceError("User not found", code="USER_NOT_FOUND")
-
+            raise UserServiceError("User not found", code="USER_NOT_FOUND") from None
         user.encrypted_dob = encrypted
         user.save(update_fields=["encrypted_dob", "updated_at"])
 
@@ -165,8 +160,7 @@ class UserService:
         try:
             user = User.objects.get(id=user_id)
         except User.DoesNotExist:
-            raise UserServiceError("User not found", code="USER_NOT_FOUND")
-
+            raise UserServiceError("User not found", code="USER_NOT_FOUND") from None
         if not user.encrypted_dob:
             return None
 
@@ -179,4 +173,4 @@ class UserService:
             raise UserServiceError(
                 "Failed to retrieve date of birth",
                 code="DECRYPTION_FAILED",
-            )
+            ) from e

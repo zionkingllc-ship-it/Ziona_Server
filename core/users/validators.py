@@ -1,14 +1,33 @@
 import re
 
-from core.authentication.services import AuthenticationError
-
-
-RESERVED_USERNAMES = frozenset({
-    "admin", "administrator", "ziona", "support", "help", "info",
-    "contact", "root", "system", "mod", "moderator", "official",
-    "api", "graphql", "auth", "login", "register", "settings",
-    "profile", "account", "null", "undefined", "test", "staff",
-})
+RESERVED_USERNAMES = frozenset(
+    {
+        "admin",
+        "administrator",
+        "ziona",
+        "support",
+        "help",
+        "info",
+        "contact",
+        "root",
+        "system",
+        "mod",
+        "moderator",
+        "official",
+        "api",
+        "graphql",
+        "auth",
+        "login",
+        "register",
+        "settings",
+        "profile",
+        "account",
+        "null",
+        "undefined",
+        "test",
+        "staff",
+    }
+)
 
 
 USERNAME_PATTERN = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_]{1,28}[a-zA-Z0-9]$")

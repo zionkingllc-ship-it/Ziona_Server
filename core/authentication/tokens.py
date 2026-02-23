@@ -12,7 +12,7 @@ Security:
 
 import logging
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import jwt
 from django.conf import settings
@@ -44,7 +44,7 @@ class TokenService:
         Returns:
             Encoded JWT access token string.
         """
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         payload = {
             "user_id": str(user_id),
             "role": role,
@@ -69,7 +69,7 @@ class TokenService:
         Returns:
             Tuple of (encoded refresh token, jti).
         """
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         jti = str(uuid.uuid4())
         payload = {
             "user_id": str(user_id),
@@ -121,9 +121,9 @@ class TokenService:
                 algorithms=[settings.JWT_ALGORITHM],
             )
         except jwt.ExpiredSignatureError:
-            raise TokenError("Access token has expired")
+            raise TokenError("Access token has expired") from None
         except jwt.InvalidTokenError as e:
-            raise TokenError(f"Invalid access token: {e}")
+            raise TokenError(f"Invalid access token: {e}") from e
 
         if payload.get("type") != "access":
             raise TokenError("Token is not an access token")
@@ -139,7 +139,7 @@ class TokenService:
         except TokenError:
             raise
         except Exception:
-            pass  # If Redis is down, allow the token
+            logger.debug("Redis unavailable for token blacklist check; allowing token")
 
         return payload
 
@@ -163,9 +163,9 @@ class TokenService:
                 algorithms=[settings.JWT_ALGORITHM],
             )
         except jwt.ExpiredSignatureError:
-            raise TokenError("Refresh token has expired")
+            raise TokenError("Refresh token has expired") from None
         except jwt.InvalidTokenError as e:
-            raise TokenError(f"Invalid refresh token: {e}")
+            raise TokenError(f"Invalid refresh token: {e}") from e
 
         if payload.get("type") != "refresh":
             raise TokenError("Token is not a refresh token")
@@ -269,7 +269,7 @@ class TokenService:
             )
             jti = payload.get("jti")
             exp = payload.get("exp", 0)
-            now = datetime.now(timezone.utc).timestamp()
+            now = datetime.now(UTC).timestamp()
             ttl = max(int(exp - now), 1)
 
             from django_redis import get_redis_connection

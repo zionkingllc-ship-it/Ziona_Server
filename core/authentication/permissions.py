@@ -11,7 +11,7 @@ from typing import Any
 from strawberry.permission import BasePermission
 from strawberry.types import Info
 
-from core.authentication.tokens import TokenService, TokenError
+from core.authentication.tokens import TokenError, TokenService
 from core.users.models import User
 
 logger = logging.getLogger("core.authentication")

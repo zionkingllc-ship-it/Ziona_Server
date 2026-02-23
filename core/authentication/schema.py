@@ -1,34 +1,34 @@
 """GraphQL types, queries, and mutations for the authentication domain."""
 
 import strawberry
-from typing import Optional
 
 from core.users.models import User
 from core.users.schema import UserType
 
-
 # --- Types ---
+
 
 @strawberry.type
 class AuthPayload:
     """Response type for authentication mutations."""
 
     success: bool
-    user: Optional[UserType] = None
-    access_token: Optional[str] = None
-    refresh_token: Optional[str] = None
-    message: Optional[str] = None
-    error_code: Optional[str] = None
+    user: UserType | None = None
+    access_token: str | None = None
+    refresh_token: str | None = None
+    message: str | None = None
+    error_code: str | None = None
 
 
 # --- Queries ---
+
 
 @strawberry.type
 class AuthQueries:
     """Authentication domain queries."""
 
     @strawberry.field(description="Get the currently authenticated user")
-    def me(self, info: strawberry.types.Info) -> Optional[UserType]:
+    def me(self, info: strawberry.types.Info) -> UserType | None:
         """Return the currently authenticated user."""
         request = info.context["request"]
         auth_header = request.META.get("HTTP_AUTHORIZATION", "")
@@ -55,6 +55,7 @@ class AuthQueries:
 
 # --- Mutations ---
 
+
 @strawberry.type
 class AuthMutations:
     """Authentication domain mutations."""
@@ -68,7 +69,7 @@ class AuthMutations:
         full_name: str = "",
     ) -> AuthPayload:
         """Register a new user (username set later during onboarding)."""
-        from core.authentication.services import AuthService, AuthenticationError
+        from core.authentication.services import AuthenticationError, AuthService
 
         request = info.context["request"]
         ip = request.META.get("REMOTE_ADDR", "unknown")
@@ -101,7 +102,7 @@ class AuthMutations:
         password: str,
     ) -> AuthPayload:
         """Authenticate a user."""
-        from core.authentication.services import AuthService, AuthenticationError
+        from core.authentication.services import AuthenticationError, AuthService
 
         request = info.context["request"]
 
@@ -132,7 +133,7 @@ class AuthMutations:
         refresh_token: str,
     ) -> AuthPayload:
         """Rotate refresh token for new token pair."""
-        from core.authentication.services import AuthService, AuthenticationError
+        from core.authentication.services import AuthenticationError, AuthService
 
         try:
             result = AuthService.refresh_tokens(refresh_token)

@@ -1,6 +1,6 @@
 import pytest
 
-from core.authentication.tokens import TokenService, TokenError
+from core.authentication.tokens import TokenError, TokenService
 
 
 class TestAccessToken:

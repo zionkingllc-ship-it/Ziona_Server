@@ -1,9 +1,9 @@
 from django.contrib import admin
-from django.urls import path, include
+from django.urls import include, path
+from strawberry.django.views import GraphQLView
 
 from config.graphql_schema import schema
-from config.swagger import swagger_ui, openapi_schema
-from strawberry.django.views import GraphQLView
+from config.swagger import openapi_schema, swagger_ui
 
 urlpatterns = [
     path("admin/", admin.site.urls),

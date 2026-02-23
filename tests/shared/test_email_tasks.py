@@ -1,6 +1,8 @@
+from unittest.mock import MagicMock, patch
+
 import pytest
-from unittest.mock import patch, MagicMock
 from celery.exceptions import MaxRetriesExceededError
+
 from core.shared.tasks.email_tasks import send_email_async
 
 
@@ -85,8 +87,8 @@ class TestEmailTasks:
         )
         elapsed = time.time() - start
 
-        assert elapsed < 0.1  
-        assert task.id is not None  
+        assert elapsed < 0.1
+        assert task.id is not None
 
     @patch("core.shared.tasks.email_tasks.send_mail")
     def test_uses_default_from_email_when_none(self, mock_send_mail):

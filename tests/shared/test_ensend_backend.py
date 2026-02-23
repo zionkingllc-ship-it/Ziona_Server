@@ -63,7 +63,7 @@ class TestSuccessfulSend:
         assert payload["subject"] == "Test Subject"
         assert payload["message"] == "Hello, plain text body."
         assert payload["sender"]["email"] == "test@ziona.app"
-        assert "user@example.com" in payload["recipients"]["email"]
+        assert "user@example.com" in payload["recipients"]
 
     @patch("core.shared.email_backends.ensend.requests.Session")
     def test_send_html_email(self, mock_session_cls, backend, html_message):
@@ -181,11 +181,10 @@ class TestErrorHandling:
         backend_silent.api_key = "test-key"
 
         messages = [
-            EmailMessage(subject=f"Test {i}", body="body", to=[f"u{i}@test.com"])
-            for i in range(3)
+            EmailMessage(subject=f"Test {i}", body="body", to=[f"u{i}@test.com"]) for i in range(3)
         ]
         count = backend_silent.send_messages(messages)
-        assert count == 2  
+        assert count == 2
 
 
 class TestEdgeCases:
@@ -215,8 +214,8 @@ class TestEdgeCases:
 
         call_kwargs = mock_session.post.call_args
         payload = call_kwargs.kwargs.get("json") or call_kwargs[1].get("json")
-        assert "a@test.com" in payload["recipients"]["email"]
-        assert "b@test.com" in payload["recipients"]["email"]
+        assert "a@test.com" in payload["recipients"]
+        assert "b@test.com" in payload["recipients"]
 
     @patch("core.shared.email_backends.ensend.requests.Session")
     def test_session_reuse(self, mock_session_cls, backend):
@@ -227,8 +226,7 @@ class TestEdgeCases:
         mock_session_cls.return_value = mock_session
 
         messages = [
-            EmailMessage(subject=f"Test {i}", body="body", to=[f"u{i}@test.com"])
-            for i in range(3)
+            EmailMessage(subject=f"Test {i}", body="body", to=[f"u{i}@test.com"]) for i in range(3)
         ]
         backend.send_messages(messages)
 

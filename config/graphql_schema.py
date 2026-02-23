@@ -1,9 +1,9 @@
 import strawberry
 from strawberry.schema import Schema
 
-from core.authentication.schema import AuthQueries, AuthMutations
-from core.users.schema import UserMutations
+from core.authentication.schema import AuthMutations, AuthQueries
 from core.media.schema import MediaMutations
+from core.users.schema import UserMutations
 
 
 @strawberry.type

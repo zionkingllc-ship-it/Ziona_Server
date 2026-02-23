@@ -9,11 +9,11 @@ import json
 import logging
 
 from django.http import HttpRequest, JsonResponse
+from django.utils.decorators import method_decorator
 from django.views import View
 from django.views.decorators.csrf import csrf_exempt
-from django.utils.decorators import method_decorator
 
-from core.authentication.services import AuthService, AuthenticationError
+from core.authentication.services import AuthenticationError, AuthService
 
 logger = logging.getLogger("core.authentication")
 
@@ -266,9 +266,7 @@ class VerifyEmailView(View):
 
         try:
             AuthService.verify_email(token)
-            return JsonResponse(
-                {"success": True, "message": "Email verified successfully"}
-            )
+            return JsonResponse({"success": True, "message": "Email verified successfully"})
         except AuthenticationError as e:
             return JsonResponse(
                 {"success": False, "error": {"code": e.code, "message": e.message}},
@@ -351,9 +349,7 @@ class PasswordResetConfirmView(View):
                 new_password=new_password,
                 ip_address=_get_client_ip(request),
             )
-            return JsonResponse(
-                {"success": True, "message": "Password reset successfully"}
-            )
+            return JsonResponse({"success": True, "message": "Password reset successfully"})
         except AuthenticationError as e:
             return JsonResponse(
                 {"success": False, "error": {"code": e.code, "message": e.message}},

@@ -9,7 +9,7 @@ from django.core.mail.message import EmailMessage
 logger = logging.getLogger("core.shared.email")
 
 _DEFAULT_API_URL = "https://api.smtpexpress.com/send"
-_DEFAULT_TIMEOUT = 10  
+_DEFAULT_TIMEOUT = 10
 
 
 class EnsendEmailBackend(BaseEmailBackend):
@@ -30,16 +30,13 @@ class EnsendEmailBackend(BaseEmailBackend):
         self.api_key: str = getattr(settings, "ENSEND_API_KEY", "")
         self.api_url: str = getattr(settings, "ENSEND_API_URL", _DEFAULT_API_URL)
         self.sender_name: str = getattr(settings, "ENSEND_SENDER_NAME", "Ziona Team")
-        self.sender_email: str = getattr(
-            settings, "DEFAULT_FROM_EMAIL", "noreply@ziona.app"
-        )
+        self.sender_email: str = getattr(settings, "DEFAULT_FROM_EMAIL", "noreply@ziona.app")
         self._session: requests.Session | None = None
-
 
     def open(self) -> bool:
         """Open a reusable HTTP session."""
         if self._session is not None:
-            return False  
+            return False
 
         self._session = requests.Session()
         self._session.headers.update(
@@ -56,7 +53,6 @@ class EnsendEmailBackend(BaseEmailBackend):
         if self._session is not None:
             self._session.close()
             self._session = None
-
 
     def send_messages(self, email_messages: list[EmailMessage]) -> int:
         """Send one or more EmailMessage objects via Ensend.
@@ -104,7 +100,6 @@ class EnsendEmailBackend(BaseEmailBackend):
 
         return sent_count
 
-
     def _send_single(self, message: EmailMessage) -> bool:
         """Send a single EmailMessage via the Ensend API.
 
@@ -135,7 +130,7 @@ class EnsendEmailBackend(BaseEmailBackend):
             "recipients": ", ".join(message.to),
         }
 
-        assert self._session is not None  
+        assert self._session is not None
         response = self._session.post(
             self.api_url,
             json=payload,
@@ -144,8 +139,7 @@ class EnsendEmailBackend(BaseEmailBackend):
 
         if response.status_code == 429:
             logger.warning(
-                "Ensend rate limit hit (HTTP 429). "
-                "Email not sent — will not retry automatically.",
+                "Ensend rate limit hit (HTTP 429). Email not sent — will not retry automatically.",
                 extra={
                     "subject": message.subject,
                     "recipients": message.to,
@@ -160,7 +154,7 @@ class EnsendEmailBackend(BaseEmailBackend):
                 response.status_code,
                 error_detail,
             )
-            response.raise_for_status() 
+            response.raise_for_status()
 
         logger.info(
             "Email sent via Ensend",
@@ -181,7 +175,7 @@ class EnsendEmailBackend(BaseEmailBackend):
         Returns:
             HTML string, or None if no HTML alternative exists.
         """
-        
+
         alternatives = getattr(message, "alternatives", None)
         if alternatives:
             for content, mimetype in alternatives:

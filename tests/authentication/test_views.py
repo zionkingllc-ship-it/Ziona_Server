@@ -1,4 +1,5 @@
-import pytest
+import json
+
 from django.test import Client
 
 
@@ -9,11 +10,13 @@ class TestRegisterEndpoint:
         """Valid registration with email+password should return 201."""
         response = api_client.post(
             "/api/auth/register",
-            data=json.dumps({
-                "email": "new@example.com",
-                "password": "SecureP@ss1",
-                "full_name": "Test User",
-            }),
+            data=json.dumps(
+                {
+                    "email": "new@example.com",
+                    "password": "SecureP@ss1",
+                    "full_name": "Test User",
+                }
+            ),
             content_type="application/json",
         )
 
@@ -50,10 +53,12 @@ class TestLoginEndpoint:
 
         response = api_client.post(
             "/api/auth/login",
-            data=json.dumps({
-                "email": "login@example.com",
-                "password": "SecureP@ss1",
-            }),
+            data=json.dumps(
+                {
+                    "email": "login@example.com",
+                    "password": "SecureP@ss1",
+                }
+            ),
             content_type="application/json",
         )
 
@@ -72,10 +77,12 @@ class TestLoginEndpoint:
 
         response = api_client.post(
             "/api/auth/login",
-            data=json.dumps({
-                "email": "user@example.com",
-                "password": "WrongP@ss!",
-            }),
+            data=json.dumps(
+                {
+                    "email": "user@example.com",
+                    "password": "WrongP@ss!",
+                }
+            ),
             content_type="application/json",
         )
 
@@ -89,9 +96,11 @@ class TestTokenRefreshEndpoint:
         """Valid refresh token should return new token pair."""
         response = api_client.post(
             "/api/auth/refresh",
-            data=json.dumps({
-                "refresh_token": authenticated_user["refresh_token"],
-            }),
+            data=json.dumps(
+                {
+                    "refresh_token": authenticated_user["refresh_token"],
+                }
+            ),
             content_type="application/json",
         )
 
@@ -119,9 +128,11 @@ class TestLogoutEndpoint:
         """Logout with valid token should return 200."""
         response = api_client.post(
             "/api/auth/logout",
-            data=json.dumps({
-                "refresh_token": authenticated_user["refresh_token"],
-            }),
+            data=json.dumps(
+                {
+                    "refresh_token": authenticated_user["refresh_token"],
+                }
+            ),
             content_type="application/json",
             HTTP_AUTHORIZATION=f"Bearer {authenticated_user['access_token']}",
         )

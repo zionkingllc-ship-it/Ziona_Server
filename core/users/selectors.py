@@ -1,11 +1,11 @@
-import random
 import re
+import secrets
 
 from core.users.models import User
 from core.users.validators import (
+    UsernameValidationError,
     validate_username_format,
     validate_username_not_reserved,
-    UsernameValidationError,
 )
 
 
@@ -18,19 +18,17 @@ def check_username_availability(username: str) -> dict:
     Returns:
         Dict with 'available' (bool) and optional 'reason' (str).
     """
-    
+
     try:
         validate_username_format(username)
     except UsernameValidationError as e:
         return {"available": False, "reason": e.message}
 
-   
     try:
         validate_username_not_reserved(username)
     except UsernameValidationError as e:
         return {"available": False, "reason": e.message}
 
-   
     if User.all_objects.filter(username=username).exists():
         return {"available": False, "reason": "This username is already taken"}
 
@@ -54,7 +52,7 @@ def suggest_usernames(base_name: str, count: int = 4) -> list[str]:
     """
 
     clean = re.sub(r"[^a-zA-Z0-9_]", "", base_name.lower().replace(" ", "_"))
-    clean = clean[:20]  
+    clean = clean[:20]
 
     if not clean:
         clean = "user"
@@ -62,12 +60,11 @@ def suggest_usernames(base_name: str, count: int = 4) -> list[str]:
     suggestions: list[str] = []
     candidates: list[str] = []
 
-    
     for i in range(1, 100):
         candidates.append(f"{clean}{i}")
 
     for _ in range(20):
-        suffix = random.randint(10, 9999)
+        suffix = secrets.randbelow(9990) + 10
         candidates.append(f"{clean}_{suffix}")
 
     if len(clean) > 5:
@@ -75,7 +72,6 @@ def suggest_usernames(base_name: str, count: int = 4) -> list[str]:
         candidates.append(f"the_{clean}")
         candidates.append(f"{clean}_x")
 
-    
     for candidate in candidates:
         if len(suggestions) >= count:
             break

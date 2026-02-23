@@ -1,8 +1,6 @@
 import strawberry
-from typing import Optional
 
 from core.users.models import User
-
 
 
 @strawberry.type
@@ -11,7 +9,7 @@ class UserType:
 
     id: str
     email: str
-    username: Optional[str]
+    username: str | None
     full_name: str
     bio: str
     avatar_url: str
@@ -42,9 +40,9 @@ class SetUsernamePayload:
     """Response for setUsername mutation."""
 
     success: bool
-    user: Optional[UserType] = None
-    message: Optional[str] = None
-    error_code: Optional[str] = None
+    user: UserType | None = None
+    message: str | None = None
+    error_code: str | None = None
 
 
 @strawberry.type
@@ -52,8 +50,8 @@ class UsernameCheckResult:
     """Response for checkUsernameAvailability query."""
 
     available: bool
-    suggestions: Optional[list[str]] = None
-    reason: Optional[str] = None
+    suggestions: list[str] | None = None
+    reason: str | None = None
 
 
 @strawberry.type
@@ -61,12 +59,11 @@ class SetDobPayload:
     """Response for setDateOfBirth mutation."""
 
     success: bool
-    message: Optional[str] = None
-    error_code: Optional[str] = None
+    message: str | None = None
+    error_code: str | None = None
 
 
-
-def _get_authenticated_user_id(info: strawberry.types.Info) -> Optional[str]:
+def _get_authenticated_user_id(info: strawberry.types.Info) -> str | None:
     """Extract user_id from Bearer token in request."""
     request = info.context["request"]
     auth_header = request.META.get("HTTP_AUTHORIZATION", "")
@@ -81,7 +78,6 @@ def _get_authenticated_user_id(info: strawberry.types.Info) -> Optional[str]:
         return payload["user_id"]
     except Exception:
         return None
-
 
 
 @strawberry.type
@@ -127,6 +123,8 @@ class UserMutations:
         """Check username availability and return suggestions if taken."""
         from core.users.selectors import (
             check_username_availability as _check,
+        )
+        from core.users.selectors import (
             suggest_usernames,
         )
 

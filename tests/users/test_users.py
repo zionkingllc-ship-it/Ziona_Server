@@ -2,12 +2,12 @@
 
 import pytest
 
-from core.users.services import UserService, UserServiceError
 from core.users.selectors import check_username_availability, suggest_usernames
+from core.users.services import UserService, UserServiceError
 from core.users.validators import (
+    UsernameValidationError,
     validate_username_format,
     validate_username_not_reserved,
-    UsernameValidationError,
 )
 
 

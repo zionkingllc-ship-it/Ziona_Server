@@ -1,4 +1,3 @@
-import hashlib
 import logging
 import time
 import uuid
@@ -128,7 +127,6 @@ class RateLimitMiddleware:
 
             current_count = results[1]
             if current_count >= max_requests:
-                
                 oldest = redis_conn.zrange(key, 0, 0, withscores=True)
                 if oldest:
                     retry_after = int(oldest[0][1] + window_seconds - now) + 1

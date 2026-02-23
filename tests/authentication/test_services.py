@@ -1,6 +1,6 @@
 import pytest
 
-from core.authentication.services import AuthService, AuthenticationError
+from core.authentication.services import AuthenticationError, AuthService
 
 
 class TestRegistration:
@@ -14,7 +14,7 @@ class TestRegistration:
         )
 
         assert result["user"].email == "newuser@example.com"
-        
+
         assert result["user"].username.startswith("user_")
         assert "access_token" in result
         assert "refresh_token" in result
@@ -130,15 +130,10 @@ class TestPasswordValidation:
     @pytest.mark.parametrize(
         "password,expected_code",
         [
-            
             ("Sh0r!!", "PASSWORD_LENGTH_INVALID"),
-           
             ("Abcdefghij1234567890!", "PASSWORD_LENGTH_INVALID"),
-            
             ("12345678!", "PASSWORD_NO_LETTER"),
-           
             ("abcdefgh!", "PASSWORD_NO_NUMBER"),
-            
             ("Abcdefgh1", "PASSWORD_NO_SPECIAL"),
         ],
     )
@@ -153,7 +148,7 @@ class TestPasswordValidation:
 
     def test_password_valid_lowercase_only(self, db):
         """Password with lowercase letters (no uppercase) should pass."""
-        
+
         result = AuthService.register(
             email="loweronly@test.com",
             password="abcdefg1!",
@@ -162,7 +157,7 @@ class TestPasswordValidation:
 
     def test_password_at_boundaries(self, db):
         """Passwords at exactly 8 and 20 chars should pass."""
-        
+
         result8 = AuthService.register(
             email="min@test.com",
             password="aBcde1!x",

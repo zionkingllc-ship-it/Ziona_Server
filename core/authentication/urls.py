@@ -7,14 +7,14 @@ All auth endpoints are prefixed with /api/auth/
 from django.urls import path
 
 from core.authentication.views import (
-    RegisterView,
-    LoginView,
-    TokenRefreshView,
-    LogoutView,
-    VerifyEmailView,
-    PasswordResetRequestView,
-    PasswordResetConfirmView,
     GoogleOAuthView,
+    LoginView,
+    LogoutView,
+    PasswordResetConfirmView,
+    PasswordResetRequestView,
+    RegisterView,
+    TokenRefreshView,
+    VerifyEmailView,
 )
 
 app_name = "authentication"
