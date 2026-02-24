@@ -20,11 +20,8 @@ services:
         sync: false
       
       - key: REDIS_URL
-        fromService:
-          type: redis
-          name: ziona-redis-staging
-          property: connectionString
-      
+        sync: false
+
       - key: DJANGO_SECRET_KEY
         generateValue: true
       - key: JWT_SECRET_KEY
@@ -39,17 +36,9 @@ services:
         value: zionking--llc-61791b@ensend.me
       - key: ENSEND_SENDER_NAME
         value: Ziona Team
-      
+
       - key: SENTRY_DSN
         sync: false
-      
+
       - key: CORS_ALLOWED_ORIGINS
         value: http://localhost:3000,http://localhost:19006,https://ziona-app-staging.netlify.app
-
-
-  - type: redis
-    name: ziona-redis-staging
-    plan: free
-    region: oregon
-    maxmemoryPolicy: allkeys-lru
-    ipAllowList: []
