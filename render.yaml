@@ -1,5 +1,4 @@
 # Render deployment configuration
-# https://render.com/docs/deploy-django
 
 services:
   - type: web
@@ -15,19 +14,80 @@ services:
         value: config.settings.staging
       - key: PYTHON_VERSION
         value: "3.12.0"
+      - key: ALLOWED_HOSTS
+        value: ziona-api-staging.onrender.com
       - key: DATABASE_URL
         fromDatabase:
           name: ziona-db-staging
           property: connectionString
-      - key: DJANGO_SECRET_KEY
-        generateValue: true
-      - key: JWT_SECRET_KEY
-        generateValue: true
+      
       - key: REDIS_URL
         fromService:
           type: redis
           name: ziona-redis-staging
           property: connectionString
+      
+      - key: DJANGO_SECRET_KEY
+        generateValue: true
+      - key: JWT_SECRET_KEY
+        generateValue: true
+      - key: ENCRYPTION_KEY
+        sync: false
+      - key: ENSEND_API_KEY
+        sync: false
+      - key: ENSEND_API_URL
+        value: https://api.smtpexpress.com/send
+      - key: DEFAULT_FROM_EMAIL
+        value: zionking--llc-61791b@ensend.me
+      - key: ENSEND_SENDER_NAME
+        value: Ziona Team
+      
+      - key: SENTRY_DSN
+        sync: false
+      
+      - key: CORS_ALLOWED_ORIGINS
+        value: http://localhost:3000,http://localhost:19006,https://ziona-app-staging.netlify.app
+
+
+  - type: worker
+    name: ziona-celery-staging
+    runtime: python
+    region: oregon
+    plan: free
+    branch: staging
+    buildCommand: pip install -r requirements.txt
+    startCommand: celery -A config worker --loglevel=info --concurrency=2
+    envVars:
+      - key: DJANGO_SETTINGS_MODULE
+        value: config.settings.staging
+      - key: PYTHON_VERSION
+        value: "3.12.0"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: ziona-db-staging
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: ziona-redis-staging
+          property: connectionString
+      - key: DJANGO_SECRET_KEY
+        generateValue: true
+      - key: JWT_SECRET_KEY
+        generateValue: true
+      - key: ENCRYPTION_KEY
+        sync: false
+      - key: ENSEND_API_KEY
+        sync: false
+      - key: ENSEND_API_URL
+        value: https://api.smtpexpress.com/send
+      - key: DEFAULT_FROM_EMAIL
+        value: zionking--llc-61791b@ensend.me
+      - key: ENSEND_SENDER_NAME
+        value: Ziona Team
+      - key: SENTRY_DSN
+        sync: false
+
 
   - type: redis
     name: ziona-redis-staging
