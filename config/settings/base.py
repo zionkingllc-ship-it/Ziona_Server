@@ -34,6 +34,9 @@ DJANGO_APPS = [
 THIRD_PARTY_APPS = [
     "corsheaders",
     "health_check",
+    "health_check.db",
+    "health_check.cache",
+    "health_check.contrib.migrations",
     "django_celery_beat",
     "strawberry.django",
 ]
