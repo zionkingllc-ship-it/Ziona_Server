@@ -94,6 +94,28 @@ class AuthMutations:
                 error_code=e.code,
             )
 
+    @strawberry.mutation(description="Verify email address using verification token")
+    def verify_email(
+        self,
+        info: strawberry.types.Info,
+        token: str,
+    ) -> AuthPayload:
+        """Verify user's email."""
+        from core.authentication.services import AuthenticationError, AuthService
+
+        try:
+            AuthService.verify_email(token)
+            return AuthPayload(
+                success=True,
+                message="Email verified successfully",
+            )
+        except AuthenticationError as e:
+            return AuthPayload(
+                success=False,
+                message=e.message,
+                error_code=e.code,
+            )
+
     @strawberry.mutation(description="Login with email and password")
     def login(
         self,

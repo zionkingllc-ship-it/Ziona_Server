@@ -574,7 +574,7 @@ class AuthService:
         send_email_async.delay(
             subject="Welcome to Ziona - Verify Your Email",
             message=(
-                f"Hi {user.username},\n\n"
+                f"Hi {user.full_name or 'there'},\n\n"
                 f"Welcome to Ziona! Please verify your email by clicking:\n"
                 f"{verification_url}\n\n"
                 f"This link expires in 24 hours.\n\n"
