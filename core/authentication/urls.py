@@ -13,6 +13,8 @@ from core.authentication.views import (
     PasswordResetConfirmView,
     PasswordResetRequestView,
     RegisterView,
+    ResendOTPView,
+    SuggestUsernamesView,
     TokenRefreshView,
     VerifyEmailView,
 )
@@ -25,6 +27,8 @@ urlpatterns = [
     path("refresh", TokenRefreshView.as_view(), name="token-refresh"),
     path("logout", LogoutView.as_view(), name="logout"),
     path("verify-email", VerifyEmailView.as_view(), name="verify-email"),
+    path("resend-otp", ResendOTPView.as_view(), name="resend-otp"),
+    path("suggest-usernames", SuggestUsernamesView.as_view(), name="suggest-usernames"),
     path("password-reset", PasswordResetRequestView.as_view(), name="password-reset"),
     path(
         "password-reset/confirm",

@@ -36,16 +36,6 @@ class UserType:
 
 
 @strawberry.type
-class SetUsernamePayload:
-    """Response for setUsername mutation."""
-
-    success: bool
-    user: UserType | None = None
-    message: str | None = None
-    error_code: str | None = None
-
-
-@strawberry.type
 class UsernameCheckResult:
     """Response for checkUsernameAvailability query."""
 
@@ -55,10 +45,11 @@ class UsernameCheckResult:
 
 
 @strawberry.type
-class SetDobPayload:
-    """Response for setDateOfBirth mutation."""
+class SetInterestsPayload:
+    """Response for setInterests mutation."""
 
     success: bool
+    interests: list[str] = strawberry.field(default_factory=list)
     message: str | None = None
     error_code: str | None = None
 
@@ -83,36 +74,6 @@ def _get_authenticated_user_id(info: strawberry.types.Info) -> str | None:
 @strawberry.type
 class UserMutations:
     """User domain GraphQL mutations."""
-
-    @strawberry.mutation(description="Set or update the authenticated user's username")
-    def set_username(
-        self,
-        info: strawberry.types.Info,
-        username: str,
-    ) -> SetUsernamePayload:
-        """Set username during onboarding or profile edit."""
-        from core.users.services import UserService, UserServiceError
-
-        user_id = _get_authenticated_user_id(info)
-        if not user_id:
-            return SetUsernamePayload(
-                success=False,
-                message="Authentication required",
-                error_code="UNAUTHORIZED",
-            )
-
-        try:
-            user = UserService.set_username(user_id, username)
-            return SetUsernamePayload(
-                success=True,
-                user=UserType.from_model(user),
-            )
-        except UserServiceError as e:
-            return SetUsernamePayload(
-                success=False,
-                message=e.message,
-                error_code=e.code,
-            )
 
     @strawberry.mutation(description="Check if a username is available")
     def check_username_availability(
@@ -151,29 +112,38 @@ class UserMutations:
 
         return _suggest(base_name, count=4)
 
-    @strawberry.mutation(description="Set the authenticated user's date of birth")
-    def set_date_of_birth(
+    @strawberry.mutation(description="Set user interests for feed personalization")
+    def set_interests(
         self,
         info: strawberry.types.Info,
-        date_of_birth: str,
-    ) -> SetDobPayload:
-        """Set DOB during onboarding. Encrypts and stores securely."""
-        from core.users.services import UserService, UserServiceError
+        interests: list[str],
+    ) -> SetInterestsPayload:
+        """Set user interests during onboarding."""
+        from core.users.models import InterestCategory, UserInterest
 
         user_id = _get_authenticated_user_id(info)
         if not user_id:
-            return SetDobPayload(
+            return SetInterestsPayload(
                 success=False,
                 message="Authentication required",
                 error_code="UNAUTHORIZED",
             )
 
-        try:
-            UserService.set_date_of_birth(user_id, date_of_birth)
-            return SetDobPayload(success=True)
-        except UserServiceError as e:
-            return SetDobPayload(
+        valid_interests = [c.value for c in InterestCategory]
+        invalid = [i for i in interests if i not in valid_interests]
+        if invalid:
+            return SetInterestsPayload(
                 success=False,
-                message=e.message,
-                error_code=e.code,
+                message=f"Invalid interests: {', '.join(invalid)}. Valid: {', '.join(valid_interests)}",
+                error_code="VALIDATION_ERROR",
             )
+
+        # Replace all interests
+        UserInterest.objects.filter(user_id=user_id).delete()
+        for interest in set(interests):
+            UserInterest.objects.create(user_id=user_id, interest=interest)
+
+        return SetInterestsPayload(
+            success=True,
+            interests=list(set(interests)),
+        )

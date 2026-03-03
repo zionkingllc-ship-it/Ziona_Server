@@ -4,17 +4,18 @@ from django.test import Client
 
 
 class TestRegisterEndpoint:
-    """Test POST /api/auth/register (no username required)."""
+    """Test POST /api/auth/register (username + DOB required, no tokens)."""
 
     def test_register_returns_201(self, api_client: Client, db):
-        """Valid registration with email+password should return 201."""
+        """Valid registration should return 201 with user data (no tokens)."""
         response = api_client.post(
             "/api/auth/register",
             data=json.dumps(
                 {
                     "email": "new@example.com",
                     "password": "SecureP@ss1",
-                    "full_name": "Test User",
+                    "username": "newuser2025",
+                    "date_of_birth": "2000-01-15",
                 }
             ),
             content_type="application/json",
@@ -23,13 +24,14 @@ class TestRegisterEndpoint:
         assert response.status_code == 201
         data = response.json()
         assert data["success"] is True
-        assert "access_token" in data["data"]
-        assert "refresh_token" in data["data"]
         assert data["data"]["user"]["email"] == "new@example.com"
-        assert data["data"]["user"]["username"].startswith("user_")
+        assert data["data"]["user"]["username"] == "newuser2025"
+        assert data["data"]["user"]["is_email_verified"] is False
+        assert "access_token" not in data["data"]
+        assert "refresh_token" not in data["data"]
 
     def test_register_missing_fields(self, api_client: Client, db):
-        """Registration with missing password should return 400."""
+        """Registration with missing fields should return 400."""
         response = api_client.post(
             "/api/auth/register",
             data=json.dumps({"email": "new@example.com"}),
@@ -139,3 +141,35 @@ class TestLogoutEndpoint:
 
         assert response.status_code == 200
         assert response.json()["success"] is True
+
+
+class TestSuggestUsernamesEndpoint:
+    """Test POST /api/auth/suggest-usernames."""
+
+    def test_suggest_returns_suggestions(self, api_client: Client, db):
+        """Should return 4 unique suggestions."""
+        response = api_client.post(
+            "/api/auth/suggest-usernames",
+            data=json.dumps(
+                {
+                    "email": "john@example.com",
+                    "date_of_birth": "1995-08-12",
+                }
+            ),
+            content_type="application/json",
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["success"] is True
+        assert len(data["data"]["suggestions"]) == 4
+
+    def test_suggest_missing_fields(self, api_client: Client, db):
+        """Missing fields should return 400."""
+        response = api_client.post(
+            "/api/auth/suggest-usernames",
+            data=json.dumps({"email": "john@example.com"}),
+            content_type="application/json",
+        )
+
+        assert response.status_code == 400

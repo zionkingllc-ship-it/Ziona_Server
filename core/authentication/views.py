@@ -39,8 +39,10 @@ class RegisterView(View):
     """User registration endpoint.
 
     POST /api/auth/register
-    Body: { email, password, full_name? }
-    Returns: { success, data: { user, access_token, refresh_token } }
+    Body: { email, password, username, date_of_birth }
+    Returns: { success, data: { user }, message }
+
+    Does NOT return tokens. User must verify email via OTP first.
     """
 
     def post(self, request: HttpRequest) -> JsonResponse:
@@ -49,15 +51,16 @@ class RegisterView(View):
 
         email = data.get("email", "")
         password = data.get("password", "")
-        full_name = data.get("full_name", "")
+        username = data.get("username", "")
+        date_of_birth = data.get("date_of_birth", "")
 
-        if not email or not password:
+        if not email or not password or not username or not date_of_birth:
             return JsonResponse(
                 {
                     "success": False,
                     "error": {
                         "code": "MISSING_FIELDS",
-                        "message": "Email and password are required",
+                        "message": "Email, password, username, and date_of_birth are required",
                     },
                 },
                 status=400,
@@ -67,7 +70,8 @@ class RegisterView(View):
             result = AuthService.register(
                 email=email,
                 password=password,
-                full_name=full_name,
+                username=username,
+                date_of_birth=date_of_birth,
                 ip_address=_get_client_ip(request),
             )
             return JsonResponse(
@@ -79,10 +83,10 @@ class RegisterView(View):
                             "email": result["user"].email,
                             "username": result["user"].username,
                             "role": result["user"].role,
+                            "is_email_verified": False,
                         },
-                        "access_token": result["access_token"],
-                        "refresh_token": result["refresh_token"],
                     },
+                    "message": result["message"],
                 },
                 status=201,
             )
@@ -240,33 +244,146 @@ class LogoutView(View):
 
 @method_decorator(csrf_exempt, name="dispatch")
 class VerifyEmailView(View):
-    """Email verification endpoint.
+    """Email verification via OTP endpoint.
 
     POST /api/auth/verify-email
-    Body: { token }
-    Returns: { success }
+    Body: { email, code }
+    Returns: { success, data: { user, access_token, refresh_token } }
+
+    Verification returns tokens immediately — no separate login needed.
     """
 
     def post(self, request: HttpRequest) -> JsonResponse:
-        """Handle email verification."""
+        """Handle email verification with OTP."""
         data = _parse_json_body(request)
-        token = data.get("token", "")
+        email = data.get("email", "")
+        code = data.get("code", "")
 
-        if not token:
+        if not email or not code:
             return JsonResponse(
                 {
                     "success": False,
                     "error": {
                         "code": "MISSING_FIELDS",
-                        "message": "Verification token is required",
+                        "message": "Email and verification code are required",
                     },
                 },
                 status=400,
             )
 
         try:
-            AuthService.verify_email(token)
-            return JsonResponse({"success": True, "message": "Email verified successfully"})
+            result = AuthService.verify_email_otp(email=email, code=code)
+            return JsonResponse(
+                {
+                    "success": True,
+                    "data": {
+                        "user": {
+                            "id": str(result["user"].id),
+                            "email": result["user"].email,
+                            "username": result["user"].username,
+                            "role": result["user"].role,
+                            "is_email_verified": True,
+                        },
+                        "access_token": result["access_token"],
+                        "refresh_token": result["refresh_token"],
+                    },
+                    "message": "Email verified successfully",
+                },
+            )
+        except AuthenticationError as e:
+            status = 429 if e.code == "OTP_RATE_LIMITED" else 400
+            return JsonResponse(
+                {"success": False, "error": {"code": e.code, "message": e.message}},
+                status=status,
+            )
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class ResendOTPView(View):
+    """Resend email verification OTP endpoint.
+
+    POST /api/auth/resend-otp
+    Body: { email }
+    Returns: { success, message }
+
+    Rate limited: 3 per 10 minutes per email.
+    """
+
+    def post(self, request: HttpRequest) -> JsonResponse:
+        """Handle OTP resend."""
+        data = _parse_json_body(request)
+        email = data.get("email", "")
+
+        if not email:
+            return JsonResponse(
+                {
+                    "success": False,
+                    "error": {
+                        "code": "MISSING_FIELDS",
+                        "message": "Email is required",
+                    },
+                },
+                status=400,
+            )
+
+        try:
+            AuthService.resend_verification_otp(email=email)
+            return JsonResponse(
+                {
+                    "success": True,
+                    "message": "If an account with this email exists and is unverified, a new code has been sent.",
+                },
+            )
+        except AuthenticationError as e:
+            status = 429 if e.code == "RESEND_RATE_LIMITED" else 400
+            return JsonResponse(
+                {"success": False, "error": {"code": e.code, "message": e.message}},
+                status=status,
+            )
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class SuggestUsernamesView(View):
+    """Username suggestions endpoint.
+
+    POST /api/auth/suggest-usernames
+    Body: { email, date_of_birth }
+    Returns: { success, data: { suggestions: [...] } }
+
+    Rate limit: 10 per minute per IP.
+    """
+
+    def post(self, request: HttpRequest) -> JsonResponse:
+        """Handle username suggestions."""
+        data = _parse_json_body(request)
+        email = data.get("email", "")
+        date_of_birth = data.get("date_of_birth", "")
+
+        if not email or not date_of_birth:
+            return JsonResponse(
+                {
+                    "success": False,
+                    "error": {
+                        "code": "MISSING_FIELDS",
+                        "message": "Email and date_of_birth are required",
+                    },
+                },
+                status=400,
+            )
+
+        try:
+            suggestions = AuthService.suggest_usernames(
+                email=email,
+                date_of_birth=date_of_birth,
+            )
+            return JsonResponse(
+                {
+                    "success": True,
+                    "data": {
+                        "suggestions": suggestions,
+                    },
+                },
+            )
         except AuthenticationError as e:
             return JsonResponse(
                 {"success": False, "error": {"code": e.code, "message": e.message}},
