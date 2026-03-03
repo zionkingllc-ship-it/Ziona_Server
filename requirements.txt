@@ -56,3 +56,6 @@ faker==22.4.0
 
 # Email (Ensend REST API)
 requests==2.31.0
+
+# DTOs
+pydantic==2.6.1
