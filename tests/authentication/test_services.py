@@ -22,8 +22,8 @@ class TestRegistration:
         assert "refresh_token" not in result
 
     def test_register_duplicate_email(self, create_user):
-        """Registration with existing email should fail."""
-        create_user(email="taken@example.com", username="existing")
+        """Registration with existing verified email should fail."""
+        create_user(email="taken@example.com", username="existing", is_email_verified=True)
 
         with pytest.raises(AuthenticationError) as exc_info:
             AuthService.register(
@@ -32,7 +32,7 @@ class TestRegistration:
                 username="newuser123",
                 date_of_birth="2000-01-15",
             )
-        assert exc_info.value.code == "EMAIL_EXISTS"
+        assert exc_info.value.code == "EMAIL_ALREADY_REGISTERED"
 
     def test_register_duplicate_username(self, create_user):
         """Registration with taken username should fail."""
@@ -127,7 +127,7 @@ class TestLogin:
         assert exc_info.value.code == "INVALID_CREDENTIALS"
 
     def test_login_unverified_email(self, create_user):
-        """Login with unverified email should fail."""
+        """Login with unverified email sends OTP instead of raising."""
         create_user(
             email="unverified@example.com",
             username="unverified",
@@ -135,12 +135,12 @@ class TestLogin:
             is_email_verified=False,
         )
 
-        with pytest.raises(AuthenticationError) as exc_info:
-            AuthService.login(
-                email="unverified@example.com",
-                password="SecureP@ss1",
-            )
-        assert exc_info.value.code == "EMAIL_NOT_VERIFIED"
+        result = AuthService.login(
+            email="unverified@example.com",
+            password="SecureP@ss1",
+        )
+        assert result["requires_verification"] is True
+        assert "access_token" not in result
 
 
 class TestLogout:

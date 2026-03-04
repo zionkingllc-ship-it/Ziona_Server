@@ -2,7 +2,7 @@
   "openapi": "3.0.3",
   "info": {
     "title": "Ziona API",
-    "description": "Authentication REST API for Ziona mobile app.\n\n**GraphQL endpoint:** `/graphql/` (use GraphiQL for queries and mutations)\n\n**Auth Flow:** Register → Verify Email (OTP) → Login → Use Bearer token → Refresh → Logout",
+    "description": "Authentication REST API for Ziona mobile app.\n\n**GraphQL endpoint:** `/graphql/` (use GraphiQL for queries and mutations)\n\n**Auth Flow:** Register → Verify Email (OTP) → Login → Use Bearer token → Refresh → Logout\n\n**Response Format:** All responses format JSON keys in camelCase. Success responses are wrapped in `{success: true, data: {...}}`. Errors use `{success: false, error: {code, message, details}}`.",
     "version": "2.0.0",
     "contact": {
       "name": "Ziona Team"
@@ -26,7 +26,7 @@
       "post": {
         "tags": ["Authentication"],
         "summary": "Register a new user",
-        "description": "Creates a new user account with username and date of birth. Sends a 6-digit OTP to verify email. Does NOT return tokens — user must verify email first.",
+        "description": "Creates a new user account with username and date of birth, or updates an existing unverified user. Sends a 6-digit OTP to verify email. Does NOT return tokens.",
         "operationId": "register",
         "requestBody": {
           "required": true,
@@ -47,7 +47,7 @@
         },
         "responses": {
           "201": {
-            "description": "User registered successfully. OTP sent to email.",
+            "description": "New user registered successfully. OTP sent.",
             "content": {
               "application/json": {
                 "schema": {
@@ -57,7 +57,8 @@
                     "data": {
                       "type": "object",
                       "properties": {
-                        "user": {"$ref": "#/components/schemas/UserWithVerification"}
+                        "user": {"$ref": "#/components/schemas/UserWithVerification"},
+                        "requiresVerification": {"type": "boolean", "example": true}
                       }
                     },
                     "message": {"type": "string", "example": "Registration successful. Please verify your email with the OTP sent."}
@@ -66,7 +67,35 @@
               }
             }
           },
-          "400": {"$ref": "#/components/responses/BadRequest"}
+          "200": {
+            "description": "Existing unverified user updated. New OTP sent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {"type": "boolean", "example": true},
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "user": {"$ref": "#/components/schemas/UserWithVerification"},
+                        "requiresVerification": {"type": "boolean", "example": true}
+                      }
+                    },
+                    "message": {"type": "string", "example": "Account updated. Please verify your email with the new OTP sent."}
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error or EMAIL_ALREADY_REGISTERED",
+            "content": {
+              "application/json": {
+                "schema": {"$ref": "#/components/schemas/ErrorResponse"}
+              }
+            }
+          }
         }
       }
     },
@@ -74,7 +103,7 @@
       "post": {
         "tags": ["Authentication"],
         "summary": "Login with email and password",
-        "description": "Authenticates user and returns JWT token pair. Email must be verified first.",
+        "description": "Authenticates user. If verified, returns tokens. If unverified, sends an OTP and returns requiresVerification=true.",
         "operationId": "login",
         "requestBody": {
           "required": true,
@@ -93,7 +122,7 @@
         },
         "responses": {
           "200": {
-            "description": "Login successful",
+            "description": "Login successful. Structure differs based on verification status.",
             "content": {
               "application/json": {
                 "schema": {
@@ -104,17 +133,28 @@
                       "type": "object",
                       "properties": {
                         "user": {"$ref": "#/components/schemas/UserWithVerification"},
-                        "access_token": {"type": "string"},
-                        "refresh_token": {"type": "string"}
+                        "tokens": {
+                          "type": "object",
+                          "properties": {
+                            "accessToken": {"type": "string"},
+                            "refreshToken": {"type": "string"}
+                          },
+                          "description": "Present ONLY if user is verified"
+                        },
+                        "requiresVerification": {
+                          "type": "boolean",
+                          "description": "Present ONLY if user is unverified"
+                        }
                       }
-                    }
+                    },
+                    "message": {"type": "string", "description": "Present ONLY if user is unverified, indicating OTP sent."}
                   }
                 }
               }
             }
           },
           "401": {
-            "description": "Invalid credentials",
+            "description": "Invalid credentials (INVALID_CREDENTIALS)",
             "content": {
               "application/json": {
                 "schema": {"$ref": "#/components/schemas/ErrorResponse"}
@@ -156,8 +196,13 @@
                     "data": {
                       "type": "object",
                       "properties": {
-                        "access_token": {"type": "string"},
-                        "refresh_token": {"type": "string"}
+                        "tokens": {
+                          "type": "object",
+                          "properties": {
+                            "accessToken": {"type": "string"},
+                            "refreshToken": {"type": "string"}
+                          }
+                        }
                       }
                     }
                   }
@@ -221,11 +266,49 @@
         }
       }
     },
+    "/auth/me": {
+      "delete": {
+        "tags": ["Authentication"],
+        "summary": "Delete user account",
+        "description": "Permanently deletes the authenticated user's account and all associated data.",
+        "operationId": "deleteAccount",
+        "security": [{"BearerAuth": []}],
+        "responses": {
+          "200": {
+            "description": "Account deleted successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {"type": "boolean", "example": true},
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "message": {"type": "string", "example": "Account permanently deleted."}
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid Bearer token",
+            "content": {
+              "application/json": {
+                "schema": {"$ref": "#/components/schemas/ErrorResponse"}
+              }
+            }
+          }
+        }
+      }
+    },
     "/auth/verify-email": {
       "post": {
         "tags": ["Email Verification"],
         "summary": "Verify email with OTP",
-        "description": "Verifies user's email using a 6-digit OTP code. Returns tokens immediately on success — no separate login needed. Rate limited: 5 attempts per 10 minutes per email.",
+        "description": "Verifies user's email using a 6-digit OTP code. Returns tokens immediately on success.",
         "operationId": "verifyEmail",
         "requestBody": {
           "required": true,
@@ -255,8 +338,13 @@
                       "type": "object",
                       "properties": {
                         "user": {"$ref": "#/components/schemas/UserWithVerification"},
-                        "access_token": {"type": "string"},
-                        "refresh_token": {"type": "string"}
+                        "tokens": {
+                          "type": "object",
+                          "properties": {
+                            "accessToken": {"type": "string"},
+                            "refreshToken": {"type": "string"}
+                          }
+                        }
                       }
                     },
                     "message": {"type": "string", "example": "Email verified successfully"}
@@ -265,9 +353,16 @@
               }
             }
           },
-          "400": {"$ref": "#/components/responses/BadRequest"},
+          "400": {
+            "description": "Invalid OTP (includes attemptsRemaining in details) or OTP Expired",
+            "content": {
+              "application/json": {
+                "schema": {"$ref": "#/components/schemas/ErrorResponse"}
+              }
+            }
+          },
           "429": {
-            "description": "Too many verification attempts",
+            "description": "Too many verification attempts (MAX_ATTEMPTS_REACHED includes retryAfter)",
             "content": {
               "application/json": {
                 "schema": {"$ref": "#/components/schemas/ErrorResponse"}
@@ -281,7 +376,7 @@
       "post": {
         "tags": ["Email Verification"],
         "summary": "Resend verification OTP",
-        "description": "Resends a new 6-digit OTP to the user's email. Rate limited: 3 per 10 minutes per email.",
+        "description": "Resends a new 6-digit OTP to the user's email.",
         "operationId": "resendOTP",
         "requestBody": {
           "required": true,
@@ -306,6 +401,12 @@
                   "type": "object",
                   "properties": {
                     "success": {"type": "boolean", "example": true},
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "expiresIn": {"type": "integer", "example": 600}
+                      }
+                    },
                     "message": {"type": "string", "example": "If an account with this email exists and is unverified, a new code has been sent."}
                   }
                 }
@@ -313,7 +414,7 @@
             }
           },
           "429": {
-            "description": "Too many resend requests",
+            "description": "Too many resend requests (RATE_LIMIT_EXCEEDED includes retryAfter in details)",
             "content": {
               "application/json": {
                 "schema": {"$ref": "#/components/schemas/ErrorResponse"}
@@ -327,7 +428,7 @@
       "post": {
         "tags": ["Username"],
         "summary": "Get username suggestions",
-        "description": "Generates 4 unique, available username suggestions based on email and date of birth. Called during onboarding after the birthday slide. Rate limit: 10 per minute per IP.",
+        "description": "Generates 4 unique, available username suggestions based on email and date of birth.",
         "operationId": "suggestUsernames",
         "requestBody": {
           "required": true,
@@ -376,7 +477,7 @@
       "post": {
         "tags": ["Password Reset"],
         "summary": "Request password reset",
-        "description": "Sends a 6-digit OTP to the user's email. Always returns success to prevent email enumeration.",
+        "description": "Sends a 6-digit OTP to the user's email. Always returns success.",
         "operationId": "requestPasswordReset",
         "requestBody": {
           "required": true,
@@ -426,7 +527,7 @@
                 "required": ["email", "otp", "new_password"],
                 "properties": {
                   "email": {"type": "string", "format": "email", "example": "user@example.com"},
-                  "otp": {"type": "string", "example": "123456", "description": "6-digit OTP from email"},
+                  "otp": {"type": "string", "example": "123456"},
                   "new_password": {"type": "string", "minLength": 8, "example": "NewSecurePass1!"}
                 }
               }
@@ -484,10 +585,15 @@
                     "data": {
                       "type": "object",
                       "properties": {
-                        "user": {"$ref": "#/components/schemas/User"},
-                        "access_token": {"type": "string"},
-                        "refresh_token": {"type": "string"},
-                        "is_new_user": {"type": "boolean"}
+                        "user": {"$ref": "#/components/schemas/UserWithVerification"},
+                        "tokens": {
+                          "type": "object",
+                          "properties": {
+                            "accessToken": {"type": "string"},
+                            "refreshToken": {"type": "string"}
+                          }
+                        },
+                        "isNewUser": {"type": "boolean"}
                       }
                     }
                   }
@@ -532,7 +638,7 @@
           {
             "type": "object",
             "properties": {
-              "is_email_verified": {"type": "boolean"}
+              "isEmailVerified": {"type": "boolean"}
             }
           }
         ]
@@ -545,7 +651,12 @@
             "type": "object",
             "properties": {
               "code": {"type": "string", "example": "INVALID_CREDENTIALS"},
-              "message": {"type": "string", "example": "Invalid email or password"}
+              "message": {"type": "string", "example": "Invalid email or password"},
+              "details": {
+                "type": "object",
+                "description": "Optional metadata like attemptsRemaining or retryAfter",
+                "additionalProperties": true
+              }
             }
           }
         }

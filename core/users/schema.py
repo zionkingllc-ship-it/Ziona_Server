@@ -1,6 +1,10 @@
+import logging
+
 import strawberry
 
 from core.users.models import User
+
+logger = logging.getLogger("core.users")
 
 
 @strawberry.type
@@ -68,6 +72,7 @@ def _get_authenticated_user_id(info: strawberry.types.Info) -> str | None:
         payload = TokenService.validate_access_token(auth_header[7:])
         return payload["user_id"]
     except Exception:
+        logger.debug("Token validation failed in GraphQL", exc_info=True)
         return None
 
 
@@ -82,24 +87,31 @@ class UserMutations:
         username: str,
     ) -> UsernameCheckResult:
         """Check username availability and return suggestions if taken."""
-        from core.users.selectors import (
-            check_username_availability as _check,
-        )
-        from core.users.selectors import (
-            suggest_usernames,
-        )
+        try:
+            from core.users.selectors import (
+                check_username_availability as _check,
+            )
+            from core.users.selectors import (
+                suggest_usernames,
+            )
 
-        result = _check(username)
+            result = _check(username)
 
-        if result["available"]:
-            return UsernameCheckResult(available=True)
+            if result["available"]:
+                return UsernameCheckResult(available=True)
 
-        suggestions = suggest_usernames(username, count=4)
-        return UsernameCheckResult(
-            available=False,
-            reason=result.get("reason", "Username not available"),
-            suggestions=suggestions if suggestions else None,
-        )
+            suggestions = suggest_usernames(username, count=4)
+            return UsernameCheckResult(
+                available=False,
+                reason=result.get("reason", "Username not available"),
+                suggestions=suggestions if suggestions else None,
+            )
+        except Exception:
+            logger.error("check_username_availability failed", exc_info=True)
+            return UsernameCheckResult(
+                available=False,
+                reason="An error occurred. Please try again.",
+            )
 
     @strawberry.mutation(description="Get username suggestions based on a name")
     def suggest_usernames(
@@ -108,9 +120,13 @@ class UserMutations:
         base_name: str,
     ) -> list[str]:
         """Generate available username suggestions."""
-        from core.users.selectors import suggest_usernames as _suggest
+        try:
+            from core.users.selectors import suggest_usernames as _suggest
 
-        return _suggest(base_name, count=4)
+            return _suggest(base_name, count=4)
+        except Exception:
+            logger.error("suggest_usernames failed", exc_info=True)
+            return []
 
     @strawberry.mutation(description="Set user interests for feed personalization")
     def set_interests(
@@ -119,31 +135,42 @@ class UserMutations:
         interests: list[str],
     ) -> SetInterestsPayload:
         """Set user interests during onboarding."""
-        from core.users.models import InterestCategory, UserInterest
+        try:
+            from core.users.models import InterestCategory, UserInterest
 
-        user_id = _get_authenticated_user_id(info)
-        if not user_id:
+            user_id = _get_authenticated_user_id(info)
+            if not user_id:
+                return SetInterestsPayload(
+                    success=False,
+                    message="Authentication required",
+                    error_code="UNAUTHORIZED",
+                )
+
+            valid_interests = [c.value for c in InterestCategory]
+            invalid = [i for i in interests if i not in valid_interests]
+            if invalid:
+                return SetInterestsPayload(
+                    success=False,
+                    message=f"Invalid interests: {', '.join(invalid)}. "
+                    f"Valid: {', '.join(valid_interests)}",
+                    error_code="VALIDATION_ERROR",
+                )
+
+            # Replace all interests
+            UserInterest.objects.filter(user_id=user_id).delete()
+            for interest in set(interests):
+                UserInterest.objects.create(user_id=user_id, interest=interest)
+
+            logger.info("Interests set for user_id=%s count=%d", user_id, len(interests))
+
+            return SetInterestsPayload(
+                success=True,
+                interests=list(set(interests)),
+            )
+        except Exception:
+            logger.error("set_interests failed", exc_info=True)
             return SetInterestsPayload(
                 success=False,
-                message="Authentication required",
-                error_code="UNAUTHORIZED",
+                message="An error occurred. Please try again.",
+                error_code="INTERNAL_ERROR",
             )
-
-        valid_interests = [c.value for c in InterestCategory]
-        invalid = [i for i in interests if i not in valid_interests]
-        if invalid:
-            return SetInterestsPayload(
-                success=False,
-                message=f"Invalid interests: {', '.join(invalid)}. Valid: {', '.join(valid_interests)}",
-                error_code="VALIDATION_ERROR",
-            )
-
-        # Replace all interests
-        UserInterest.objects.filter(user_id=user_id).delete()
-        for interest in set(interests):
-            UserInterest.objects.create(user_id=user_id, interest=interest)
-
-        return SetInterestsPayload(
-            success=True,
-            interests=list(set(interests)),
-        )

@@ -7,6 +7,7 @@ All auth endpoints are prefixed with /api/auth/
 from django.urls import path
 
 from core.authentication.views import (
+    DeleteAccountView,
     GoogleOAuthView,
     LoginView,
     LogoutView,
@@ -36,4 +37,5 @@ urlpatterns = [
         name="password-reset-confirm",
     ),
     path("google", GoogleOAuthView.as_view(), name="google-oauth"),
+    path("me", DeleteAccountView.as_view(), name="delete-account"),
 ]

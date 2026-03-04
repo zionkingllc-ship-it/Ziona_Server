@@ -28,9 +28,15 @@ logger = logging.getLogger("core.authentication")
 class AuthenticationError(Exception):
     """Raised when authentication operations fail."""
 
-    def __init__(self, message: str, code: str = "AUTH_ERROR"):
+    def __init__(
+        self,
+        message: str,
+        code: str = "AUTH_ERROR",
+        details: dict | None = None,
+    ):
         self.message = message
         self.code = code
+        self.details = details or {}
         super().__init__(message)
 
 
@@ -59,9 +65,12 @@ class AuthService:
         date_of_birth: str,
         ip_address: str | None = None,
     ) -> dict[str, Any]:
-        """Register a new user with email, password, username, and DOB.
+        """Register a new user or update an unverified user's data.
 
-        Does NOT return tokens — user must verify email via OTP first.
+        Three scenarios:
+        A) New email → create user, send OTP, return user (no tokens).
+        B) Email exists + NOT verified → update user data, send new OTP.
+        C) Email exists + verified → raise EMAIL_ALREADY_REGISTERED.
 
         Args:
             email: User's email address.
@@ -71,58 +80,112 @@ class AuthService:
             ip_address: Registration IP for audit logging.
 
         Returns:
-            Dict with user data and message (no tokens).
+            Dict with user, message, and requiresVerification flag (no tokens).
 
         Raises:
-            AuthenticationError: If validation fails.
+            AuthenticationError: If validation fails or email is already verified.
         """
         email = email.lower().strip()
         username = username.strip()
 
-        if User.objects.filter(email=email).exists():
-            raise AuthenticationError(
-                "An account with this email already exists",
-                code="EMAIL_EXISTS",
-            )
-
         _validate_password(password)
-
         _validate_username(username)
-
-        if User.all_objects.filter(username=username).exists():
-            raise AuthenticationError(
-                "This username is already taken",
-                code="USERNAME_TAKEN",
-            )
-
         encrypted_dob = _validate_and_encrypt_dob(date_of_birth)
 
-        try:
-            user = User.objects.create_user(
-                email=email,
-                username=username,
-                password=password,
-                encrypted_dob=encrypted_dob,
-                last_login_ip=ip_address,
-            )
-        except IntegrityError:
+        existing_user = User.objects.filter(email=email).first()
+
+        if existing_user and existing_user.is_email_verified:
+            logger.info("Registration attempt for verified email: %s", mask_email(email))
             raise AuthenticationError(
-                "This username is already taken. Please choose another.",
-                code="USERNAME_TAKEN",
-            ) from None
+                "An account with this email already exists. Please log in.",
+                code="EMAIL_ALREADY_REGISTERED",
+            )
+
+        if existing_user and not existing_user.is_email_verified:
+            # Scenario B: update unverified user's data
+            # Username must not belong to ANOTHER user
+            username_conflict = (
+                User.all_objects.filter(username=username).exclude(id=existing_user.id).exists()
+            )
+            if username_conflict:
+                raise AuthenticationError(
+                    "This username is already taken",
+                    code="USERNAME_TAKEN",
+                )
+
+            existing_user.username = username
+            existing_user.set_password(password)
+            existing_user.encrypted_dob = encrypted_dob
+            existing_user.last_login_ip = ip_address
+            existing_user.save(
+                update_fields=[
+                    "username",
+                    "password",
+                    "encrypted_dob",
+                    "last_login_ip",
+                    "updated_at",
+                ]
+            )
+            user = existing_user
+
+            logger.info(
+                "Updated unverified user data: user_id=%s email=%s",
+                user.id,
+                mask_email(email),
+            )
+            log_security_event(
+                "auth.register.updated_unverified",
+                user_id=str(user.id),
+                ip_address=ip_address,
+                metadata={
+                    "email": mask_email(email),
+                    "username": username,
+                },
+            )
+
+            message = "Registration details updated. " "Check your email for verification code."
+        else:
+            # Scenario A: brand-new user
+            if User.all_objects.filter(username=username).exists():
+                raise AuthenticationError(
+                    "This username is already taken",
+                    code="USERNAME_TAKEN",
+                )
+
+            try:
+                user = User.objects.create_user(
+                    email=email,
+                    username=username,
+                    password=password,
+                    encrypted_dob=encrypted_dob,
+                    last_login_ip=ip_address,
+                )
+            except IntegrityError:
+                raise AuthenticationError(
+                    "This username is already taken. Please choose another.",
+                    code="USERNAME_TAKEN",
+                ) from None
+
+            logger.info(
+                "New user registered: user_id=%s email=%s",
+                user.id,
+                mask_email(email),
+            )
+            log_security_event(
+                "auth.register.success",
+                user_id=str(user.id),
+                ip_address=ip_address,
+                metadata={"email": mask_email(email), "username": username},
+            )
+
+            message = "Registration successful. " "Check your email for verification code."
 
         AuthService._send_otp(user.email, str(user.id), purpose="verify")
 
-        log_security_event(
-            "auth.register.success",
-            user_id=str(user.id),
-            ip_address=ip_address,
-            metadata={"email": mask_email(email), "username": username},
-        )
-
         return {
             "user": user,
-            "message": "Registration successful. Please verify your email with the OTP sent.",
+            "message": message,
+            "requires_verification": True,
         }
 
     @staticmethod
@@ -134,6 +197,12 @@ class AuthService:
     ) -> dict[str, Any]:
         """Authenticate user with email and password.
 
+        Scenarios:
+        A) Valid credentials + verified → return tokens.
+        B) Valid credentials + NOT verified → send OTP, requiresVerification.
+        C) Invalid credentials → INVALID_CREDENTIALS error.
+        D) Deactivated account → ACCOUNT_DEACTIVATED error.
+
         Args:
             email: User's email address.
             password: Plain text password.
@@ -141,16 +210,21 @@ class AuthService:
             user_agent: Client User-Agent for audit logging.
 
         Returns:
-            Dict with user data, access_token, and refresh_token.
+            Dict with user, tokens (if verified), or requiresVerification flag.
 
         Raises:
-            AuthenticationError: If credentials invalid or email not verified.
+            AuthenticationError: If credentials are invalid or account deactivated.
         """
         email = email.lower().strip()
 
         try:
             user = User.objects.get(email=email)
         except User.DoesNotExist:
+            logger.warning(
+                "Login failed: user not found for email=%s ip=%s",
+                mask_email(email),
+                ip_address,
+            )
             log_security_event(
                 "auth.login.failed",
                 ip_address=ip_address,
@@ -162,6 +236,11 @@ class AuthService:
             ) from None
 
         if not user.check_password(password):
+            logger.warning(
+                "Login failed: invalid password for user_id=%s ip=%s",
+                user.id,
+                ip_address,
+            )
             log_security_event(
                 "auth.login.failed",
                 user_id=str(user.id),
@@ -174,24 +253,39 @@ class AuthService:
                 code="INVALID_CREDENTIALS",
             )
 
-        if not user.is_email_verified:
-            raise AuthenticationError(
-                "Please verify your email before logging in",
-                code="EMAIL_NOT_VERIFIED",
-            )
-
         if not user.is_active:
+            logger.warning("Login failed: deactivated account user_id=%s", user.id)
             raise AuthenticationError(
                 "This account has been deactivated",
                 code="ACCOUNT_DEACTIVATED",
             )
 
+        if not user.is_email_verified:
+            # Scenario B: send OTP, no tokens, no error
+            logger.info(
+                "Login attempt for unverified user_id=%s — sending OTP",
+                user.id,
+            )
+            AuthService._send_otp(user.email, str(user.id), purpose="verify")
+            log_security_event(
+                "auth.login.unverified_otp_sent",
+                user_id=str(user.id),
+                ip_address=ip_address,
+            )
+            return {
+                "user": user,
+                "message": "Email not verified. Verification code sent to your email.",
+                "requires_verification": True,
+            }
+
+        # Scenario A: verified + active → issue tokens
         user.last_login_ip = ip_address
         user.save(update_fields=["last_login_ip", "updated_at"])
 
         access_token = TokenService.generate_access_token(str(user.id), user.role)
         refresh_token, _ = TokenService.generate_refresh_token(str(user.id))
 
+        logger.info("Login success: user_id=%s ip=%s", user.id, ip_address)
         log_security_event(
             "auth.login.success",
             user_id=str(user.id),
@@ -246,22 +340,24 @@ class AuthService:
             AuthenticationError: If OTP is invalid/expired or max attempts reached.
         """
         email = email.lower().strip()
+        max_attempts = 5
 
         try:
             user = User.objects.get(email=email)
         except User.DoesNotExist:
+            logger.warning("OTP verification for non-existent email=%s", mask_email(email))
             raise AuthenticationError(
-                "Invalid email or verification code",
+                "Invalid email or verification code.",
                 code="INVALID_OTP",
             ) from None
 
         if user.is_email_verified:
             raise AuthenticationError(
-                "Email is already verified",
+                "Email is already verified. Please log in.",
                 code="EMAIL_ALREADY_VERIFIED",
             )
 
-        AuthService._check_otp_attempts(email, purpose="verify", max_attempts=5)
+        AuthService._check_otp_attempts(email, purpose="verify", max_attempts=max_attempts)
 
         try:
             from django_redis import get_redis_connection
@@ -270,8 +366,13 @@ class AuthService:
             redis_key = f"otp:verify:{user.id}"
             stored_otp = redis_conn.get(redis_key)
 
+            attempts_key = f"otp_attempts:verify:{email}"
+            current_attempts = redis_conn.get(attempts_key)
+            used = int(current_attempts) if current_attempts else 0
+
             if stored_otp is None:
                 AuthService._increment_otp_attempts(email, purpose="verify")
+                logger.info("OTP expired for user_id=%s", user.id)
                 raise AuthenticationError(
                     "Verification code has expired. Please request a new one.",
                     code="OTP_EXPIRED",
@@ -279,18 +380,25 @@ class AuthService:
 
             if stored_otp.decode() != code:
                 AuthService._increment_otp_attempts(email, purpose="verify")
+                remaining = max(0, max_attempts - used - 1)
+                logger.warning(
+                    "Invalid OTP for user_id=%s attempts_remaining=%d",
+                    user.id,
+                    remaining,
+                )
                 raise AuthenticationError(
-                    "Invalid verification code",
+                    "Invalid verification code. Please try again.",
                     code="INVALID_OTP",
+                    details={"attemptsRemaining": remaining},
                 )
 
             redis_conn.delete(redis_key)
-            redis_conn.delete(f"otp_attempts:verify:{email}")
+            redis_conn.delete(attempts_key)
 
         except AuthenticationError:
             raise
         except Exception as e:
-            logger.error(f"OTP validation failed: {e}")
+            logger.error("OTP validation failed: %s", e, exc_info=True)
             raise AuthenticationError(
                 "Failed to validate code. Please try again.",
                 code="OTP_VALIDATION_FAILED",
@@ -302,6 +410,7 @@ class AuthService:
         access_token = TokenService.generate_access_token(str(user.id), user.role)
         refresh_token, _ = TokenService.generate_refresh_token(str(user.id))
 
+        logger.info("Email verified: user_id=%s", user.id)
         log_security_event(
             "auth.email_verified",
             user_id=str(user.id),
@@ -314,7 +423,7 @@ class AuthService:
         }
 
     @staticmethod
-    def resend_verification_otp(email: str) -> bool:
+    def resend_verification_otp(email: str) -> dict[str, Any]:
         """Resend verification OTP with rate limiting.
 
         Rate limit: 3 per 10 minutes per email.
@@ -323,10 +432,10 @@ class AuthService:
             email: User's email address.
 
         Returns:
-            True (always, to prevent email enumeration).
+            Dict with message and expiresIn seconds.
 
         Raises:
-            AuthenticationError: If rate limited.
+            AuthenticationError: If rate limited or already verified.
         """
         email = email.lower().strip()
 
@@ -335,18 +444,58 @@ class AuthService:
         try:
             user = User.objects.get(email=email)
         except User.DoesNotExist:
-            return True
+            return {
+                "message": "Verification code sent to your email.",
+                "expires_in": 600,
+            }
 
         if user.is_email_verified:
             raise AuthenticationError(
-                "Email is already verified",
+                "Email is already verified. Please log in.",
                 code="EMAIL_ALREADY_VERIFIED",
             )
 
         AuthService._send_otp(email, str(user.id), purpose="verify")
         AuthService._increment_resend_count(email, purpose="verify")
 
-        return True
+        logger.info("OTP resent for user_id=%s", user.id)
+
+        return {
+            "message": "Verification code sent to your email.",
+            "expires_in": 600,
+        }
+
+    @staticmethod
+    def delete_account(user_id: str) -> bool:
+        """Permanently delete a user account and all associated data.
+
+        This is a hard delete to comply with App Store account deletion requirements.
+        Django's cascading deletes will handle related models.
+
+        Args:
+            user_id: The UUID of the user to delete.
+
+        Returns:
+            True if deletion was successful.
+
+        Raises:
+            AuthenticationError: if user is not found.
+        """
+        try:
+            from core.users.models import User
+
+            user = User.objects.get(id=user_id)
+            email = user.email
+
+            # Perform hard delete
+            user.delete()
+
+            logger.info("Account permanently deleted: user_id=%s email=%s", user_id, email)
+            return True
+
+        except User.DoesNotExist as e:
+            logger.error("Delete account failed: user not found id=%s", user_id)
+            raise AuthenticationError("User not found", "USER_NOT_FOUND") from e
 
     @staticmethod
     def suggest_usernames(email: str, date_of_birth: str) -> list[str]:
@@ -762,9 +911,15 @@ class AuthService:
             key = f"otp_attempts:{purpose}:{email}"
             attempts = redis_conn.get(key)
             if attempts and int(attempts) >= max_attempts:
+                logger.warning(
+                    "OTP max attempts reached for email=%s purpose=%s",
+                    mask_email(email),
+                    purpose,
+                )
                 raise AuthenticationError(
-                    "Too many verification attempts. Please try again later.",
-                    code="OTP_RATE_LIMITED",
+                    "Too many failed attempts. Please request a new verification code.",
+                    code="MAX_ATTEMPTS_REACHED",
+                    details={"retryAfter": 600},
                 )
         except AuthenticationError:
             raise
@@ -799,9 +954,15 @@ class AuthService:
             key = f"otp_resend:{purpose}:{email}"
             count = redis_conn.get(key)
             if count and int(count) >= max_resends:
+                logger.warning(
+                    "OTP resend rate limited for email=%s purpose=%s",
+                    mask_email(email),
+                    purpose,
+                )
                 raise AuthenticationError(
-                    "Too many resend requests. Please try again later.",
-                    code="RESEND_RATE_LIMITED",
+                    "Too many requests. Please wait before requesting another code.",
+                    code="RATE_LIMIT_EXCEEDED",
+                    details={"retryAfter": 600},
                 )
         except AuthenticationError:
             raise
