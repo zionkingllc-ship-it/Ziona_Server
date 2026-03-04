@@ -11,7 +11,7 @@ DEBUG = False
 
 ALLOWED_HOSTS = env.list(  # noqa: F405
     "ALLOWED_HOSTS",
-    default=["ziona-api-staging.onrender.com"],
+    default=["ziona-api-staging.onrender.com", "api.ziona.app"],
 )
 
 SECURE_SSL_REDIRECT = True
