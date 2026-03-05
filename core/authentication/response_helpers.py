@@ -13,11 +13,8 @@ from django.http import JsonResponse
 
 logger = logging.getLogger("core.authentication")
 
-# --------------------------------------------------------------------------- #
-# HTTP STATUS CODE MAP for auth error codes
-# --------------------------------------------------------------------------- #
+
 ERROR_STATUS_MAP: dict[str, int] = {
-    # 400 - Validation / client errors
     "MISSING_FIELDS": 400,
     "EMAIL_ALREADY_REGISTERED": 400,
     "USERNAME_TAKEN": 400,
@@ -32,18 +29,22 @@ ERROR_STATUS_MAP: dict[str, int] = {
     "OTP_STORAGE_FAILED": 400,
     "OTP_VALIDATION_FAILED": 400,
     "EMAIL_ALREADY_VERIFIED": 400,
-    # 401 - Authentication errors
+    "INVALID_PURPOSE": 400,
+    "USER_NOT_FOUND": 400,
+    "INVALID_RESET_TOKEN": 400,
+    "TOKEN_VALIDATION_FAILED": 400,
+    "PASSWORD_REQUIRED": 400,
     "INVALID_CREDENTIALS": 401,
     "ACCOUNT_DEACTIVATED": 401,
     "MISSING_TOKEN": 401,
     "INVALID_REFRESH_TOKEN": 401,
     "INVALID_TOKEN": 401,
     "AUTH_ERROR": 401,
-    # 429 - Rate limit errors
     "MAX_ATTEMPTS_REACHED": 429,
     "RATE_LIMIT_EXCEEDED": 429,
-    # 500 - Server errors
+    "RESEND_COOLDOWN": 429,
     "INTERNAL_ERROR": 500,
+    "TOKEN_STORAGE_FAILED": 500,
     "SERVICE_UNAVAILABLE": 503,
 }
 
