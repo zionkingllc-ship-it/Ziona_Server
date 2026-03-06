@@ -542,7 +542,7 @@ class PostService:
             type=post.post_type,
             created_at=post.created_at.isoformat(),
             caption=post.caption or None,
-            category_id=post.category,
+            category_id=str(post.category) if post.category else None,
             author=author,
             media=media,
             stats=stats,
