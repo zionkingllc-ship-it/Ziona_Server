@@ -2,8 +2,6 @@
 
 import strawberry
 
-# --- Types ---
-
 
 @strawberry.type
 class MediaUploadPayload:
@@ -15,9 +13,6 @@ class MediaUploadPayload:
     expires_in: int | None = None
     message: str | None = None
     error_code: str | None = None
-
-
-# --- Mutations ---
 
 
 @strawberry.type
@@ -35,7 +30,6 @@ class MediaMutations:
         """Generate a signed URL for direct file upload to GCP."""
         from core.media.services import MediaError, MediaService
 
-        # Check auth
         request = info.context["request"]
         auth_header = request.META.get("HTTP_AUTHORIZATION", "")
         if not auth_header.startswith("Bearer "):

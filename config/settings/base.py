@@ -46,6 +46,13 @@ LOCAL_APPS = [
     "core.users",
     "core.authentication",
     "core.media",
+    "core.posts",
+    "core.engagement",
+    "core.follows",
+    "core.moderation",
+    "core.feed",
+    "core.profiles",
+    "core.notifications",
 ]
 
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS

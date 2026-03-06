@@ -42,14 +42,14 @@ class TestBookmarkFolders:
 
     def test_default_folders_created(self, user_a):
         folders = BookmarkService.get_folders(str(user_a.id))
-        assert len(folders) == 5
-        assert folders[0].name == "All"
+        folder_names = {f.name for f in folders}
+        expected = {"All", "Churches", "Prayer References", "Bible Study", "Events/Concerts"}
+        assert folder_names == expected
 
     def test_create_custom_folder(self, user_a):
         BookmarkService.get_folders(str(user_a.id))
-        folder = BookmarkService.create_folder(str(user_a.id), "My Folder", "🌟")
+        folder = BookmarkService.create_folder(str(user_a.id), "My Folder")
         assert folder.name == "My Folder"
-        assert folder.icon == "🌟"
 
     def test_delete_folder_returns_moved_count(self, user_a, post_text):
         """Delete folder returns dict with moved_posts_count."""

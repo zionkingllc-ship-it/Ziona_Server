@@ -16,7 +16,6 @@ from core.media.models import MediaFile, MediaStatus, MediaType
 logger = logging.getLogger("core.media")
 
 
-# Allowed MIME types and their extensions
 ALLOWED_TYPES = {
     "image/jpeg": {"ext": "jpg", "media_type": MediaType.IMAGE, "max_size": 10 * 1024 * 1024},
     "image/png": {"ext": "png", "media_type": MediaType.IMAGE, "max_size": 10 * 1024 * 1024},
@@ -24,12 +23,11 @@ ALLOWED_TYPES = {
     "video/mp4": {"ext": "mp4", "media_type": MediaType.VIDEO, "max_size": 100 * 1024 * 1024},
 }
 
-# Magic bytes for file validation
 MAGIC_BYTES = {
     "image/jpeg": [b"\xff\xd8\xff"],
     "image/png": [b"\x89PNG\r\n\x1a\n"],
-    "image/webp": [b"RIFF"],  # Also check for WEBP at offset 8
-    "video/mp4": [b"ftyp"],  # Appears at offset 4-7
+    "image/webp": [b"RIFF"],
+    "video/mp4": [b"ftyp"],
 }
 
 
@@ -72,7 +70,6 @@ class MediaService:
         Raises:
             MediaError: If file type or size is invalid.
         """
-        # Validate file type
         if file_type not in ALLOWED_TYPES:
             raise MediaError(
                 f"File type '{file_type}' not allowed. Accepted: JPEG, PNG, WEBP, MP4",
@@ -81,7 +78,6 @@ class MediaService:
 
         type_config = ALLOWED_TYPES[file_type]
 
-        # Validate file size
         if file_size > type_config["max_size"]:
             max_mb = type_config["max_size"] / (1024 * 1024)
             raise MediaError(
@@ -95,7 +91,6 @@ class MediaService:
                 code="INVALID_FILE_SIZE",
             )
 
-        # Generate storage path
         media_id = str(uuid.uuid4())
         ext = type_config["ext"]
         media_type = type_config["media_type"]
@@ -105,7 +100,6 @@ class MediaService:
         else:
             storage_path = f"uploads/{user_id}/images/{media_id}.{ext}"
 
-        # Create MediaFile record
         media_file = MediaFile.objects.create(
             user_id=user_id,
             file_name=file_name,
@@ -116,7 +110,6 @@ class MediaService:
             status=MediaStatus.PENDING,
         )
 
-        # Generate signed URL
         expiry = settings.GCP_SIGNED_URL_EXPIRY
         try:
             upload_url = _generate_gcp_signed_url(
@@ -128,7 +121,6 @@ class MediaService:
             )
         except Exception as e:
             logger.error(f"Failed to generate signed URL: {e}")
-            # For development, return a placeholder URL
             upload_url = (
                 f"https://storage.googleapis.com/{settings.GCP_STORAGE_BUCKET}/{storage_path}"
             )
@@ -180,7 +172,6 @@ class MediaService:
         media_file.status = MediaStatus.PROCESSING
         media_file.save(update_fields=["status", "updated_at"])
 
-        # Trigger async processing
         try:
             from core.media.tasks import process_media_upload
 
@@ -222,7 +213,7 @@ class MediaService:
                 bucket=settings.GCP_STORAGE_BUCKET,
                 blob_path=media_file.storage_path,
                 content_type=media_file.file_type,
-                expiry_seconds=3600,  # 60 minutes
+                expiry_seconds=3600,
                 method="GET",
             )
         except Exception as e:
@@ -287,11 +278,9 @@ def validate_magic_bytes(file_content: bytes, declared_type: str) -> bool:
 
     for signature in expected_signatures:
         if declared_type == "video/mp4":
-            # MP4 magic bytes appear at offset 4
             if len(file_content) >= 8 and signature in file_content[4:8]:
                 return True
         elif declared_type == "image/webp":
-            # RIFF at offset 0, WEBP at offset 8
             if (
                 len(file_content) >= 12
                 and file_content[:4] == b"RIFF"

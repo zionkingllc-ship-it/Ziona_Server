@@ -1,5 +1,5 @@
 import logging
-from datetime import UTC, date, datetime
+from datetime import date, datetime, timezone
 
 from cryptography.fernet import Fernet
 from django.conf import settings
@@ -105,7 +105,7 @@ class UserService:
                 code="INVALID_DATE_FORMAT",
             ) from None
 
-        today = datetime.now(UTC).date()
+        today = datetime.now(timezone.utc).date()
         age = (today - birth_date).days / 365.25
 
         if age < 13:

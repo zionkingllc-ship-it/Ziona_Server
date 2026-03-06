@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ caption|truncatewords:10 }} — {{ app_name }}</title>
+
+    <meta property="og:type" content="article">
+    <meta property="og:title" content="{{ author.username }} on {{ app_name }}">
+    <meta property="og:description" content="{{ caption|truncatewords:30 }}">
+    <meta property="og:url" content="{{ post_url }}">
+    {% if preview_image %}
+    <meta property="og:image" content="{{ preview_image }}">
+    {% endif %}
+    <meta property="og:site_name" content="{{ app_name }}">
+
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="{{ author.username }} on {{ app_name }}">
+    <meta name="twitter:description" content="{{ caption|truncatewords:30 }}">
+    {% if preview_image %}
+    <meta name="twitter:image" content="{{ preview_image }}">
+    {% endif %}
+
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            max-width: 600px;
+            margin: 40px auto;
+            padding: 20px;
+            text-align: center;
+            background: #fafafa;
+        }
+        .logo { font-size: 2em; margin-bottom: 20px; }
+        .caption { font-size: 1.1em; color: #333; margin: 20px 0; }
+        .author { color: #666; font-size: 0.9em; }
+        .cta {
+            display: inline-block;
+            margin-top: 30px;
+            padding: 12px 36px;
+            background: #6c63ff;
+            color: white;
+            text-decoration: none;
+            border-radius: 8px;
+            font-weight: 600;
+        }
+        .cta:hover { background: #5a52d9; }
+    </style>
+</head>
+<body>
+    <div class="logo">✝️ {{ app_name }}</div>
+    <p class="author">@{{ author.username }}</p>
+    <p class="caption">{{ caption }}</p>
+    {% if preview_image %}
+    <img src="{{ preview_image }}" alt="Post preview" style="max-width: 100%; border-radius: 12px;">
+    {% endif %}
+    <br>
+    <a href="https://ziona.app" class="cta">Open in Ziona</a>
+</body>
+</html>

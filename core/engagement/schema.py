@@ -1,0 +1,580 @@
+"""GraphQL types, queries, and mutations for the engagement domain."""
+
+
+import strawberry
+
+from core.feed.schema import FeedPost, _dto_to_feed_post
+from core.users.schema import _get_authenticated_user_id
+
+
+@strawberry.type
+class LikePayload:
+    """Response for like/unlike mutations."""
+
+    success: bool
+    liked: bool = False
+    message: str | None = None
+    error_code: str | None = None
+
+
+@strawberry.type
+class SavePayload:
+    """Response for save/unsave mutations."""
+
+    success: bool
+    saved: bool = False
+    message: str | None = None
+    error_code: str | None = None
+
+
+@strawberry.type
+class CommentAuthor:
+    """Author info within a comment."""
+
+    id: str
+    username: str
+    avatar_url: str | None = None
+
+
+@strawberry.type
+class CommentStats:
+    """Stats for a comment."""
+
+    likes_count: int = 0
+    replies_count: int = 0
+
+
+@strawberry.type
+class CommentViewerState:
+    """Viewer state for a comment."""
+
+    liked: bool = False
+    is_owner: bool = False
+
+
+@strawberry.type
+class CommentType:
+    """A comment on a post."""
+
+    id: str
+    post_id: str
+    parent_comment_id: str | None = None
+    user: CommentAuthor
+    text: str
+    stats: CommentStats
+    viewer_state: CommentViewerState | None = None
+    created_at: str
+
+
+@strawberry.type
+class CommentPayload:
+    """Response for comment mutations."""
+
+    success: bool
+    comment: CommentType | None = None
+    message: str | None = None
+    error_code: str | None = None
+
+
+@strawberry.type
+class CommentsResponse:
+    """Paginated comments response."""
+
+    comments: list[CommentType]
+    next_cursor: str | None = None
+    has_more: bool = False
+    total_count: int = 0
+
+
+@strawberry.type
+class BookmarkFolderType:
+    """A bookmark folder."""
+
+    id: str
+    name: str
+    saved_count: int = 0
+
+
+@strawberry.type
+class BookmarkFolderPayload:
+    """Response for folder mutations."""
+
+    success: bool
+    folder: BookmarkFolderType | None = None
+    message: str | None = None
+    error_code: str | None = None
+
+
+@strawberry.type
+class DeleteFolderPayload:
+    """Response for folder deletion."""
+
+    success: bool
+    message: str | None = None
+    moved_posts_count: int = 0
+    error_code: str | None = None
+
+
+@strawberry.type
+class BulkRemovePayload:
+    """Response for bulk bookmark removal."""
+
+    success: bool
+    removed_count: int = 0
+    message: str | None = None
+    error_code: str | None = None
+
+
+@strawberry.type
+class SavedPostsResponse:
+    """Paginated saved posts response."""
+
+    posts: list[FeedPost]
+    next_cursor: str | None = None
+    has_more: bool = False
+
+
+@strawberry.type
+class SharePayload:
+    """Response for share mutations."""
+
+    success: bool
+    share_id: str | None = None
+    share_url: str | None = None
+    message: str | None = None
+    error_code: str | None = None
+
+
+@strawberry.type
+class FriendType:
+    """A friend (mutual follow) for the share picker."""
+
+    id: str
+    username: str
+    avatar_url: str | None = None
+    full_name: str = ""
+
+
+def _dto_to_comment(dto) -> CommentType:
+    """Convert CommentResponseDTO to CommentType."""
+    return CommentType(
+        id=dto.id,
+        post_id=dto.post_id,
+        parent_comment_id=dto.parent_comment_id,
+        user=CommentAuthor(
+            id=dto.user.id,
+            username=dto.user.username,
+            avatar_url=dto.user.avatar_url,
+        ),
+        text=dto.text,
+        stats=CommentStats(
+            likes_count=dto.stats.likes_count,
+            replies_count=dto.stats.replies_count,
+        ),
+        viewer_state=(
+            CommentViewerState(
+                liked=dto.viewer_state.liked,
+                is_owner=dto.viewer_state.is_owner,
+            )
+            if dto.viewer_state
+            else None
+        ),
+        created_at=dto.created_at,
+    )
+
+
+@strawberry.type
+class EngagementMutations:
+    """Engagement domain GraphQL mutations."""
+
+    @strawberry.mutation(description="Like a post")
+    def like_post(self, info: strawberry.types.Info, post_id: str) -> LikePayload:
+        """Like a post."""
+        from core.engagement.services import EngagementService
+        from core.shared.exceptions import EngagementError
+
+        user_id = _get_authenticated_user_id(info)
+        if not user_id:
+            return LikePayload(
+                success=False,
+                message="Authentication required",
+                error_code="UNAUTHORIZED",
+            )
+
+        try:
+            result = EngagementService.like_post(user_id, post_id)
+            return LikePayload(success=True, liked=result.liked)
+        except EngagementError as e:
+            return LikePayload(success=False, message=e.message, error_code=e.code)
+
+    @strawberry.mutation(description="Unlike a post")
+    def unlike_post(self, info: strawberry.types.Info, post_id: str) -> LikePayload:
+        """Unlike a post."""
+        from core.engagement.services import EngagementService
+        from core.shared.exceptions import EngagementError
+
+        user_id = _get_authenticated_user_id(info)
+        if not user_id:
+            return LikePayload(
+                success=False,
+                message="Authentication required",
+                error_code="UNAUTHORIZED",
+            )
+
+        try:
+            result = EngagementService.unlike_post(user_id, post_id)
+            return LikePayload(success=True, liked=result.liked)
+        except EngagementError as e:
+            return LikePayload(success=False, message=e.message, error_code=e.code)
+
+    @strawberry.mutation(description="Create a comment on a post")
+    def create_comment(
+        self,
+        info: strawberry.types.Info,
+        post_id: str,
+        text: str,
+        parent_comment_id: str | None = None,
+    ) -> CommentPayload:
+        """Create a comment."""
+        from core.engagement.services import EngagementService
+        from core.shared.exceptions import EngagementError
+
+        user_id = _get_authenticated_user_id(info)
+        if not user_id:
+            return CommentPayload(
+                success=False,
+                message="Authentication required",
+                error_code="UNAUTHORIZED",
+            )
+
+        try:
+            result = EngagementService.create_comment(
+                user_id=user_id,
+                post_id=post_id,
+                text=text,
+                parent_comment_id=parent_comment_id,
+            )
+            return CommentPayload(success=True, comment=_dto_to_comment(result))
+        except EngagementError as e:
+            return CommentPayload(success=False, message=e.message, error_code=e.code)
+
+    @strawberry.mutation(description="Delete a comment")
+    def delete_comment(self, info: strawberry.types.Info, comment_id: str) -> CommentPayload:
+        """Delete a comment (soft delete)."""
+        from core.engagement.services import EngagementService
+        from core.shared.exceptions import EngagementError
+
+        user_id = _get_authenticated_user_id(info)
+        if not user_id:
+            return CommentPayload(
+                success=False,
+                message="Authentication required",
+                error_code="UNAUTHORIZED",
+            )
+
+        try:
+            EngagementService.delete_comment(user_id, comment_id)
+            return CommentPayload(success=True)
+        except EngagementError as e:
+            return CommentPayload(success=False, message=e.message, error_code=e.code)
+
+    @strawberry.mutation(description="Like a comment")
+    def like_comment(self, info: strawberry.types.Info, comment_id: str) -> LikePayload:
+        """Like a comment."""
+        from core.engagement.services import EngagementService
+        from core.shared.exceptions import EngagementError
+
+        user_id = _get_authenticated_user_id(info)
+        if not user_id:
+            return LikePayload(
+                success=False,
+                message="Authentication required",
+                error_code="UNAUTHORIZED",
+            )
+
+        try:
+            EngagementService.like_comment(user_id, comment_id)
+            return LikePayload(success=True, liked=True)
+        except EngagementError as e:
+            return LikePayload(success=False, message=e.message, error_code=e.code)
+
+    @strawberry.mutation(description="Save/bookmark a post")
+    def save_post(
+        self,
+        info: strawberry.types.Info,
+        post_id: str,
+        folder_id: str | None = None,
+    ) -> SavePayload:
+        """Save a post to bookmarks."""
+        from core.engagement.services import EngagementService
+        from core.shared.exceptions import EngagementError
+
+        user_id = _get_authenticated_user_id(info)
+        if not user_id:
+            return SavePayload(
+                success=False,
+                message="Authentication required",
+                error_code="UNAUTHORIZED",
+            )
+
+        try:
+            result = EngagementService.save_post(user_id, post_id, folder_id)
+            return SavePayload(success=True, saved=result.saved)
+        except EngagementError as e:
+            return SavePayload(success=False, message=e.message, error_code=e.code)
+
+    @strawberry.mutation(description="Unsave/remove a bookmark")
+    def unsave_post(self, info: strawberry.types.Info, post_id: str) -> SavePayload:
+        """Remove a saved post."""
+        from core.engagement.services import EngagementService
+
+        user_id = _get_authenticated_user_id(info)
+        if not user_id:
+            return SavePayload(
+                success=False,
+                message="Authentication required",
+                error_code="UNAUTHORIZED",
+            )
+
+        result = EngagementService.unsave_post(user_id, post_id)
+        return SavePayload(success=True, saved=result.saved)
+
+    @strawberry.mutation(description="Create a bookmark folder")
+    def create_bookmark_folder(
+        self,
+        info: strawberry.types.Info,
+        name: str,
+    ) -> BookmarkFolderPayload:
+        """Create a new bookmark folder."""
+        from core.engagement.bookmark_services import BookmarkService
+        from core.shared.exceptions import BookmarkError
+
+        user_id = _get_authenticated_user_id(info)
+        if not user_id:
+            return BookmarkFolderPayload(
+                success=False,
+                message="Authentication required",
+                error_code="UNAUTHORIZED",
+            )
+
+        try:
+            result = BookmarkService.create_folder(user_id, name)
+            return BookmarkFolderPayload(
+                success=True,
+                folder=BookmarkFolderType(
+                    id=result.id,
+                    name=result.name,
+                    saved_count=result.saved_count,
+                ),
+            )
+        except BookmarkError as e:
+            return BookmarkFolderPayload(success=False, message=e.message, error_code=e.code)
+
+    @strawberry.mutation(description="Delete a bookmark folder")
+    def delete_bookmark_folder(
+        self, info: strawberry.types.Info, folder_id: str
+    ) -> DeleteFolderPayload:
+        """Delete a bookmark folder. Posts are moved to 'All'."""
+        from core.engagement.bookmark_services import BookmarkService
+        from core.shared.exceptions import BookmarkError
+
+        user_id = _get_authenticated_user_id(info)
+        if not user_id:
+            return DeleteFolderPayload(
+                success=False,
+                message="Authentication required",
+                error_code="UNAUTHORIZED",
+            )
+
+        try:
+            result = BookmarkService.delete_folder(user_id, folder_id)
+            count = result["moved_posts_count"]
+            return DeleteFolderPayload(
+                success=True,
+                moved_posts_count=count,
+                message=f"Folder deleted. {count} post(s) moved to 'All'.",
+            )
+        except BookmarkError as e:
+            return DeleteFolderPayload(success=False, message=e.message, error_code=e.code)
+
+    @strawberry.mutation(description="Remove multiple bookmarks at once")
+    def bulk_remove_bookmarks(
+        self,
+        info: strawberry.types.Info,
+        post_ids: list[str],
+    ) -> BulkRemovePayload:
+        """Bulk remove bookmarks across folders."""
+        from core.engagement.bookmark_services import BookmarkService
+
+        user_id = _get_authenticated_user_id(info)
+        if not user_id:
+            return BulkRemovePayload(
+                success=False,
+                message="Authentication required",
+                error_code="UNAUTHORIZED",
+            )
+
+        result = BookmarkService.bulk_remove_bookmarks(user_id, post_ids)
+        return BulkRemovePayload(
+            success=True,
+            removed_count=result["removed_count"],
+            message=f"{result['removed_count']} bookmark(s) removed.",
+        )
+
+    @strawberry.mutation(description="Share a post to another user")
+    def share_post_direct(
+        self,
+        info: strawberry.types.Info,
+        post_id: str,
+        recipient_id: str,
+    ) -> SharePayload:
+        """Share a post directly to another user."""
+        from core.engagement.share_services import ShareService
+        from core.shared.exceptions import ShareError
+
+        user_id = _get_authenticated_user_id(info)
+        if not user_id:
+            return SharePayload(
+                success=False,
+                message="Authentication required",
+                error_code="UNAUTHORIZED",
+            )
+
+        try:
+            result = ShareService.share_post_direct(user_id, post_id, recipient_id)
+            return SharePayload(success=True, share_id=result.share_id)
+        except ShareError as e:
+            return SharePayload(success=False, message=e.message, error_code=e.code)
+
+    @strawberry.mutation(description="Share a post externally (generate link)")
+    def share_post_external(self, info: strawberry.types.Info, post_id: str) -> SharePayload:
+        """Share a post externally."""
+        from core.engagement.share_services import ShareService
+        from core.shared.exceptions import ShareError
+
+        user_id = _get_authenticated_user_id(info)
+        if not user_id:
+            return SharePayload(
+                success=False,
+                message="Authentication required",
+                error_code="UNAUTHORIZED",
+            )
+
+        try:
+            result = ShareService.share_post_external(user_id, post_id)
+            return SharePayload(
+                success=True,
+                share_id=result.share_id,
+                share_url=result.share_url,
+            )
+        except ShareError as e:
+            return SharePayload(success=False, message=e.message, error_code=e.code)
+
+
+@strawberry.type
+class EngagementQueries:
+    """Engagement domain GraphQL queries."""
+
+    @strawberry.field(description="Get comments for a post")
+    def post_comments(
+        self,
+        info: strawberry.types.Info,
+        post_id: str,
+        cursor: str | None = None,
+        limit: int = 20,
+    ) -> CommentsResponse:
+        """Get paginated comments for a post."""
+        from core.engagement.services import EngagementService
+
+        user_id = _get_authenticated_user_id(info)
+
+        result = EngagementService.get_post_comments(
+            post_id=post_id,
+            viewer_id=user_id,
+            cursor=cursor,
+            limit=limit,
+        )
+
+        return CommentsResponse(
+            comments=[_dto_to_comment(c) for c in result.comments],
+            next_cursor=result.next_cursor,
+            has_more=result.has_more,
+            total_count=result.total_count,
+        )
+
+    @strawberry.field(description="Get bookmark folders")
+    def bookmark_folders(self, info: strawberry.types.Info) -> list[BookmarkFolderType]:
+        """Get all bookmark folders for the authenticated user."""
+        from core.engagement.bookmark_services import BookmarkService
+
+        user_id = _get_authenticated_user_id(info)
+        if not user_id:
+            return []
+
+        folders = BookmarkService.get_folders(user_id)
+        return [
+            BookmarkFolderType(
+                id=f.id,
+                name=f.name,
+                saved_count=f.saved_count,
+            )
+            for f in folders
+        ]
+
+    @strawberry.field(description="Get friends list for sharing")
+    def friends_list(
+        self,
+        info: strawberry.types.Info,
+        search: str | None = None,
+        limit: int = 20,
+    ) -> list[FriendType]:
+        """Get friends (mutual follows) for the share picker."""
+        from core.engagement.share_services import ShareService
+
+        user_id = _get_authenticated_user_id(info)
+        if not user_id:
+            return []
+
+        friends = ShareService.get_friends_list(user_id, search, limit)
+        return [
+            FriendType(
+                id=f["user"].id,
+                username=f["user"].username,
+                avatar_url=f["user"].avatar_url,
+                full_name=f.get("full_name", ""),
+            )
+            for f in friends
+        ]
+
+    @strawberry.field(description="Get saved/bookmarked posts")
+    def saved_posts(
+        self,
+        info: strawberry.types.Info,
+        folder_id: str | None = None,
+        media_type: str = "all",
+        cursor: str | None = None,
+        limit: int = 20,
+    ) -> SavedPostsResponse:
+        """Get saved posts with optional folder and media type filtering."""
+        from core.engagement.bookmark_services import BookmarkService
+        from core.shared.exceptions import BookmarkError
+
+        user_id = _get_authenticated_user_id(info)
+        if not user_id:
+            return SavedPostsResponse(posts=[], has_more=False)
+
+        try:
+            result = BookmarkService.get_saved_posts(
+                user_id=user_id,
+                folder_id=folder_id,
+                media_type=media_type,
+                cursor=cursor,
+                limit=limit,
+            )
+            return SavedPostsResponse(
+                posts=[_dto_to_feed_post(p) for p in result["posts"]],
+                next_cursor=result["next_cursor"],
+                has_more=result["has_more"],
+            )
+        except BookmarkError:
+            return SavedPostsResponse(posts=[], has_more=False)

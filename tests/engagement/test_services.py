@@ -1,0 +1,167 @@
+"""Tests for EngagementService — likes, comments, saves."""
+
+from unittest.mock import patch
+
+import pytest
+
+from core.engagement.services import EngagementService
+from core.shared.exceptions import EngagementError
+
+
+@pytest.fixture
+def user_a(create_user):
+    return create_user(email="a@test.com", username="user_a")
+
+
+@pytest.fixture
+def user_b(create_user):
+    return create_user(email="b@test.com", username="user_b")
+
+
+@pytest.fixture
+def post(user_a):
+    from core.posts.models import Post
+
+    return Post.objects.create(
+        user=user_a,
+        post_type="text",
+        caption="Test post",
+    )
+
+
+class TestLikePost:
+    """Tests for like/unlike operations."""
+
+    @patch("core.engagement.services.check_engagement_spam")
+    def test_like_post_success(self, mock_spam, user_b, post):
+        result = EngagementService.like_post(str(user_b.id), str(post.id))
+        assert result.success is True
+        assert result.liked is True
+
+    @patch("core.engagement.services.check_engagement_spam")
+    def test_like_post_already_liked(self, mock_spam, user_b, post):
+        EngagementService.like_post(str(user_b.id), str(post.id))
+
+        with pytest.raises(EngagementError) as exc:
+            EngagementService.like_post(str(user_b.id), str(post.id))
+        assert exc.value.code == "ALREADY_LIKED"
+
+    @patch("core.engagement.services.check_engagement_spam")
+    def test_like_nonexistent_post(self, mock_spam, user_b):
+        with pytest.raises(EngagementError) as exc:
+            EngagementService.like_post(str(user_b.id), "00000000-0000-0000-0000-000000000000")
+        assert exc.value.code == "POST_NOT_FOUND"
+
+    @patch("core.engagement.services.check_engagement_spam")
+    def test_unlike_post(self, mock_spam, user_b, post):
+        EngagementService.like_post(str(user_b.id), str(post.id))
+        result = EngagementService.unlike_post(str(user_b.id), str(post.id))
+        assert result.success is True
+        assert result.liked is False
+
+
+class TestCreateComment:
+    """Tests for comment creation."""
+
+    def test_create_comment_success(self, user_b, post):
+        result = EngagementService.create_comment(
+            user_id=str(user_b.id),
+            post_id=str(post.id),
+            text="Great post!",
+        )
+        assert result.text == "Great post!"
+        assert result.post_id == str(post.id)
+
+    def test_create_comment_empty_text(self, user_b, post):
+        with pytest.raises(EngagementError):
+            EngagementService.create_comment(
+                user_id=str(user_b.id),
+                post_id=str(post.id),
+                text="",
+            )
+
+    def test_create_comment_too_long(self, user_b, post):
+        with pytest.raises(EngagementError) as exc:
+            EngagementService.create_comment(
+                user_id=str(user_b.id),
+                post_id=str(post.id),
+                text="x" * 501,
+            )
+        assert exc.value.code == "COMMENT_TOO_LONG"
+
+    def test_create_threaded_reply(self, user_a, user_b, post):
+        parent = EngagementService.create_comment(
+            user_id=str(user_a.id),
+            post_id=str(post.id),
+            text="Parent comment",
+        )
+        reply = EngagementService.create_comment(
+            user_id=str(user_b.id),
+            post_id=str(post.id),
+            text="Reply to parent",
+            parent_comment_id=parent.id,
+        )
+        assert reply.parent_comment_id == parent.id
+
+
+class TestDeleteComment:
+    """Tests for comment deletion."""
+
+    def test_delete_own_comment(self, user_b, post):
+        comment = EngagementService.create_comment(
+            user_id=str(user_b.id),
+            post_id=str(post.id),
+            text="My comment",
+        )
+        result = EngagementService.delete_comment(str(user_b.id), comment.id)
+        assert result is True
+
+    def test_delete_other_users_comment(self, user_a, user_b, post):
+        comment = EngagementService.create_comment(
+            user_id=str(user_a.id),
+            post_id=str(post.id),
+            text="A's comment",
+        )
+        with pytest.raises(EngagementError) as exc:
+            EngagementService.delete_comment(str(user_b.id), comment.id)
+        assert exc.value.code == "PERMISSION_DENIED"
+
+
+class TestSavePost:
+    """Tests for save/unsave operations."""
+
+    def test_save_post_success(self, user_b, post):
+        result = EngagementService.save_post(str(user_b.id), str(post.id))
+        assert result.success is True
+        assert result.saved is True
+
+    def test_save_post_already_saved(self, user_b, post):
+        EngagementService.save_post(str(user_b.id), str(post.id))
+        with pytest.raises(EngagementError) as exc:
+            EngagementService.save_post(str(user_b.id), str(post.id))
+        assert exc.value.code == "ALREADY_SAVED"
+
+    def test_unsave_post(self, user_b, post):
+        EngagementService.save_post(str(user_b.id), str(post.id))
+        result = EngagementService.unsave_post(str(user_b.id), str(post.id))
+        assert result.success is True
+        assert result.saved is False
+
+
+class TestGetPostComments:
+    """Tests for paginated comment retrieval."""
+
+    def test_get_empty_comments(self, post):
+        result = EngagementService.get_post_comments(str(post.id))
+        assert len(result.comments) == 0
+        assert result.has_more is False
+
+    def test_get_comments_with_viewer(self, user_a, user_b, post):
+        EngagementService.create_comment(
+            user_id=str(user_a.id),
+            post_id=str(post.id),
+            text="First!",
+        )
+        result = EngagementService.get_post_comments(str(post.id), viewer_id=str(user_b.id))
+        assert len(result.comments) == 1
+        assert result.comments[0].viewer_state is not None

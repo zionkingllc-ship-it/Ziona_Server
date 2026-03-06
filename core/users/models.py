@@ -63,7 +63,6 @@ class User(AbstractBaseUser, PermissionsMixin):
     bio = models.TextField(max_length=500, blank=True)
     avatar_url = models.URLField(max_length=500, blank=True)
 
-    # Role-based access
     role = models.CharField(
         max_length=10,
         choices=UserRole.choices,
@@ -71,28 +70,23 @@ class User(AbstractBaseUser, PermissionsMixin):
         db_index=True,
     )
 
-    # Verification
     is_email_verified = models.BooleanField(default=False)
 
-    # Sensitive fields (encrypted)
     encrypted_dob = models.BinaryField(null=True, blank=True)
 
-    # Location (manual input only, no GPS)
     location = models.CharField(max_length=100, blank=True)
 
-    # Django auth fields
     is_active = models.BooleanField(default=True)
     is_staff = models.BooleanField(default=False)
 
-    # Timestamps
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
     updated_at = models.DateTimeField(auto_now=True)
     deleted_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    last_name_change = models.DateTimeField(null=True, blank=True)
+    last_username_change = models.DateTimeField(null=True, blank=True)
 
-    # Security tracking
     last_login_ip = models.GenericIPAddressField(null=True, blank=True)
 
-    # Auth provider
     auth_provider = models.CharField(
         max_length=20,
         choices=[("email", "Email"), ("google", "Google")],
@@ -106,7 +100,6 @@ class User(AbstractBaseUser, PermissionsMixin):
         db_index=True,
     )
 
-    # Custom managers
     objects = UserManager()
     all_objects = AllObjectsManager()
 
@@ -144,3 +137,57 @@ class User(AbstractBaseUser, PermissionsMixin):
         self.deleted_at = None
         self.is_active = True
         self.save(update_fields=["deleted_at", "is_active", "updated_at"])
+
+
+class InterestCategory(models.TextChoices):
+    """Faith-based interest categories for onboarding."""
+
+    LOVE = "love", "Love"
+    TRUST = "trust", "Trust"
+    WORSHIP = "worship", "Worship"
+    PATIENCE = "patience", "Patience"
+    PRAYER = "prayer", "Prayer"
+
+
+class UserInterest(models.Model):
+    """A user's selected faith interest for feed personalization.
+
+    Created during onboarding when users choose their interests.
+
+    Attributes:
+        id: UUID primary key.
+        user: The user who selected this interest.
+        interest: The selected interest category.
+    """
+
+    id = models.UUIDField(
+        primary_key=True,
+        default=uuid.uuid4,
+        editable=False,
+    )
+    user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name="interests",
+    )
+    interest = models.CharField(
+        max_length=50,
+        choices=InterestCategory.choices,
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "user_interests"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["user", "interest"],
+                name="uq_user_interest",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["user"], name="idx_userinterest_user"),
+        ]
+
+    def __str__(self) -> str:
+        """Return string representation."""
+        return f"{self.user_id} → {self.interest}"

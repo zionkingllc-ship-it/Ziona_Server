@@ -65,7 +65,6 @@ class MediaFile(TimestampedModel):
         db_index=True,
     )
 
-    # Media metadata
     width = models.PositiveIntegerField(null=True, blank=True)
     height = models.PositiveIntegerField(null=True, blank=True)
     duration = models.FloatField(null=True, blank=True, help_text="Video duration in seconds")
