@@ -173,7 +173,6 @@ class PasswordService:
         Raises:
             AuthenticationError: If token is invalid/expired or password fails validation.
         """
-        # 1. Validate reset token from Redis
         try:
             from django_redis import get_redis_connection
 
@@ -191,7 +190,6 @@ class PasswordService:
             email = data["email"]
             user_id = data["user_id"]
 
-            # Consume the token (one-time use)
             redis_conn.delete(token_key)
 
         except AuthenticationError:
@@ -203,7 +201,6 @@ class PasswordService:
                 code="TOKEN_VALIDATION_FAILED",
             ) from e
 
-        # 2. Look up user
         try:
             user = User.objects.get(id=user_id, email=email)
         except User.DoesNotExist:
@@ -212,15 +209,12 @@ class PasswordService:
                 code="USER_NOT_FOUND",
             ) from None
 
-        # 3. Validate and set new password
         validate_password(new_password)
         user.set_password(new_password)
         user.save(update_fields=["password", "updated_at"])
 
-        # 4. Revoke tokens
         TokenService.revoke_all_user_tokens(str(user.id))
 
-        # 5. Issue new tokens for the current session
         access_token = TokenService.generate_access_token(str(user.id), user.role)
         refresh_token, _ = TokenService.generate_refresh_token(str(user.id))
 
@@ -234,4 +228,116 @@ class PasswordService:
             "user": user,
             "access_token": access_token,
             "refresh_token": refresh_token,
+        }
+
+    @staticmethod
+    def add_password(user_id: str, password: str) -> dict[str, Any]:
+        """Add a password for an OAuth user who doesn't have one.
+
+        Enables email+password login alongside OAuth.
+
+        Args:
+            user_id: UUID of the authenticated user.
+            password: New password (8-20 chars, 1 letter, 1 number, 1 special).
+
+        Returns:
+            Dict with success=True and user.
+
+        Raises:
+            AuthenticationError: If user already has a password or
+                password is too weak.
+        """
+        try:
+            user = User.objects.get(id=user_id)
+        except User.DoesNotExist:
+            raise AuthenticationError(
+                "User not found.",
+                code="USER_NOT_FOUND",
+            ) from None
+
+        if user.has_usable_password():
+            raise AuthenticationError(
+                "You already have a password. Use 'Change Password' instead.",
+                code="PASSWORD_ALREADY_EXISTS",
+            )
+
+        validate_password(password)
+        user.set_password(password)
+        user.save(update_fields=["password", "updated_at"])
+
+        log_security_event(
+            "auth.password_added",
+            user_id=str(user.id),
+            metadata={"auth_provider": user.auth_provider},
+        )
+
+        return {"user": user}
+
+    @staticmethod
+    def change_password(
+        user_id: str,
+        current_password: str,
+        new_password: str,
+        sign_out_other_devices: bool = False,
+        current_jti: str | None = None,
+        ip_address: str | None = None,
+    ) -> dict[str, Any]:
+        """Change password for an authenticated user.
+
+        Optionally sign out all other devices by revoking their tokens.
+
+        Args:
+            user_id: UUID of the authenticated user.
+            current_password: Current password for verification.
+            new_password: New password (8-20 chars, complexity enforced).
+            sign_out_other_devices: If True, invalidate all other sessions.
+            current_jti: JTI of the current refresh token to keep alive.
+            ip_address: Client IP for audit logging.
+
+        Returns:
+            Dict with message and signed_out_devices count.
+
+        Raises:
+            AuthenticationError: If current password is wrong or new
+                password doesn't meet requirements.
+        """
+        try:
+            user = User.objects.get(id=user_id)
+        except User.DoesNotExist:
+            raise AuthenticationError(
+                "User not found.",
+                code="USER_NOT_FOUND",
+            ) from None
+
+        if not user.check_password(current_password):
+            raise AuthenticationError(
+                "Current password is incorrect.",
+                code="CURRENT_PASSWORD_INCORRECT",
+            )
+
+        validate_password(new_password)
+        user.set_password(new_password)
+        user.save(update_fields=["password", "updated_at"])
+
+        signed_out_devices = 0
+
+        if sign_out_other_devices and current_jti:
+            signed_out_devices = TokenService.revoke_all_user_tokens_except(
+                user_id=str(user.id),
+                keep_jti=current_jti,
+            )
+            event_name = "auth.password_changed_with_device_signout"
+        else:
+            event_name = "auth.password_changed"
+
+        log_security_event(
+            event_name,
+            user_id=str(user.id),
+            ip_address=ip_address,
+            metadata={"signed_out_devices": signed_out_devices},
+        )
+
+        return {
+            "message": "Password changed successfully.",
+            "signed_out_devices": signed_out_devices,
         }

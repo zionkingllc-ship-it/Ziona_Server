@@ -9,8 +9,8 @@ Follows the Service Layer Pattern: View -> Service -> ORM
 """
 
 import logging
-import random
 import re
+import secrets
 import string
 from datetime import date
 from typing import Any
@@ -29,10 +29,6 @@ from core.shared.logging import log_security_event, mask_email
 from core.users.models import User
 
 logger = logging.getLogger("core.authentication")
-
-# Re-export for backward compatibility -- all external code can still do:
-#   from core.authentication.services import AuthenticationError, AuthService
-# and AuthService delegates to OTPService/PasswordService/OAuthService.
 
 
 class AuthService:
@@ -57,10 +53,6 @@ class AuthService:
         reset_password_with_token -> PasswordService
         google_oauth_login -> OAuthService
     """
-
-    # ================================================================== #
-    # CORE AUTHENTICATION
-    # ================================================================== #
 
     @staticmethod
     def register(
@@ -94,7 +86,6 @@ class AuthService:
             )
 
         if existing_user and not existing_user.is_email_verified:
-            # Scenario B: update unverified user data
             username_conflict = (
                 User.all_objects.filter(username=username).exclude(id=existing_user.id).exists()
             )
@@ -136,7 +127,6 @@ class AuthService:
 
             message = "Registration details updated. " "Check your email for verification code."
         else:
-            # Scenario A: brand-new user
             if User.all_objects.filter(username=username).exists():
                 raise AuthenticationError(
                     "This username is already taken",
@@ -236,7 +226,6 @@ class AuthService:
                 "requires_verification": True,
             }
 
-        # Scenario A: verified + active -> issue tokens
         user.last_login_ip = ip_address
         user.save(update_fields=["last_login_ip", "updated_at"])
 
@@ -319,7 +308,7 @@ class AuthService:
                     break
 
         while len(suggestions) < 4:
-            suffix = "".join(random.choices(string.digits, k=3))  # noqa: S311
+            suffix = "".join(secrets.choice(string.digits) for _ in range(3))
             candidate = f"{base}_{suffix}"[:30]
             if candidate not in seen:
                 seen.add(candidate)
@@ -327,10 +316,6 @@ class AuthService:
                     suggestions.append(candidate)
 
         return suggestions[:4]
-
-    # ================================================================== #
-    # TOKEN / SESSION MANAGEMENT
-    # ================================================================== #
 
     @staticmethod
     def refresh_tokens(refresh_token: str) -> dict[str, str]:
@@ -375,11 +360,6 @@ class AuthService:
 
         return True
 
-    # ================================================================== #
-    # BACKWARD-COMPATIBLE DELEGATIONS
-    # ================================================================== #
-
-    # OTP methods -> OTPService
     send_verification_otp = staticmethod(OTPService.send_verification_otp)
     verify_email_otp = staticmethod(OTPService.verify_email_otp)
     resend_verification_otp = staticmethod(OTPService.resend_verification_otp)
@@ -391,7 +371,6 @@ class AuthService:
     _check_resend_limit = staticmethod(OTPService._check_resend_limit)
     _increment_resend_count = staticmethod(OTPService._increment_resend_count)
 
-    # Password methods -> PasswordService (lazy import to avoid circular)
     @staticmethod
     def request_password_reset(email, ip_address=None):
         from core.authentication.password_service import PasswordService
@@ -414,7 +393,6 @@ class AuthService:
             reset_token, new_password, sign_out_all_devices, ip_address
         )
 
-    # OAuth methods -> OAuthService (lazy import to avoid circular)
     @staticmethod
     def google_oauth_login(id_token, ip_address=None):
         from core.authentication.oauth_service import OAuthService

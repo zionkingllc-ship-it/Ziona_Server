@@ -12,7 +12,7 @@ Security:
 
 import logging
 import uuid
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 
 import jwt
 from django.conf import settings
@@ -44,7 +44,7 @@ class TokenService:
         Returns:
             Encoded JWT access token string.
         """
-        now = datetime.now(UTC)
+        now = datetime.now(timezone.utc)
         payload = {
             "user_id": str(user_id),
             "role": role,
@@ -69,7 +69,7 @@ class TokenService:
         Returns:
             Tuple of (encoded refresh token, jti).
         """
-        now = datetime.now(UTC)
+        now = datetime.now(timezone.utc)
         jti = str(uuid.uuid4())
         payload = {
             "user_id": str(user_id),
@@ -84,7 +84,6 @@ class TokenService:
             algorithm=settings.JWT_ALGORITHM,
         )
 
-        # Store refresh token in Redis
         try:
             from django_redis import get_redis_connection
 
@@ -128,7 +127,6 @@ class TokenService:
         if payload.get("type") != "access":
             raise TokenError("Token is not an access token")
 
-        # Check if token is blacklisted
         try:
             from django_redis import get_redis_connection
 
@@ -170,7 +168,6 @@ class TokenService:
         if payload.get("type") != "refresh":
             raise TokenError("Token is not a refresh token")
 
-        # Verify refresh token exists in Redis
         try:
             from django_redis import get_redis_connection
 
@@ -206,7 +203,6 @@ class TokenService:
         user_id = payload["user_id"]
         old_jti = payload["jti"]
 
-        # Revoke old refresh token
         try:
             from django_redis import get_redis_connection
 
@@ -215,7 +211,6 @@ class TokenService:
         except Exception as e:
             logger.warning(f"Failed to revoke old refresh token: {e}")
 
-        # Issue new tokens
         access_token = TokenService.generate_access_token(user_id, role)
         refresh_token, new_jti = TokenService.generate_refresh_token(user_id)
 
@@ -252,6 +247,51 @@ class TokenService:
             logger.warning(f"Failed to revoke all tokens for user {user_id}: {e}")
 
     @staticmethod
+    def revoke_all_user_tokens_except(user_id: str, keep_jti: str) -> int:
+        """Revoke all refresh tokens for a user except the specified one.
+
+        Keeps the current session alive while forcing re-login on
+        all other devices.
+
+        Args:
+            user_id: UUID of the user.
+            keep_jti: JTI of the token to keep (current session).
+
+        Returns:
+            Number of tokens revoked.
+        """
+        try:
+            from django_redis import get_redis_connection
+
+            redis_conn = get_redis_connection("default")
+            pattern = f"refresh:{user_id}:*"
+            keep_key = f"refresh:{user_id}:{keep_jti}"
+
+            keys = redis_conn.keys(pattern)
+            keys_to_delete = [k for k in keys if k.decode() != keep_key]
+
+            if keys_to_delete:
+                redis_conn.delete(*keys_to_delete)
+
+            revoked = len(keys_to_delete)
+            logger.info(
+                "Tokens revoked (except current)",
+                extra={
+                    "user_id": str(user_id),
+                    "revoked": revoked,
+                    "kept": keep_jti,
+                },
+            )
+            return revoked
+        except Exception as e:
+            logger.warning(
+                "Failed to revoke tokens except current for user %s: %s",
+                user_id,
+                e,
+            )
+            return 0
+
+    @staticmethod
     def blacklist_access_token(token: str) -> None:
         """Add an access token to the blacklist (for logout).
 
@@ -269,7 +309,7 @@ class TokenService:
             )
             jti = payload.get("jti")
             exp = payload.get("exp", 0)
-            now = datetime.now(UTC).timestamp()
+            now = datetime.now(timezone.utc).timestamp()
             ttl = max(int(exp - now), 1)
 
             from django_redis import get_redis_connection

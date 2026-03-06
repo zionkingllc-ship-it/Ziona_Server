@@ -27,10 +27,8 @@ from core.authentication.views import (
 app_name = "authentication"
 
 urlpatterns = [
-    # --- Unified OTP endpoints (new) ---
     path("otp/send", UnifiedSendOTPView.as_view(), name="otp-send"),
     path("otp/verify", UnifiedVerifyOTPView.as_view(), name="otp-verify"),
-    # --- Legacy endpoints (backward compatibility) ---
     path("register", RegisterView.as_view(), name="register"),
     path("login", LoginView.as_view(), name="login"),
     path("refresh", TokenRefreshView.as_view(), name="token-refresh"),

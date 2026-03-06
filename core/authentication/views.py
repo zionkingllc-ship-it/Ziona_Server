@@ -461,7 +461,6 @@ class DeleteAccountView(View):
             if not user_id:
                 raise AuthenticationError("Invalid token payload", "INVALID_TOKEN")
 
-            # Service performs hard delete
             AuthService.delete_account(user_id=user_id)
 
             return success_response(

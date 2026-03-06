@@ -5,8 +5,6 @@ import strawberry
 from core.users.models import User
 from core.users.schema import UserType
 
-# --- Types ---
-
 
 @strawberry.type
 class AuthPayload:
@@ -20,7 +18,24 @@ class AuthPayload:
     error_code: str | None = None
 
 
-# --- Queries ---
+@strawberry.type
+class AddPasswordPayload:
+    """Response for adding a password to an OAuth account."""
+
+    success: bool
+    message: str | None = None
+    user: UserType | None = None
+    error_code: str | None = None
+
+
+@strawberry.type
+class ChangePasswordPayload:
+    """Response for changing password."""
+
+    success: bool
+    message: str | None = None
+    signed_out_devices: int = 0
+    error_code: str | None = None
 
 
 @strawberry.type
@@ -51,9 +66,6 @@ class AuthQueries:
     def health(self) -> str:
         """Return a simple health check response."""
         return "OK"
-
-
-# --- Mutations ---
 
 
 @strawberry.type
@@ -166,6 +178,98 @@ class AuthMutations:
             )
         except AuthenticationError as e:
             return AuthPayload(
+                success=False,
+                message=e.message,
+                error_code=e.code,
+            )
+
+    @strawberry.mutation(description="Add a password for OAuth users")
+    def add_password(
+        self,
+        info: strawberry.types.Info,
+        password: str,
+    ) -> AddPasswordPayload:
+        """Add a password so OAuth users can also login with email+password."""
+        from core.authentication.password_service import PasswordService
+        from core.authentication.validators import AuthenticationError
+        from core.users.schema import _get_authenticated_user_id
+
+        user_id = _get_authenticated_user_id(info)
+        if not user_id:
+            return AddPasswordPayload(
+                success=False,
+                message="Authentication required",
+                error_code="UNAUTHORIZED",
+            )
+
+        try:
+            result = PasswordService.add_password(user_id, password)
+            return AddPasswordPayload(
+                success=True,
+                message="Password added successfully. You can now login with email and password.",
+                user=UserType.from_model(result["user"]),
+            )
+        except AuthenticationError as e:
+            return AddPasswordPayload(
+                success=False,
+                message=e.message,
+                error_code=e.code,
+            )
+
+    @strawberry.mutation(description="Change password (optionally sign out other devices)")
+    def change_password(
+        self,
+        info: strawberry.types.Info,
+        current_password: str,
+        new_password: str,
+        sign_out_other_devices: bool = False,
+    ) -> ChangePasswordPayload:
+        """Change password and optionally invalidate all other sessions."""
+        from core.authentication.password_service import PasswordService
+        from core.authentication.tokens import TokenService
+        from core.authentication.validators import AuthenticationError
+        from core.users.schema import _get_authenticated_user_id
+
+        user_id = _get_authenticated_user_id(info)
+        if not user_id:
+            return ChangePasswordPayload(
+                success=False,
+                message="Authentication required",
+                error_code="UNAUTHORIZED",
+            )
+
+        current_jti = None
+        if sign_out_other_devices:
+            try:
+                request = info.context["request"]
+                auth_header = request.META.get("HTTP_AUTHORIZATION", "")
+                token = auth_header[7:]
+                payload = TokenService.validate_access_token(token)
+                current_jti = payload.get("jti")
+            except Exception:
+                return ChangePasswordPayload(
+                    success=False,
+                    message="Invalid or expired token. Please re-login.",
+                    error_code="INVALID_TOKEN",
+                )
+
+        try:
+            request = info.context["request"]
+            result = PasswordService.change_password(
+                user_id=user_id,
+                current_password=current_password,
+                new_password=new_password,
+                sign_out_other_devices=sign_out_other_devices,
+                current_jti=current_jti,
+                ip_address=request.META.get("REMOTE_ADDR", "unknown"),
+            )
+            return ChangePasswordPayload(
+                success=True,
+                message=result["message"],
+                signed_out_devices=result["signed_out_devices"],
+            )
+        except AuthenticationError as e:
+            return ChangePasswordPayload(
                 success=False,
                 message=e.message,
                 error_code=e.code,

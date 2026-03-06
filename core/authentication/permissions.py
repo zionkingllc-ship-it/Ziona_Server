@@ -44,7 +44,6 @@ class IsAuthenticated(BasePermission):
 
         try:
             payload = TokenService.validate_access_token(token)
-            # Attach user to context for use in resolvers
             try:
                 user = User.objects.get(id=payload["user_id"])
                 info.context["user"] = user

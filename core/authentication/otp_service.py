@@ -27,13 +27,8 @@ class OTPService:
 
     VALID_OTP_PURPOSES = ("registration", "email_verification", "password_reset")
 
-    # Progressive resend delays: 1st=0s, 2nd=30s, 3rd=60s, 4th+=blocked
     RESEND_DELAYS = [0, 30, 60]
     MAX_RESENDS_PER_PURPOSE = 3
-
-    # ================================================================== #
-    # UNIFIED OTP ENDPOINTS
-    # ================================================================== #
 
     @staticmethod
     def unified_send_otp(
@@ -59,19 +54,16 @@ class OTPService:
         """
         email = email.lower().strip()
 
-        # 1. Validate purpose
         if purpose not in OTPService.VALID_OTP_PURPOSES:
             raise AuthenticationError(
                 f"Invalid purpose. Must be one of: {', '.join(OTPService.VALID_OTP_PURPOSES)}",
                 code="INVALID_PURPOSE",
             )
 
-        # 2. Look up user
         try:
             user = User.objects.get(email=email)
         except User.DoesNotExist:
             if purpose == "password_reset":
-                # Prevent email enumeration — always return success
                 return {
                     "message": "If an account exists, a code has been sent.",
                     "expires_in": 600,
@@ -83,7 +75,6 @@ class OTPService:
                 code="USER_NOT_FOUND",
             ) from None
 
-        # 3. Purpose-specific validation
         if purpose in ("registration", "email_verification") and user.is_email_verified:
             raise AuthenticationError(
                 "This email is already verified."
@@ -93,9 +84,7 @@ class OTPService:
                 if purpose == "email_verification"
                 else "EMAIL_ALREADY_REGISTERED",
             )
-        # password_reset: any existing user is fine, no verification check
 
-        # 4. Progressive resend delay
         resend_after = 0
         try:
             from django_redis import get_redis_connection
@@ -112,7 +101,6 @@ class OTPService:
                     details={"retryAfter": 600},
                 )
 
-            # Check if user must wait before resending
             if send_count > 0 and send_count <= len(OTPService.RESEND_DELAYS):
                 cooldown_key = f"otp:cooldown:{purpose}:{email}"
                 ttl = redis_conn.ttl(cooldown_key)
@@ -123,7 +111,6 @@ class OTPService:
                         details={"resendAfter": ttl},
                     )
 
-            # Set cooldown for next resend
             next_delay = 0
             next_index = send_count + 1
             if next_index < len(OTPService.RESEND_DELAYS):
@@ -137,7 +124,6 @@ class OTPService:
 
             resend_after = next_delay
 
-            # Increment resend count (10 min window)
             pipe = redis_conn.pipeline()
             pipe.incr(resend_key)
             pipe.expire(resend_key, 600)
@@ -148,7 +134,6 @@ class OTPService:
         except Exception:
             logger.debug("Failed to check resend limits", exc_info=True)
 
-        # 5. Send OTP (reuse internal helper)
         OTPService._send_otp(email, str(user.id), purpose=purpose)
 
         log_security_event(
@@ -192,14 +177,12 @@ class OTPService:
         email = email.lower().strip()
         max_attempts = 5
 
-        # 1. Validate purpose
         if purpose not in OTPService.VALID_OTP_PURPOSES:
             raise AuthenticationError(
                 f"Invalid purpose. Must be one of: {', '.join(OTPService.VALID_OTP_PURPOSES)}",
                 code="INVALID_PURPOSE",
             )
 
-        # 2. Look up user
         try:
             user = User.objects.get(email=email)
         except User.DoesNotExist:
@@ -208,17 +191,14 @@ class OTPService:
                 code="INVALID_OTP",
             ) from None
 
-        # 3. Purpose-specific pre-checks
         if purpose in ("registration", "email_verification") and user.is_email_verified:
             raise AuthenticationError(
                 "Email is already verified. Please log in.",
                 code="EMAIL_ALREADY_VERIFIED",
             )
 
-        # 4. Check attempt limits (per purpose)
         OTPService._check_otp_attempts(email, purpose=purpose, max_attempts=max_attempts)
 
-        # 5. Validate OTP from Redis (purpose-namespaced key)
         try:
             from django_redis import get_redis_connection
 
@@ -246,10 +226,8 @@ class OTPService:
                     details={"attemptsRemaining": remaining},
                 )
 
-            # OTP valid — clean up
             redis_conn.delete(redis_key)
             redis_conn.delete(attempts_key)
-            # Also clear resend counters for this purpose
             redis_conn.delete(f"otp:resend:{purpose}:{email}")
             redis_conn.delete(f"otp:cooldown:{purpose}:{email}")
 
@@ -262,9 +240,7 @@ class OTPService:
                 code="OTP_VALIDATION_FAILED",
             ) from e
 
-        # 6. Purpose-specific actions
         if purpose in ("registration", "email_verification"):
-            # Mark email as verified and return tokens
             user.is_email_verified = True
             user.save(update_fields=["is_email_verified", "updated_at"])
 
@@ -285,7 +261,6 @@ class OTPService:
             }
 
         if purpose == "password_reset":
-            # Generate a short-lived reset token (15 min)
             reset_token = str(uuid.uuid4())
 
             try:
@@ -294,7 +269,7 @@ class OTPService:
                 redis_conn = get_redis_connection("default")
                 redis_conn.setex(
                     f"reset_token:{reset_token}",
-                    900,  # 15 minutes
+                    900,
                     json.dumps({"email": email, "user_id": str(user.id)}),
                 )
             except Exception as e:
@@ -316,12 +291,7 @@ class OTPService:
                 "purpose": purpose,
             }
 
-        # Should never reach here
         raise AuthenticationError("Unexpected purpose.", code="INVALID_PURPOSE")
-
-    # ================================================================== #
-    # LEGACY OTP METHODS (backward compatibility)
-    # ================================================================== #
 
     @staticmethod
     def send_verification_otp(email: str) -> bool:
@@ -468,10 +438,10 @@ class OTPService:
         try:
             user = User.objects.get(email=email)
         except User.DoesNotExist:
-            return {
-                "message": "Verification code sent to your email.",
-                "expires_in": 600,
-            }
+            raise AuthenticationError(
+                "No account found with this email address.",
+                code="USER_NOT_FOUND",
+            ) from None
 
         if user.is_email_verified:
             raise AuthenticationError(
@@ -488,10 +458,6 @@ class OTPService:
             "message": "Verification code sent to your email.",
             "expires_in": 600,
         }
-
-    # ================================================================== #
-    # PRIVATE HELPERS
-    # ================================================================== #
 
     @staticmethod
     def _send_otp(email: str, user_id: str, purpose: str = "verify") -> None:

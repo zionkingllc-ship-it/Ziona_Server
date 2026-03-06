@@ -123,7 +123,6 @@ class UnifiedVerifyOTPView(View):
                 ip_address=_get_client_ip(request),
             )
 
-            # Purpose-specific response
             if purpose in ("registration", "email_verification"):
                 return success_response(
                     data={
