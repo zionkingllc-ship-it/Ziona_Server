@@ -266,10 +266,10 @@ class AuthService:
 
         local_part = email.split("@")[0]
         base = re.sub(r"[^a-zA-Z0-9_]", "", local_part).lower()
-        base = base[:15]
 
-        if len(base) < 2:
-            base = "ziona_user"
+        base_short = base[:5] if len(base) >= 5 else base
+        if len(base_short) < 2:
+            base_short = "user"
 
         try:
             dob = date.fromisoformat(date_of_birth)
@@ -279,18 +279,17 @@ class AuthService:
                 code="INVALID_DATE_FORMAT",
             ) from None
 
-        year = str(dob.year)
-        year_short = year[-2:]
+        year_short = str(dob.year)[-2:]
         month = f"{dob.month:02d}"
         day = f"{dob.day:02d}"
 
         candidates = [
-            f"{base}{year}",
-            f"{base}_{month}{day}",
-            f"{base}_{year_short}",
-            f"{base}{year_short}{month}",
-            f"{base}_{day}{month}",
-            f"{base}{year_short}{day}",
+            f"{base_short}{year_short}",
+            f"{base_short}{month}{day}",
+            f"{base_short}{year_short}{month}",
+            f"{base_short}{day}",
+            f"{base_short}_{year_short}{day}",
+            f"{base_short}{year_short[0]}{month}",
         ]
 
         suggestions = []
@@ -308,8 +307,8 @@ class AuthService:
                     break
 
         while len(suggestions) < 4:
-            suffix = "".join(secrets.choice(string.digits) for _ in range(3))
-            candidate = f"{base}_{suffix}"[:30]
+            suffix = "".join(secrets.choice(string.digits) for _ in range(2))
+            candidate = f"{base_short}{suffix}"[:30]
             if candidate not in seen:
                 seen.add(candidate)
                 if not User.all_objects.filter(username=candidate).exists():
