@@ -10,7 +10,6 @@ import logging
 
 from django.http import HttpRequest, JsonResponse
 from django.utils.decorators import method_decorator
-from django.views import View
 from django.views.decorators.csrf import csrf_exempt
 
 from core.authentication.otp_service import OTPService
@@ -21,6 +20,7 @@ from core.authentication.response_helpers import (
     success_response,
 )
 from core.authentication.validators import AuthenticationError
+from core.authentication.views import BaseAuthView
 
 logger = logging.getLogger("core.authentication")
 
@@ -51,7 +51,7 @@ def _auth_error_response(e: AuthenticationError) -> JsonResponse:
 
 
 @method_decorator(csrf_exempt, name="dispatch")
-class UnifiedSendOTPView(View):
+class UnifiedSendOTPView(BaseAuthView):
     """Unified OTP send endpoint.
 
     POST /api/auth/otp/send
@@ -92,7 +92,7 @@ class UnifiedSendOTPView(View):
 
 
 @method_decorator(csrf_exempt, name="dispatch")
-class UnifiedVerifyOTPView(View):
+class UnifiedVerifyOTPView(BaseAuthView):
     """Unified OTP verify endpoint.
 
     POST /api/auth/otp/verify

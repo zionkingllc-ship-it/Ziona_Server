@@ -57,8 +57,29 @@ def _auth_error_response(e: AuthenticationError) -> JsonResponse:
     )
 
 
+class BaseAuthView(View):
+    """Base view for auth endpoints handling 405 Method Not Allowed and CORS OPTIONS."""
+
+    def options(self, request: HttpRequest, *args, **kwargs) -> JsonResponse:
+        """Handle CORS preflight requests."""
+        allowed_methods = [m.upper() for m in self.http_method_names if hasattr(self, m.lower())]
+        response = success_response()
+        response["Allow"] = ", ".join(allowed_methods)
+        return response
+
+    def http_method_not_allowed(self, request: HttpRequest, *args, **kwargs) -> JsonResponse:
+        """Return standardized JSON error for unsupported HTTP methods."""
+        allowed_methods = [m.upper() for m in self.http_method_names if hasattr(self, m.lower())]
+        return error_response(
+            message=f"Method {request.method} not allowed. Use {', '.join(allowed_methods)}",
+            code="METHOD_NOT_ALLOWED",
+            details={"allowedMethods": allowed_methods},
+            status=405,
+        )
+
+
 @method_decorator(csrf_exempt, name="dispatch")
-class RegisterView(View):
+class RegisterView(BaseAuthView):
     """User registration endpoint.
 
     POST /api/auth/register
@@ -106,7 +127,7 @@ class RegisterView(View):
 
 
 @method_decorator(csrf_exempt, name="dispatch")
-class LoginView(View):
+class LoginView(BaseAuthView):
     """User login endpoint.
 
     POST /api/auth/login
@@ -156,7 +177,7 @@ class LoginView(View):
 
 
 @method_decorator(csrf_exempt, name="dispatch")
-class TokenRefreshView(View):
+class TokenRefreshView(BaseAuthView):
     """Token refresh endpoint.
 
     POST /api/auth/refresh
@@ -190,7 +211,7 @@ class TokenRefreshView(View):
 
 
 @method_decorator(csrf_exempt, name="dispatch")
-class LogoutView(View):
+class LogoutView(BaseAuthView):
     """User logout endpoint.
 
     POST /api/auth/logout
@@ -224,7 +245,7 @@ class LogoutView(View):
 
 
 @method_decorator(csrf_exempt, name="dispatch")
-class VerifyEmailView(View):
+class VerifyEmailView(BaseAuthView):
     """Email verification via OTP endpoint.
 
     POST /api/auth/verify-email
@@ -256,7 +277,7 @@ class VerifyEmailView(View):
 
 
 @method_decorator(csrf_exempt, name="dispatch")
-class ResendOTPView(View):
+class ResendOTPView(BaseAuthView):
     """Resend email verification OTP endpoint.
 
     POST /api/auth/resend-otp
@@ -288,7 +309,7 @@ class ResendOTPView(View):
 
 
 @method_decorator(csrf_exempt, name="dispatch")
-class SuggestUsernamesView(View):
+class SuggestUsernamesView(BaseAuthView):
     """Username suggestions endpoint.
 
     POST /api/auth/suggest-usernames
@@ -317,7 +338,7 @@ class SuggestUsernamesView(View):
 
 
 @method_decorator(csrf_exempt, name="dispatch")
-class PasswordResetRequestView(View):
+class PasswordResetRequestView(BaseAuthView):
     """Password reset request endpoint.
 
     POST /api/auth/password-reset
@@ -351,7 +372,7 @@ class PasswordResetRequestView(View):
 
 
 @method_decorator(csrf_exempt, name="dispatch")
-class PasswordResetConfirmView(View):
+class PasswordResetConfirmView(BaseAuthView):
     """Password reset confirmation endpoint.
 
     POST /api/auth/password-reset/confirm
@@ -387,7 +408,7 @@ class PasswordResetConfirmView(View):
 
 
 @method_decorator(csrf_exempt, name="dispatch")
-class GoogleOAuthView(View):
+class GoogleOAuthView(BaseAuthView):
     """Google OAuth endpoint.
 
     POST /api/auth/google
@@ -432,7 +453,7 @@ class GoogleOAuthView(View):
 
 
 @method_decorator(csrf_exempt, name="dispatch")
-class DeleteAccountView(View):
+class DeleteAccountView(BaseAuthView):
     """Delete authenticated user account permanently.
 
     DELETE /api/auth/me
