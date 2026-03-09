@@ -8,7 +8,7 @@ import logging
 from typing import Any
 
 from core.authentication.tokens import TokenService
-from core.authentication.validators import AuthenticationError, generate_unique_username
+from core.authentication.validators import AuthenticationError
 from core.shared.logging import log_security_event
 from core.users.models import User
 
@@ -73,15 +73,18 @@ class OAuthService:
                     ]
                 )
             except User.DoesNotExist:
-                username = generate_unique_username(email, name)
+                import secrets
+
+                temp_username = f"user_{secrets.token_hex(4)}"
                 user = User.objects.create_user(
                     email=email,
-                    username=username,
+                    username=temp_username,
                     full_name=name,
                     avatar_url=picture,
                     firebase_uid=firebase_uid,
                     auth_provider="google",
                     is_email_verified=True,
+                    needs_username_selection=True,
                     last_login_ip=ip_address,
                 )
                 is_new_user = True

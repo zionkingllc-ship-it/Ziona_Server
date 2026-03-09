@@ -221,7 +221,7 @@ class TestSuggestUsernamesEndpoint:
         """Missing fields returns 400."""
         response = api_client.post(
             "/api/auth/suggest-usernames",
-            data=json.dumps({"email": "john@example.com"}),
+            data=json.dumps({"date_of_birth": "1990-01-01"}),
             content_type="application/json",
         )
 

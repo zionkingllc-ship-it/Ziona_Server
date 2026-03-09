@@ -308,7 +308,7 @@ class AuthService:
             raise AuthenticationError("User not found", "USER_NOT_FOUND") from e
 
     @staticmethod
-    def suggest_usernames(email: str, date_of_birth: str) -> list[str]:
+    def suggest_usernames(email: str, date_of_birth: str | None = None) -> list[str]:
         """Generate 4 unique, available username suggestions."""
         email = email.lower().strip()
 
@@ -319,26 +319,28 @@ class AuthService:
         if len(base_short) < 2:
             base_short = "user"
 
-        try:
-            dob = date.fromisoformat(date_of_birth)
-        except ValueError:
-            raise AuthenticationError(
-                "Invalid date format. Use YYYY-MM-DD.",
-                code="INVALID_DATE_FORMAT",
-            ) from None
+        candidates = []
+        if date_of_birth:
+            try:
+                dob = date.fromisoformat(date_of_birth)
+            except ValueError:
+                raise AuthenticationError(
+                    "Invalid date format. Use YYYY-MM-DD.",
+                    code="INVALID_DATE_FORMAT",
+                ) from None
 
-        year_short = str(dob.year)[-2:]
-        month = f"{dob.month:02d}"
-        day = f"{dob.day:02d}"
+            year_short = str(dob.year)[-2:]
+            month = f"{dob.month:02d}"
+            day = f"{dob.day:02d}"
 
-        candidates = [
-            f"{base_short}{year_short}",
-            f"{base_short}{month}{day}",
-            f"{base_short}{year_short}{month}",
-            f"{base_short}{day}",
-            f"{base_short}_{year_short}{day}",
-            f"{base_short}{year_short[0]}{month}",
-        ]
+            candidates = [
+                f"{base_short}{year_short}",
+                f"{base_short}{month}{day}",
+                f"{base_short}{year_short}{month}",
+                f"{base_short}{day}",
+                f"{base_short}_{year_short}{day}",
+                f"{base_short}{year_short[0]}{month}",
+            ]
 
         suggestions = []
         seen = set()

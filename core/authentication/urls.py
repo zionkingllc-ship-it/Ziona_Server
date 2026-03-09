@@ -12,6 +12,7 @@ from core.authentication.otp_views import (
 )
 from core.authentication.views import (
     CheckEmailView,
+    FinalizeUsernameView,
     GoogleOAuthView,
     LoginView,
     LogoutView,
@@ -46,4 +47,5 @@ urlpatterns = [
     path("google", GoogleOAuthView.as_view(), name="google-oauth"),
     path("me", MeView.as_view(), name="me"),
     path("check-email", CheckEmailView.as_view(), name="check-email"),
+    path("finalize-username", FinalizeUsernameView.as_view(), name="finalize_username"),
 ]

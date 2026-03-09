@@ -368,11 +368,11 @@ class SuggestUsernamesView(BaseAuthView):
     def post(self, request: HttpRequest) -> JsonResponse:
         data = _parse_json_body(request)
         email = data.get("email", "")
-        date_of_birth = data.get("date_of_birth", "")
+        date_of_birth = data.get("date_of_birth")
 
-        if not email or not date_of_birth:
+        if not email:
             return error_response(
-                message="Email and date_of_birth are required",
+                message="Email is required",
                 code="MISSING_FIELDS",
             )
 
@@ -488,6 +488,9 @@ class GoogleOAuthView(BaseAuthView):
                     "username": result["user"].username,
                     "role": result["user"].role,
                     "isEmailVerified": result["user"].is_email_verified,
+                    "needsUsernameSelection": getattr(
+                        result["user"], "needs_username_selection", False
+                    ),
                 },
                 "tokens": build_tokens_dict(
                     result["access_token"],
@@ -570,3 +573,88 @@ class MeView(BaseAuthView):
         except AuthenticationError as e:
             logger.warning("Account deletion failed: code=%s", e.code)
             return _auth_error_response(e)
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class FinalizeUsernameView(BaseAuthView):
+    """Finalize OAuth username.
+
+    POST /api/auth/finalize-username
+    Body: { username: "new_username" }
+    Headers: Authorization: Bearer <token>
+    """
+
+    def post(self, request: HttpRequest) -> JsonResponse:
+        auth_header = request.META.get("HTTP_AUTHORIZATION", "")
+        access_token = ""
+        if auth_header.startswith("Bearer "):
+            access_token = auth_header[7:]
+
+        if not access_token:
+            return error_response(
+                message="Authentication required",
+                code="UNAUTHENTICATED",
+                status=401,
+            )
+
+        try:
+            from core.authentication.tokens import TokenService
+            from core.users.models import User
+
+            payload = TokenService.validate_access_token(access_token)
+            user_id = payload.get("user_id")
+
+            if not user_id:
+                raise AuthenticationError("Invalid token payload", "INVALID_TOKEN")
+
+            user = User.objects.get(id=user_id)
+
+            data = _parse_json_body(request)
+            username = data.get("username", "").strip()
+
+            if not username:
+                return error_response(
+                    message="Username is required",
+                    code="MISSING_FIELDS",
+                )
+
+            from core.authentication.validators import validate_username
+
+            try:
+                validate_username(username)
+            except AuthenticationError as e:
+                return error_response(
+                    message=e.message,
+                    code=e.code,
+                )
+
+            if User.all_objects.filter(username=username).exclude(id=user.id).exists():
+                return error_response(
+                    message="Username already exists",
+                    code="USERNAME_TAKEN",
+                )
+
+            user.username = username
+            user.needs_username_selection = False
+            user.save(update_fields=["username", "needs_username_selection", "updated_at"])
+
+            from django.core.cache import cache
+
+            cache_key = f"user_me_data_{user.id}"
+            cache.delete(cache_key)
+
+            return success_response(
+                data={
+                    "username": username,
+                    "message": "Username updated successfully",
+                }
+            )
+
+        except AuthenticationError as e:
+            return _auth_error_response(e)
+        except User.DoesNotExist:
+            return error_response(
+                message="Authentication required",
+                code="UNAUTHENTICATED",
+                status=401,
+            )

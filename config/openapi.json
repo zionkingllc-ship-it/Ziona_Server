@@ -649,6 +649,59 @@
         }
       }
     },
+    "/auth/finalize-username": {
+      "post": {
+        "tags": ["Authentication", "OAuth"],
+        "summary": "Finalize username after OAuth login",
+        "description": "Allows Google OAuth users to select their permanent username. Changes the temporary username generating during login and clears the needsUsernameSelection flag.",
+        "operationId": "finalizeUsername",
+        "security": [{"BearerAuth": []}],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["username"],
+                "properties": {
+                  "username": {"type": "string", "example": "john24", "description": "3-30 chars, alphanumeric + underscore"}
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Username finalized successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {"type": "boolean", "example": true},
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "username": {"type": "string", "example": "john24"},
+                        "message": {"type": "string", "example": "Username updated successfully"}
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error (USERNAME_TAKEN, MISSING_FIELDS, USERNAME_INVALID)",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ErrorResponse"}}}
+          },
+          "401": {
+            "description": "User not authenticated (UNAUTHENTICATED)",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ErrorResponse"}}}
+          }
+        }
+      }
+    },
     "/auth/google": {
       "post": {
         "tags": ["OAuth"],
@@ -725,7 +778,8 @@
           "id": {"type": "string", "format": "uuid"},
           "email": {"type": "string", "format": "email"},
           "username": {"type": "string"},
-          "role": {"type": "string", "enum": ["user", "admin"]}
+          "role": {"type": "string", "enum": ["user", "admin"]},
+          "needsUsernameSelection": {"type": "boolean", "description": "True if an OAuth user needs to select a username"}
         }
       },
       "UserWithVerification": {
