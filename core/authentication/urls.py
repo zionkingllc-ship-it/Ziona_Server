@@ -11,10 +11,11 @@ from core.authentication.otp_views import (
     UnifiedVerifyOTPView,
 )
 from core.authentication.views import (
-    DeleteAccountView,
+    CheckEmailView,
     GoogleOAuthView,
     LoginView,
     LogoutView,
+    MeView,
     PasswordResetConfirmView,
     PasswordResetRequestView,
     RegisterView,
@@ -43,5 +44,6 @@ urlpatterns = [
         name="password-reset-confirm",
     ),
     path("google", GoogleOAuthView.as_view(), name="google-oauth"),
-    path("me", DeleteAccountView.as_view(), name="delete-account"),
+    path("me", MeView.as_view(), name="me"),
+    path("check-email", CheckEmailView.as_view(), name="check-email"),
 ]

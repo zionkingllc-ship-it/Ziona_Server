@@ -175,6 +175,11 @@ class ProfileService:
 
         if len(update_fields) > 1:
             user.save(update_fields=update_fields)
+
+            from django.core.cache import cache
+
+            cache.delete(f"user_me_data_{user_id}")
+
             logger.info(
                 "profile_updated",
                 extra={"user_id": user_id, "fields": update_fields},

@@ -401,6 +401,10 @@ class OTPService:
         user.is_email_verified = True
         user.save(update_fields=["is_email_verified", "updated_at"])
 
+        from django.core.cache import cache
+
+        cache.delete(f"user_me_data_{user.id}")
+
         access_token = TokenService.generate_access_token(str(user.id), user.role)
         refresh_token, _ = TokenService.generate_refresh_token(str(user.id))
 

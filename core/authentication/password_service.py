@@ -265,6 +265,10 @@ class PasswordService:
         user.set_password(password)
         user.save(update_fields=["password", "updated_at"])
 
+        from django.core.cache import cache
+
+        cache.delete(f"user_me_data_{user.id}")
+
         log_security_event(
             "auth.password_added",
             user_id=str(user.id),

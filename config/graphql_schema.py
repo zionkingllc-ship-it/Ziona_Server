@@ -11,7 +11,7 @@ from core.notifications.schema import NotificationMutations, NotificationQueries
 from core.posts.schema import PostMutations
 from core.profiles.schema import ProfileMutations, ProfileQueries
 from core.scripture.schema import ScriptureQueries
-from core.users.schema import UserMutations
+from core.users.schema import UserMutations, UserQueries
 
 
 @strawberry.type
@@ -24,6 +24,7 @@ class Query(
     ModerationQueries,
     NotificationQueries,
     ScriptureQueries,
+    UserQueries,
 ):
     """Root query type — extends all domain queries."""
 

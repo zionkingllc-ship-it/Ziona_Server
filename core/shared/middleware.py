@@ -56,6 +56,7 @@ class RateLimitMiddleware:
     Rate limits are configurable via Django settings:
     - RATE_LIMIT_LOGIN: Login endpoint limit
     - RATE_LIMIT_REGISTER: Registration endpoint limit
+    - RATE_LIMIT_CHECK_EMAIL: Email check endpoint limit
     - RATE_LIMIT_MUTATIONS: GraphQL mutation limit
     - RATE_LIMIT_QUERIES: GraphQL query limit
     """
@@ -63,6 +64,7 @@ class RateLimitMiddleware:
     RATE_LIMITED_PATHS = {
         "/api/auth/login": "RATE_LIMIT_LOGIN",
         "/api/auth/register": "RATE_LIMIT_REGISTER",
+        "/api/auth/check-email": "RATE_LIMIT_CHECK_EMAIL",
         "/api/auth/password-reset": "RATE_LIMIT_PASSWORD_RESET",
     }
 

@@ -22,6 +22,58 @@
     {"name": "OAuth", "description": "Third-party authentication"}
   ],
   "paths": {
+    "/auth/check-email": {
+      "post": {
+        "tags": ["Authentication"],
+        "summary": "Check email registration status",
+        "description": "Public endpoint to check if an email exists before attempting login. Used to trigger UX flows like 'Sign up' vs 'Enter Password'. Rate limited heavily (10 requests per minute).",
+        "operationId": "checkEmail",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["email"],
+                "properties": {
+                  "email": {"type": "string", "format": "email", "example": "user@example.com"}
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Email registration status returned",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {"type": "boolean", "example": true},
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "exists": {"type": "boolean", "example": true},
+                        "message": {"type": "string"}
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error (MISSING_FIELDS or INVALID_EMAIL)",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ErrorResponse"}}}
+          },
+          "429": {
+            "description": "Rate limit exceeded (RATE_LIMIT_EXCEEDED)",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ErrorResponse"}}}
+          }
+        }
+      }
+    },
     "/auth/register": {
       "post": {
         "tags": ["Authentication"],
@@ -267,6 +319,50 @@
       }
     },
     "/auth/me": {
+      "get": {
+        "tags": ["Authentication"],
+        "summary": "Get current user",
+        "description": "Retrieves the authenticated user's full profile and engagement statistics.",
+        "operationId": "getCurrentUser",
+        "security": [{"BearerAuth": []}],
+        "responses": {
+          "200": {
+            "description": "Current user data retrieved successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {"type": "boolean", "example": true},
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "id": {"type": "string", "example": "123e4567-e89b-12d3-a456-426614174000"},
+                        "username": {"type": "string", "example": "johndoe"},
+                        "email": {"type": "string", "example": "john@example.com"},
+                        "displayName": {"type": "string", "example": "John Doe"},
+                        "isEmailVerified": {"type": "boolean", "example": true},
+                        "hasPassword": {"type": "boolean", "example": true},
+                        "profile": {"type": "object"},
+                        "stats": {"type": "object"},
+                        "createdAt": {"type": "string", "example": "2024-03-05T12:00:00Z"}
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid Bearer token",
+            "content": {
+              "application/json": {
+                "schema": {"$ref": "#/components/schemas/ErrorResponse"}
+              }
+            }
+          }
+        }
+      },
       "delete": {
         "tags": ["Authentication"],
         "summary": "Delete user account",

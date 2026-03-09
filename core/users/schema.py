@@ -1,4 +1,5 @@
 import logging
+from typing import Annotated
 
 import strawberry
 
@@ -40,6 +41,23 @@ class UserType:
 
 
 @strawberry.type
+class CurrentUserResponse:
+    """Authenticated user's complete data including profile and stats."""
+
+    id: strawberry.ID
+    username: str
+    email: str
+    displayName: str | None
+    isEmailVerified: bool
+    hasPassword: bool
+
+    profile: Annotated["UserProfileType", strawberry.lazy("core.profiles.schema")]  # noqa: F821
+    stats: Annotated["ProfileStatsType", strawberry.lazy("core.profiles.schema")]  # noqa: F821
+
+    createdAt: str
+
+
+@strawberry.type
 class UsernameCheckResult:
     """Response for checkUsernameAvailability query."""
 
@@ -74,6 +92,57 @@ def _get_authenticated_user_id(info: strawberry.types.Info) -> str | None:
     except Exception:
         logger.debug("Token validation failed in GraphQL", exc_info=True)
         return None
+
+
+@strawberry.type
+class UserQueries:
+    """User domain GraphQL queries."""
+
+    @strawberry.field(description="Get the currently authenticated user's complete data")
+    def me(self, info: strawberry.types.Info) -> CurrentUserResponse:
+        """Get the authenticated user's profile, stats, and auth settings."""
+        user_id = _get_authenticated_user_id(info)
+        if not user_id:
+            from core.shared.exceptions import AuthenticationError
+
+            raise AuthenticationError("Authentication required", "UNAUTHENTICATED")
+
+        from core.authentication.services import AuthService
+        from core.profiles.schema import ProfileStatsType, UserProfileType
+
+        data = AuthService.get_me(user_id)
+
+        return CurrentUserResponse(
+            id=data["id"],
+            username=data["username"],
+            email=data["email"],
+            displayName=data["displayName"],
+            isEmailVerified=data["isEmailVerified"],
+            hasPassword=data["hasPassword"],
+            profile=UserProfileType(
+                id=data["id"],
+                username=data["username"],
+                full_name=data["displayName"],
+                bio=data["profile"]["bio"],
+                avatar_url=data["profile"]["avatarUrl"],
+                location=data["profile"]["location"],
+                stats=ProfileStatsType(
+                    followers_count=data["stats"]["followersCount"],
+                    following_count=data["stats"]["followingCount"],
+                    posts_count=data["stats"]["postsCount"],
+                ),
+                is_following=False,
+                is_own_profile=True,
+                recent_posts=[],
+                created_at=data["createdAt"],
+            ),
+            stats=ProfileStatsType(
+                followers_count=data["stats"]["followersCount"],
+                following_count=data["stats"]["followingCount"],
+                posts_count=data["stats"]["postsCount"],
+            ),
+            createdAt=data["createdAt"],
+        )
 
 
 @strawberry.type

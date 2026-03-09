@@ -15,6 +15,7 @@ import string
 from datetime import date
 from typing import Any
 
+from django.core.cache import cache
 from django.db import IntegrityError
 
 from core.authentication.otp_service import OTPService
@@ -53,6 +54,53 @@ class AuthService:
         reset_password_with_token -> PasswordService
         google_oauth_login -> OAuthService
     """
+
+    @staticmethod
+    def get_me(user_id: str) -> dict[str, Any]:
+        """Get authenticated user data with profile and stats.
+
+        Returns data structured for CurrentUserResponse schema / GET /api/auth/me.
+        Uses 5-minute caching mechanism invalidated on profile updates.
+        """
+        cache_key = f"user_me_data_{user_id}"
+        cached_data = cache.get(cache_key)
+
+        if cached_data:
+            return cached_data
+
+        user = User.objects.filter(id=user_id, deleted_at__isnull=True).first()
+        if not user:
+            raise AuthenticationError("User not found", "USER_NOT_FOUND")
+
+        from core.profiles.services import ProfileService
+
+        # ProfileService.get_user_profile handles stats and recent posts aggregation
+        profile_dto = ProfileService.get_user_profile(user_id, viewer_id=user_id)
+
+        response_data = {
+            "id": str(user.id),
+            "username": user.username or "",
+            "email": user.email,
+            "displayName": user.full_name or "",
+            "isEmailVerified": user.is_email_verified,
+            "hasPassword": user.has_usable_password(),
+            "profile": {
+                "bio": profile_dto.bio,
+                "avatarUrl": profile_dto.avatar_url,
+                "location": profile_dto.location,
+            },
+            "stats": {
+                "postsCount": profile_dto.stats.posts_count,
+                "followersCount": profile_dto.stats.followers_count,
+                "followingCount": profile_dto.stats.following_count,
+            },
+            "createdAt": user.created_at.isoformat(),
+        }
+
+        # Cache for 5 minutes (300 seconds)
+        cache.set(cache_key, response_data, 300)
+
+        return response_data
 
     @staticmethod
     def register(

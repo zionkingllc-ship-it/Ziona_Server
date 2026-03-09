@@ -28,6 +28,7 @@ from core.authentication.response_helpers import (
     success_response,
 )
 from core.authentication.services import AuthenticationError, AuthService
+from core.users.models import User
 
 logger = logging.getLogger("core.authentication")
 
@@ -75,6 +76,54 @@ class BaseAuthView(View):
             code="METHOD_NOT_ALLOWED",
             details={"allowedMethods": allowed_methods},
             status=405,
+        )
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class CheckEmailView(BaseAuthView):
+    """Check if an email is registered endpoint.
+
+    POST /api/auth/check-email
+    Body: { email }
+
+    Public endpoint used to determine whether to prompt for login or signup.
+    Rate limited by IP.
+    """
+
+    def post(self, request: HttpRequest) -> JsonResponse:
+        data = _parse_json_body(request)
+        email = data.get("email", "")
+
+        if not email:
+            return error_response(
+                message="Email is required",
+                code="MISSING_FIELDS",
+            )
+
+        email = email.lower().strip()
+
+        if "@" not in email:
+            return error_response(
+                message="Invalid email format",
+                code="INVALID_EMAIL",
+            )
+
+        parts = email.split("@")
+        if len(parts) != 2 or not parts[0] or not parts[1]:
+            return error_response(
+                message="Invalid email format",
+                code="INVALID_EMAIL",
+            )
+
+        exists = User.objects.filter(email=email).exists()
+
+        message = "Email already registered" if exists else "Email available"
+
+        return success_response(
+            data={
+                "exists": exists,
+                "message": message,
+            }
         )
 
 
@@ -453,12 +502,43 @@ class GoogleOAuthView(BaseAuthView):
 
 
 @method_decorator(csrf_exempt, name="dispatch")
-class DeleteAccountView(BaseAuthView):
-    """Delete authenticated user account permanently.
+class MeView(BaseAuthView):
+    """Authenticated user info and account deletion.
 
+    GET /api/auth/me
     DELETE /api/auth/me
     Headers: Authorization: Bearer <token>
     """
+
+    def get(self, request: HttpRequest) -> JsonResponse:
+        auth_header = request.META.get("HTTP_AUTHORIZATION", "")
+        access_token = ""
+        if auth_header.startswith("Bearer "):
+            access_token = auth_header[7:]
+
+        if not access_token:
+            return error_response(
+                message="Authorization header with Bearer token is required",
+                code="MISSING_TOKEN",
+                status=401,
+            )
+
+        try:
+            from core.authentication.services import AuthService
+            from core.authentication.tokens import TokenService
+
+            payload = TokenService.validate_access_token(access_token)
+            user_id = payload.get("user_id")
+
+            if not user_id:
+                raise AuthenticationError("Invalid token payload", "INVALID_TOKEN")
+
+            data = AuthService.get_me(user_id=user_id)
+            return success_response(data=data)
+
+        except AuthenticationError as e:
+            logger.warning("Get current user failed: code=%s", e.code)
+            return _auth_error_response(e)
 
     def delete(self, request: HttpRequest) -> JsonResponse:
         auth_header = request.META.get("HTTP_AUTHORIZATION", "")
