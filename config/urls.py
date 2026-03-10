@@ -1,4 +1,5 @@
 from django.contrib import admin
+from django.http import JsonResponse
 from django.urls import include, path
 from strawberry.django.views import GraphQLView
 
@@ -33,3 +34,36 @@ urlpatterns = [
     ),
     path("post/<str:post_id>/", share_preview, name="share-preview"),
 ]
+
+
+def custom_404_handler(request, exception=None):
+    """Return standardized JSON response for 404 errors."""
+    return JsonResponse(
+        {
+            "success": False,
+            "error": {
+                "code": "NOT_FOUND",
+                "message": "Endpoint not found",
+                "path": request.path,
+            },
+        },
+        status=404,
+    )
+
+
+def custom_500_handler(request):
+    """Return standardized JSON response for 500 server errors."""
+    return JsonResponse(
+        {
+            "success": False,
+            "error": {
+                "code": "INTERNAL_SERVER_ERROR",
+                "message": "Internal server error",
+            },
+        },
+        status=500,
+    )
+
+
+handler404 = "config.urls.custom_404_handler"
+handler500 = "config.urls.custom_500_handler"

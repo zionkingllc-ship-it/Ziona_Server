@@ -1,5 +1,6 @@
 import logging
 import time
+import traceback
 import uuid
 
 from django.conf import settings
@@ -202,3 +203,49 @@ def _parse_rate_limit(limit_str: str) -> tuple[int, int]:
         window_seconds = int(window)
 
     return max_requests, window_seconds
+
+
+class GlobalExceptionMiddleware:
+    """Middleware to catch all unhandled exceptions and return standardized JSON."""
+
+    def __init__(self, get_response):
+        """Initialize middleware."""
+        self.get_response = get_response
+
+    def __call__(self, request: HttpRequest) -> HttpResponse:
+        """Process request."""
+        return self.get_response(request)
+
+    def process_exception(self, request: HttpRequest, exception: Exception) -> JsonResponse:
+        """Handle uncaught exceptions."""
+        is_authenticated = hasattr(request, "user") and request.user.is_authenticated
+        user_id = request.user.id if is_authenticated else None
+
+        logger.error(
+            "Unhandled exception in request",
+            exc_info=True,
+            extra={
+                "path": request.path,
+                "method": request.method,
+                "user_id": user_id,
+                "exception_type": type(exception).__name__,
+            },
+        )
+
+        error_detail = {
+            "code": "INTERNAL_SERVER_ERROR",
+            "message": "An internal error occurred. Please try again later.",
+        }
+
+        if settings.DEBUG:
+            error_detail["message"] = str(exception)
+            error_detail["type"] = type(exception).__name__
+            error_detail["traceback"] = traceback.format_tb(exception.__traceback__)
+
+        return JsonResponse(
+            {
+                "success": False,
+                "error": error_detail,
+            },
+            status=500,
+        )
