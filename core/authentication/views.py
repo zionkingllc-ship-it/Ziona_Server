@@ -51,10 +51,21 @@ def _parse_json_body(request: HttpRequest) -> dict:
 
 def _auth_error_response(e: AuthenticationError) -> JsonResponse:
     """Convert an AuthenticationError into a standardized error response."""
+    status_map = {
+        "UNAUTHENTICATED": 401,
+        "INVALID_TOKEN": 401,
+        "INVALID_REFRESH_TOKEN": 401,
+        "MISSING_TOKEN": 401,
+        "USER_NOT_FOUND": 404,
+        "INVALID_CREDENTIALS": 401,
+    }
+    status_code = status_map.get(e.code, 400)
+
     return error_response(
         message=e.message,
         code=e.code,
         details=e.details if e.details else None,
+        status=status_code,
     )
 
 
@@ -115,7 +126,7 @@ class CheckEmailView(BaseAuthView):
                 code="INVALID_EMAIL",
             )
 
-        exists = User.objects.filter(email=email).exists()
+        exists = User.objects.filter(email=email, is_email_verified=True).exists()
 
         message = "Email already registered" if exists else "Email available"
 
@@ -521,16 +532,20 @@ class MeView(BaseAuthView):
 
         if not access_token:
             return error_response(
-                message="Authorization header with Bearer token is required",
-                code="MISSING_TOKEN",
+                message="Authentication required",
+                code="UNAUTHENTICATED",
                 status=401,
             )
 
         try:
             from core.authentication.services import AuthService
-            from core.authentication.tokens import TokenService
+            from core.authentication.tokens import TokenError, TokenService
 
-            payload = TokenService.validate_access_token(access_token)
+            try:
+                payload = TokenService.validate_access_token(access_token)
+            except TokenError:
+                raise AuthenticationError("Invalid or expired token", "INVALID_TOKEN") from None
+
             user_id = payload.get("user_id")
 
             if not user_id:
@@ -551,15 +566,19 @@ class MeView(BaseAuthView):
 
         if not access_token:
             return error_response(
-                message="Authorization header with Bearer token is required",
-                code="MISSING_TOKEN",
+                message="Authentication required",
+                code="UNAUTHENTICATED",
                 status=401,
             )
 
         try:
-            from core.authentication.tokens import TokenService
+            from core.authentication.tokens import TokenError, TokenService
 
-            payload = TokenService.validate_access_token(access_token)
+            try:
+                payload = TokenService.validate_access_token(access_token)
+            except TokenError:
+                raise AuthenticationError("Invalid or expired token", "INVALID_TOKEN") from None
+
             user_id = payload.get("user_id")
 
             if not user_id:

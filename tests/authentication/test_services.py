@@ -47,6 +47,34 @@ class TestRegistration:
             )
         assert exc_info.value.code == "USERNAME_TAKEN"
 
+    def test_register_unverified_email_overwrite(self, create_user):
+        """Registration with an existing UNVERIFIED email should strictly overwrite/delete the old account."""
+        old_user = create_user(
+            email="started@example.com",
+            username="oldusername",
+            is_email_verified=False,
+        )
+
+        old_user_id = old_user.id
+
+        result = AuthService.register(
+            email="started@example.com",
+            password="SecureP@ss2",
+            username="newusername",
+            date_of_birth="2000-01-15",
+        )
+
+        from core.users.models import User
+
+        # The old user DB cache was completely deleted!
+        assert not User.objects.filter(id=old_user_id).exists()
+
+        # New fresh user correctly maps to the exact same email
+        assert result["user"].email == "started@example.com"
+        assert result["user"].username == "newusername"
+        assert "message" in result
+        assert result["user"].id != old_user_id
+
     def test_register_weak_password(self, db):
         """Registration with weak password should fail."""
         with pytest.raises(AuthenticationError) as exc_info:

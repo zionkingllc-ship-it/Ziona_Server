@@ -166,6 +166,10 @@ class TestFullAuthFlowE2E:
         user = User.objects.get(email="resend_e2e@example.com")
         redis_conn.get(f"otp:verify:{user.id}").decode()
 
+        from django.core.cache import cache
+
+        cache.clear()
+
         resp = client.post(
             "/api/auth/resend-otp",
             data=json.dumps({"email": "resend_e2e@example.com"}),
@@ -215,7 +219,7 @@ class TestFullAuthFlowE2E:
             ),
             content_type="application/json",
         )
-        assert resp.status_code == 200
+        assert resp.status_code == 201
         data = resp.json()
         assert data["success"] is True
         assert data["data"]["user"]["username"] == "newname"

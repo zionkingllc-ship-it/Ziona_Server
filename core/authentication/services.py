@@ -74,7 +74,6 @@ class AuthService:
 
         from core.profiles.services import ProfileService
 
-        # ProfileService.get_user_profile handles stats and recent posts aggregation
         profile_dto = ProfileService.get_user_profile(user_id, viewer_id=user_id)
 
         response_data = {
@@ -97,7 +96,6 @@ class AuthService:
             "createdAt": user.created_at.isoformat(),
         }
 
-        # Cache for 5 minutes (300 seconds)
         cache.set(cache_key, response_data, 300)
 
         return response_data
@@ -134,80 +132,45 @@ class AuthService:
             )
 
         if existing_user and not existing_user.is_email_verified:
-            username_conflict = (
-                User.all_objects.filter(username=username).exclude(id=existing_user.id).exists()
-            )
-            if username_conflict:
-                raise AuthenticationError(
-                    "This username is already taken",
-                    code="USERNAME_TAKEN",
-                )
-
-            existing_user.username = username
-            existing_user.set_password(password)
-            existing_user.encrypted_dob = encrypted_dob
-            existing_user.last_login_ip = ip_address
-            existing_user.save(
-                update_fields=[
-                    "username",
-                    "password",
-                    "encrypted_dob",
-                    "last_login_ip",
-                    "updated_at",
-                ]
-            )
-            user = existing_user
-
             logger.info(
-                "Updated unverified user data: user_id=%s email=%s",
-                user.id,
+                "Deleting unverified account to allow re-registration for email: %s",
                 mask_email(email),
             )
-            log_security_event(
-                "auth.register.updated_unverified",
-                user_id=str(user.id),
-                ip_address=ip_address,
-                metadata={
-                    "email": mask_email(email),
-                    "username": username,
-                },
+            existing_user.delete()
+
+        if User.all_objects.filter(username=username).exists():
+            raise AuthenticationError(
+                "This username is already taken",
+                code="USERNAME_TAKEN",
             )
 
-            message = "Registration details updated. " "Check your email for verification code."
-        else:
-            if User.all_objects.filter(username=username).exists():
-                raise AuthenticationError(
-                    "This username is already taken",
-                    code="USERNAME_TAKEN",
-                )
-
-            try:
-                user = User.objects.create_user(
-                    email=email,
-                    username=username,
-                    password=password,
-                    encrypted_dob=encrypted_dob,
-                    last_login_ip=ip_address,
-                )
-            except IntegrityError:
-                raise AuthenticationError(
-                    "This username is already taken. Please choose another.",
-                    code="USERNAME_TAKEN",
-                ) from None
-
-            logger.info(
-                "New user registered: user_id=%s email=%s",
-                user.id,
-                mask_email(email),
+        try:
+            user = User.objects.create_user(
+                email=email,
+                username=username,
+                password=password,
+                encrypted_dob=encrypted_dob,
+                last_login_ip=ip_address,
             )
-            log_security_event(
-                "auth.register.success",
-                user_id=str(user.id),
-                ip_address=ip_address,
-                metadata={"email": mask_email(email), "username": username},
-            )
+        except IntegrityError:
+            raise AuthenticationError(
+                "This username is already taken. Please choose another.",
+                code="USERNAME_TAKEN",
+            ) from None
 
-            message = "Registration successful. " "Check your email for verification code."
+        logger.info(
+            "New user registered: user_id=%s email=%s",
+            user.id,
+            mask_email(email),
+        )
+        log_security_event(
+            "auth.register.success",
+            user_id=str(user.id),
+            ip_address=ip_address,
+            metadata={"email": mask_email(email), "username": username},
+        )
+
+        message = "Registration successful. Check your email for verification code."
 
         OTPService._send_otp(user.email, str(user.id), purpose="verify")
 

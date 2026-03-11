@@ -26,7 +26,10 @@ def run_rate_limited():
 
 def test_check_email_success_true(client: Client) -> None:
     User.objects.create_user(
-        email="registered@example.com", username="testuser", password="password123"
+        email="registered@example.com",
+        username="testuser",
+        password="password123",
+        is_email_verified=True,
     )
 
     response = client.post(
@@ -51,6 +54,27 @@ def test_check_email_success_false(client: Client) -> None:
     assert response.status_code == 200
     data = response.json()
     assert data["success"] is True
+    assert data["data"]["exists"] is False
+
+
+def test_check_email_unverified_returns_false(client: Client) -> None:
+    User.objects.create_user(
+        email="unverified_check@example.com",
+        username="unverified",
+        password="password123",
+        is_email_verified=False,
+    )
+
+    response = client.post(
+        reverse("authentication:check-email"),
+        {"email": "unverified_check@example.com"},
+        content_type="application/json",
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["success"] is True
+    # Unverified emails should appear as entirely unregistered to the mobile frontend
     assert data["data"]["exists"] is False
 
 
@@ -82,7 +106,10 @@ def test_check_email_invalid_email_format(client: Client) -> None:
 
 def test_check_email_normalization(client: Client) -> None:
     User.objects.create_user(
-        email="normalized@example.com", username="testuser", password="password123"
+        email="normalized@example.com",
+        username="testuser",
+        password="password123",
+        is_email_verified=True,
     )
 
     response = client.post(

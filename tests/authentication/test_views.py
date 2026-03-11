@@ -31,8 +31,8 @@ class TestRegisterEndpoint:
         assert data["data"]["requiresVerification"] is True
         assert "tokens" not in data["data"]
 
-    def test_register_unverified_email_updates_200(self, api_client: Client, create_user):
-        """Re-register with unverified email updates user and returns 200."""
+    def test_register_unverified_email_overwrites_201(self, api_client: Client, create_user, db):
+        """Registering with an unverified email should overwrite and return 201."""
         create_user(
             email="retry@example.com",
             username="oldname",
@@ -52,7 +52,7 @@ class TestRegisterEndpoint:
             content_type="application/json",
         )
 
-        assert response.status_code == 200
+        assert response.status_code == 201
         data = response.json()
         assert data["success"] is True
         assert data["data"]["user"]["username"] == "newname"
