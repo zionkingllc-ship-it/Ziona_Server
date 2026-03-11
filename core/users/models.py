@@ -100,6 +100,19 @@ class User(AbstractBaseUser, PermissionsMixin):
         unique=True,
         db_index=True,
     )
+    social_auth_provider = models.CharField(
+        max_length=20,
+        null=True,
+        blank=True,
+        choices=[
+            (None, "Email/Password"),
+            ("google", "Google"),
+            ("facebook", "Facebook"),
+            ("apple", "Apple"),
+        ],
+        help_text="How the user originally registered. Null = email/password",
+    )
+    google_id = models.CharField(max_length=255, null=True, blank=True, unique=True)
 
     objects = UserManager()
     all_objects = AllObjectsManager()
