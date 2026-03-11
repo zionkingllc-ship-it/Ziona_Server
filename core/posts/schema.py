@@ -1,13 +1,9 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 import strawberry
 
+from core.feed.schema import FeedPost
 from core.users.schema import _get_authenticated_user_id
-
-if TYPE_CHECKING:
-    from core.feed.schema import FeedPost
 
 
 @strawberry.type
