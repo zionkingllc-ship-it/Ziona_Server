@@ -8,12 +8,23 @@ from core.users.schema import _get_authenticated_user_id
 
 @strawberry.type
 class FollowPayload:
-    """Response for follow/unfollow mutations."""
+    """
+    Response outlining state changes when following or unfollowing users.
 
-    success: bool
-    following: bool = False
-    message: str | None = None
-    error_code: str | None = None
+    **Authentication:** Required
+    **Related operations:** follow_user, unfollow_user
+    """
+
+    success: bool = strawberry.field(description="Whether the state change persisted")
+    following: bool = strawberry.field(
+        default=False, description="The new resultant state boolean flag natively"
+    )
+    message: str | None = strawberry.field(
+        default=None, description="Detailed logging message or success"
+    )
+    error_code: str | None = strawberry.field(
+        default=None, description="Detailed failure string identifier"
+    )
 
 
 @strawberry.type
@@ -28,11 +39,20 @@ class FollowUserType:
 
 @strawberry.type
 class FollowListResponse:
-    """Paginated followers/following list response."""
+    """
+    Paginated followers/following graph response array.
 
-    users: list[FollowUserType]
-    next_cursor: str | None = None
-    has_more: bool = False
+    **Authentication:** Optional depending on the query
+    **Related operations:** followers, following
+    """
+
+    users: list[FollowUserType] = strawberry.field(
+        description="Directly resolved mapping array of users"
+    )
+    next_cursor: str | None = strawberry.field(default=None, description="Passed backwards safely")
+    has_more: bool = strawberry.field(
+        default=False, description="Scrolling bounds limit tracking flag"
+    )
 
 
 @strawberry.type
@@ -50,9 +70,22 @@ class SuggestedCreatorType:
 class FollowMutations:
     """Follow domain GraphQL mutations."""
 
-    @strawberry.mutation(description="Follow a user")
+    @strawberry.mutation(
+        description="Optimistically toggle a direct Edge relationship connecting to a User account globally."
+    )
     def follow_user(self, info: strawberry.types.Info, user_id: str) -> FollowPayload:
-        """Follow another user."""
+        """
+        Create a following edge between the viewer and requested user_id.
+
+        Is idempotent natively so repeat follow instructions succeed gracefully. Implicitly
+        anchors Discovery content feeds instantly on creation natively.
+
+        **Authentication:** Required
+        **Parameters:**
+        - user_id (String, required) - Valid remote Profile UUID
+        **Returns:** FollowPayload tracking the new state
+        **Errors:** UNAUTHENTICATED, NOT_FOUND
+        """
         from core.follows.services import FollowService
         from core.shared.exceptions import FollowError
 
@@ -70,9 +103,21 @@ class FollowMutations:
         except FollowError as e:
             return FollowPayload(success=False, message=e.message, error_code=e.code)
 
-    @strawberry.mutation(description="Unfollow a user")
+    @strawberry.mutation(
+        description="Delete an existing following Edge relation targeting a User account."
+    )
     def unfollow_user(self, info: strawberry.types.Info, user_id: str) -> FollowPayload:
-        """Unfollow a user."""
+        """
+        Delete a following edge explicitly purging them from the Following algorithm bounds.
+
+        Idempotent design guarantees no conflicts dynamically.
+
+        **Authentication:** Required
+        **Parameters:**
+        - user_id (String, required) - Target UUID previously linked natively
+        **Returns:** FollowPayload explicitly clearing the tracker (following: False)
+        **Errors:** UNAUTHENTICATED
+        """
         from core.follows.services import FollowService
 
         current_user_id = _get_authenticated_user_id(info)
@@ -91,7 +136,9 @@ class FollowMutations:
 class FollowQueries:
     """Follow domain GraphQL queries."""
 
-    @strawberry.field(description="Get a user's followers")
+    @strawberry.field(
+        description="Get hierarchical chronologically descending array of all User Nodes following a Profile."
+    )
     def followers(
         self,
         info: strawberry.types.Info,
@@ -99,7 +146,20 @@ class FollowQueries:
         cursor: str | None = None,
         limit: int = 20,
     ) -> FollowListResponse:
-        """Get paginated followers for a user."""
+        """
+        Retrieve paginated list of accounts pointing TO the targeted natively user.
+
+        Appends `is_following` boolean flag on every Node resolving against the Viewer's
+        State instantly determining if 'Follow Back' or identical CTA natively renders.
+
+        **Authentication:** Optional (Viewer State defaults if unauthed)
+        **Parameters:**
+        - user_id (String, required) - Mapped explicit UUID natively
+        - cursor (String, optional) - Pass for page bounds natively
+        - limit (Int, optional) - Volume mapping
+        **Returns:** FollowListResponse correctly configured array natively
+        **Errors:** Return empty graph states naturally safely natively.
+        """
         from core.follows.services import FollowService
 
         viewer_id = _get_authenticated_user_id(info)
@@ -124,7 +184,9 @@ class FollowQueries:
             has_more=result["has_more"],
         )
 
-    @strawberry.field(description="Get users that a user follows")
+    @strawberry.field(
+        description="Get hierarchical descending list of all User Nodes a particular Profile is following."
+    )
     def following(
         self,
         info: strawberry.types.Info,
@@ -132,7 +194,20 @@ class FollowQueries:
         cursor: str | None = None,
         limit: int = 20,
     ) -> FollowListResponse:
-        """Get paginated following list for a user."""
+        """
+        Retrieve paginated list of entities the targeted account tracks actively globally.
+
+        Yields specific context natively determining if the viewing authenticated session
+        overlaps with the rendered node array via `is_following` boolean evaluation.
+
+        **Authentication:** Optional (Viewer State returns false inherently natively)
+        **Parameters:**
+        - user_id (String, required) - Valid Root UUID
+        - cursor (String, optional) - Hash sequence bounds
+        - limit (Int, optional) - Cap array natively
+        **Returns:** FollowListResponse Array structure
+        **Errors:** Yields safe empty object struct bounds dynamically globally.
+        """
         from core.follows.services import FollowService
 
         viewer_id = _get_authenticated_user_id(info)
@@ -157,13 +232,25 @@ class FollowQueries:
             has_more=result["has_more"],
         )
 
-    @strawberry.field(description="Get suggested creators to follow")
+    @strawberry.field(
+        description="Get highly validated creators algorithmically dynamically curated for the authenticating user."
+    )
     def suggested_creators(
         self,
         info: strawberry.types.Info,
         limit: int = 10,
     ) -> list[SuggestedCreatorType]:
-        """Get interest-based creator suggestions."""
+        """
+        Pull 10 algorithmically tailored profiles optimizing the For You connections natively explicitly.
+
+        Yields based on aggregated interest data arrays overlapping actively globally dynamically natively.
+
+        **Authentication:** Required natively logically evaluating user graph dynamically
+        **Parameters:**
+        - limit (Int, optional) - Chunk Cap
+        **Returns:** Directly mapped array of 10 SuggestedCreatorType nodes organically natively
+        **Errors:** Falls back onto an empty list bounding cleanly globally natively gracefully without panicking natively.
+        """
         from core.follows.services import FollowService
 
         user_id = _get_authenticated_user_id(info)

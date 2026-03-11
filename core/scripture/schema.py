@@ -8,37 +8,64 @@ from core.scripture.services import ScriptureError, ScriptureService
 
 @strawberry.type
 class BibleVersion:
-    code: str
-    name: str
-    abbreviation: str
-    language: str
-    scope: str
-    free: bool
+    """
+    Metadata representation of an available Bible Translation natively.
+    """
+
+    code: str = strawberry.field(description="Short code ('kjv')")
+    name: str = strawberry.field(description="Full text name ('King James Version')")
+    abbreviation: str = strawberry.field(description="Display tag ('KJV')")
+    language: str = strawberry.field(description="ISO Code ('eng')")
+    scope: str = strawberry.field(description="Coverage bounds ('complete', 'nt')")
+    free: bool = strawberry.field(description="Public domain flag")
 
 
 @strawberry.type
 class BibleBook:
-    name: str
-    slug: str
-    chapters: int
+    """
+    Lookup metadata bounds for a particular canonical book mapping.
+    """
+
+    name: str = strawberry.field(description="Full label ('Genesis')")
+    slug: str = strawberry.field(description="URL safe ('genesis')")
+    chapters: int = strawberry.field(description="Volume capacity Cap")
 
 
 @strawberry.type
 class ScriptureResult:
-    text: str
-    reference: str
-    version: str
-    book: str
-    chapter: int
-    verseStart: int
-    verseEnd: int | None = None
+    """
+    Explicit verse text payload resulting from exact coordinates mapping.
+
+    **Authentication:** Optional depending on query globally
+    **Related operations:** scripture
+    """
+
+    text: str = strawberry.field(description="The canonical sequence itself")
+    reference: str = strawberry.field(description="Formatted label string literal ('John 3:16')")
+    version: str = strawberry.field(description="Translation metadata")
+    book: str = strawberry.field(description="Root index mapping")
+    chapter: int = strawberry.field(description="Coordinates")
+    verseStart: int = strawberry.field(description="Coordinates")
+    verseEnd: int | None = strawberry.field(
+        default=None, description="Coordinates bounded natively"
+    )
 
 
 @strawberry.type
 class ScriptureQueries:
-    @strawberry.field
+    @strawberry.field(
+        description="Extract canonical list representing available supported translations."
+    )
     def bibleVersions(self, language: str | None = None) -> list[BibleVersion]:
-        """Get available Bible versions, optionally filtered by language."""
+        """
+        Get bounded array list mapping metadata for Scripture engine versions natively valid.
+
+        **Authentication:** Not required
+        **Parameters:**
+        - language (String, optional) - Bounding implicitly
+        **Returns:** Array list mapping available dictionaries
+        **Errors:** Fails safely natively empty struct bounds.
+        """
         versions = ScriptureService.get_available_versions()
 
         if language:
@@ -57,9 +84,17 @@ class ScriptureQueries:
             for v in versions
         ]
 
-    @strawberry.field
+    @strawberry.field(description="Filter hierarchical mapping structure list of volumes cleanly.")
     def bibleBooks(self, testament: str = "all") -> list[BibleBook]:
-        """Get list of Bible books mapping."""
+        """
+        Fetch valid indexing constants metadata supporting verse picking organically.
+
+        **Authentication:** Not required
+        **Parameters:**
+        - testament (String, optional) - Section bounds explicitly
+        **Returns:** Array sequence BibleBook dictionaries mapped seamlessly
+        **Errors:** Bounded implicitly.
+        """
         books = ScriptureService.get_books_list(testament=testament)
         return [
             BibleBook(
@@ -70,7 +105,9 @@ class ScriptureQueries:
             for b in books
         ]
 
-    @strawberry.field
+    @strawberry.field(
+        description="Query mapping sequence directly returning bounded text preview literal."
+    )
     def scripture(
         self,
         book: str,
@@ -79,7 +116,19 @@ class ScriptureQueries:
         verseEnd: int | None = None,
         version: str = "kjv",
     ) -> ScriptureResult | None:
-        """Fetch specific verse (for preview)."""
+        """
+        Fetch explicit specific coordinates safely previewing verse text literal mapped natively.
+
+        **Authentication:** Not required
+        **Parameters:**
+        - book (String, required) - Volume
+        - chapter (Int, required) - Area
+        - verseStart (Int, required) - Bounds
+        - verseEnd (Int, optional) - Expanded bounds
+        - version (String, optional) - Translation lookup
+        **Returns:** Nullable ScriptureResult text payload explicitly
+        **Errors:** Fails yielding None seamlessly avoiding throws mapping cleanly.
+        """
         try:
             result = ScriptureService.fetch_verse(
                 book=book,

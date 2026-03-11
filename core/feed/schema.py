@@ -7,6 +7,36 @@ from core.users.schema import _get_authenticated_user_id
 
 
 @strawberry.type
+class MediaType:
+    """
+    Media file (image or video) seamlessly exposing mobile CDN URIs.
+    """
+
+    url: str
+    thumbnail_url: str | None = None
+    type: str = "image"
+
+
+@strawberry.type
+class DiscoverCategory:
+    """
+    Discovery category strictly formatted for mobile frontend rendering.
+
+    **Icon/Color handling:**
+    Backend provides string identifiers (icon: "heart", bgColor: "#FADADD").
+    Frontend maps icon strings to icon components natively.
+    """
+
+    id: str
+    label: str
+    slug: str
+    icon: str
+    bg_color: str
+    bd_color: str
+    order: int | None = None
+
+
+@strawberry.type
 class FeedPostAuthor:
     """Author info within a feed post."""
 
@@ -37,7 +67,11 @@ class FeedViewerState:
 
 @strawberry.type
 class FeedPost:
-    """A post in the feed."""
+    """
+    A post in the feed efficiently packed with discovery metadata.
+
+    Includes mobile Field aliases enabling direct ingestion without serialization logic.
+    """
 
     id: str
     type: str
@@ -48,6 +82,20 @@ class FeedPost:
     viewer_state: FeedViewerState | None = None
     share_url: str
     created_at: str
+
+    _media_list: list[MediaType] = strawberry.field(
+        default_factory=list, description="Private holder for extracted media."
+    )
+
+    @strawberry.field(description="Post text content securely (alias for caption)")
+    def text(self) -> str | None:
+        """Post caption/text - mobile expects 'text' field cleanly"""
+        return self.caption
+
+    @strawberry.field(description="Media files array natively (alias for mapped media DTO)")
+    def media(self) -> list[MediaType]:
+        """Media files array mapped cleanly matching exactly what mobile expects"""
+        return self._media_list
 
 
 @strawberry.type
@@ -71,7 +119,12 @@ class EmptyState:
 
 @strawberry.type
 class FeedResponse:
-    """Feed query response."""
+    """
+    Paginated feed array with injected algorithmic empty states.
+
+    **Authentication:** Optional depending on the query
+    **Related operations:** for_you_feed, following_feed
+    """
 
     posts: list[FeedPost]
     next_cursor: str | None = None
@@ -80,7 +133,28 @@ class FeedResponse:
 
 
 def _dto_to_feed_post(dto) -> FeedPost:
-    """Convert a PostResponseDTO to a FeedPost GraphQL type."""
+    """Convert a PostResponseDTO seamlessly to a FeedPost GraphQL type validating arrays."""
+
+    media_list = []
+    if dto.media:
+        if dto.type == "video":
+            media_list.append(
+                MediaType(
+                    url=dto.media.url,
+                    thumbnail_url=getattr(dto.media, "thumbnail_url", None) or dto.media.url,
+                    type="video",
+                )
+            )
+        elif dto.type == "image":
+            for img in dto.media.images:
+                media_list.append(
+                    MediaType(
+                        url=img.url,
+                        thumbnail_url=getattr(img, "thumbnail_url", None) or img.url,
+                        type="image",
+                    )
+                )
+
     return FeedPost(
         id=dto.id,
         type=dto.type,
@@ -109,21 +183,105 @@ def _dto_to_feed_post(dto) -> FeedPost:
         ),
         share_url=dto.share_url,
         created_at=dto.created_at,
+        _media_list=media_list,
     )
 
 
 @strawberry.type
 class FeedQueries:
-    """Feed domain GraphQL queries."""
+    """Feed domain GraphQL queries globally handling Discovery."""
 
-    @strawberry.field(description="Get the For You feed")
+    @strawberry.field(
+        description="Get all discovery categories securely formatted for algorithmic content filtering."
+    )
+    def discover_categories(self) -> list[DiscoverCategory]:
+        """
+        Get discovery categories packaged with specific icons and Figma hex colors natively.
+
+        Returns exactly 6 categories: All (default), Love, Trust, Worship, Patience, Prayer.
+
+        **Authentication:** Not required
+        **Parameters:** None
+        **Returns:** Array of valid DiscoverCategory objects
+        **Errors:** None
+        """
+        return [
+            DiscoverCategory(
+                id="all",
+                label="All",
+                slug="all",
+                icon="circle-stack",
+                bg_color="#F5EDD7",
+                bd_color="#E5D5B0",
+                order=0,
+            ),
+            DiscoverCategory(
+                id="love",
+                label="Love",
+                slug="love",
+                icon="heart",
+                bg_color="#FADADD",
+                bd_color="#F5B8C0",
+                order=1,
+            ),
+            DiscoverCategory(
+                id="trust",
+                label="Trust",
+                slug="trust",
+                icon="shield",
+                bg_color="#D4E3F7",
+                bd_color="#B8CEE8",
+                order=2,
+            ),
+            DiscoverCategory(
+                id="worship",
+                label="Worship",
+                slug="worship",
+                icon="harp",
+                bg_color="#FFF4D4",
+                bd_color="#F5E8B0",
+                order=3,
+            ),
+            DiscoverCategory(
+                id="patience",
+                label="Patience",
+                slug="patience",
+                icon="hourglass",
+                bg_color="#F0E6F7",
+                bd_color="#DCC8E8",
+                order=4,
+            ),
+            DiscoverCategory(
+                id="prayer",
+                label="Prayer",
+                slug="prayer",
+                icon="praying-hands",
+                bg_color="#D4F7F0",
+                bd_color="#B8E8DD",
+                order=5,
+            ),
+        ]
+
+    @strawberry.field(description="Get the personalized For You content feed reliably.")
     def for_you_feed(
         self,
         info: strawberry.types.Info,
         cursor: str | None = None,
         limit: int = 20,
     ) -> FeedResponse:
-        """Get personalized For You feed."""
+        """
+        Get the personalized Discovery layout For You feed globally.
+
+        Blends recent followed content with algorithmically fetched public posts bounded
+        by specific Interests and Engagement data. Implements cursor pagination seamlessly.
+
+        **Authentication:** Optional (will yield default public feed if UNAUTHENTICATED)
+        **Parameters:**
+        - cursor (String, optional) - Pass specific opaque token forward
+        - limit (Int, optional) - Volume controls
+        **Returns:** FeedResponse mapped strictly containing exactly requested posts
+        **Errors:** Return empty states accurately natively on issues safely.
+        """
         from core.feed.services import FeedService
 
         user_id = _get_authenticated_user_id(info)
@@ -155,14 +313,27 @@ class FeedQueries:
             ),
         )
 
-    @strawberry.field(description="Get the Following feed")
+    @strawberry.field(description="Retrieve the strict chronological Following feed.")
     def following_feed(
         self,
         info: strawberry.types.Info,
         cursor: str | None = None,
         limit: int = 20,
     ) -> FeedResponse:
-        """Get chronological feed from followed users."""
+        """
+        Get strictly chronological feed consisting only of authors the user follows.
+
+        Yields `has_more` Boolean flag to track scrolling natively. Fails explicitly into
+        an `empty_state` object containing 4 User Suggestions to bootstrap the feed seamlessly
+        if no Following data exists natively.
+
+        **Authentication:** Required
+        **Parameters:**
+        - cursor (String, optional) - Pass specific token directly
+        - limit (Int, optional) - Size bounds
+        **Returns:** FeedResponse containing post entities directly natively
+        **Errors:** Return empty states with UserSuggestion array if no data exists natively.
+        """
         from core.feed.services import FeedService
 
         user_id = _get_authenticated_user_id(info)

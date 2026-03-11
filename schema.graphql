@@ -1,0 +1,769 @@
+type AddPasswordPayload {
+  """Whether the password was added successfully"""
+  success: Boolean!
+
+  """Success or error message"""
+  message: String
+
+  """The updated user data"""
+  user: UserType
+
+  """Specific error code if operation failed (e.g. UNAUTHENTICATED)"""
+  errorCode: String
+}
+
+type AuthPayload {
+  """Whether the authentication operation was successful"""
+  success: Boolean!
+
+  """The authenticated user data"""
+  user: UserType
+
+  """JWT access token (valid for 15 minutes)"""
+  accessToken: String
+
+  """JWT refresh token (valid for 7 days)"""
+  refreshToken: String
+
+  """Success or error message"""
+  message: String
+
+  """Specific error code if operation failed (e.g. INVALID_CREDENTIALS)"""
+  errorCode: String
+}
+
+type BibleBook {
+  """Full label ('Genesis')"""
+  name: String!
+
+  """URL safe ('genesis')"""
+  slug: String!
+
+  """Volume capacity Cap"""
+  chapters: Int!
+}
+
+type BibleVersion {
+  """Short code ('kjv')"""
+  code: String!
+
+  """Full text name ('King James Version')"""
+  name: String!
+
+  """Display tag ('KJV')"""
+  abbreviation: String!
+
+  """ISO Code ('eng')"""
+  language: String!
+
+  """Coverage bounds ('complete', 'nt')"""
+  scope: String!
+
+  """Public domain flag"""
+  free: Boolean!
+}
+
+type BookmarkFolderPayload {
+  success: Boolean!
+  folder: BookmarkFolderType
+  message: String
+  errorCode: String
+}
+
+type BookmarkFolderType {
+  id: String!
+  name: String!
+  savedCount: Int!
+}
+
+type BulkRemovePayload {
+  success: Boolean!
+  removedCount: Int!
+  message: String
+  errorCode: String
+}
+
+type ChangePasswordPayload {
+  """Whether the password change was successful"""
+  success: Boolean!
+
+  """Success or error message"""
+  message: String
+
+  """Number of other device sessions terminated"""
+  signedOutDevices: Int!
+
+  """Specific error code if operation failed (e.g. INVALID_CREDENTIALS)"""
+  errorCode: String
+}
+
+type CommentAuthor {
+  id: String!
+  username: String!
+  avatarUrl: String
+}
+
+type CommentPayload {
+  success: Boolean!
+  comment: CommentType
+  message: String
+  errorCode: String
+}
+
+type CommentStats {
+  likesCount: Int!
+  repliesCount: Int!
+}
+
+type CommentType {
+  id: String!
+  postId: String!
+  parentCommentId: String
+  user: CommentAuthor!
+  text: String!
+  stats: CommentStats!
+  viewerState: CommentViewerState
+  createdAt: String!
+}
+
+type CommentViewerState {
+  liked: Boolean!
+  isOwner: Boolean!
+}
+
+type CommentsResponse {
+  comments: [CommentType!]!
+  nextCursor: String
+  hasMore: Boolean!
+  totalCount: Int!
+}
+
+type DeleteFolderPayload {
+  success: Boolean!
+  message: String
+  movedPostsCount: Int!
+  errorCode: String
+}
+
+type DeleteNotificationResponse {
+  """Confirms deletion execution"""
+  success: Boolean!
+}
+
+type DiscoverCategory {
+  id: String!
+  label: String!
+  slug: String!
+  icon: String!
+  bgColor: String!
+  bdColor: String!
+  order: Int
+}
+
+type EmptyState {
+  message: String!
+  suggestions: [UserSuggestion!]!
+}
+
+type FeedPost {
+  id: String!
+  type: String!
+  caption: String
+  categoryId: String
+  author: FeedPostAuthor!
+  stats: FeedPostStats!
+  viewerState: FeedViewerState
+  shareUrl: String!
+  createdAt: String!
+
+  """Private holder for extracted media."""
+  MediaList: [MediaType!]!
+
+  """Post text content securely (alias for caption)"""
+  text: String
+
+  """Media files array natively (alias for mapped media DTO)"""
+  media: [MediaType!]!
+}
+
+type FeedPostAuthor {
+  id: String!
+  username: String!
+  avatarUrl: String
+}
+
+type FeedPostStats {
+  likesCount: Int!
+  commentsCount: Int!
+  sharesCount: Int!
+  savesCount: Int!
+}
+
+type FeedResponse {
+  posts: [FeedPost!]!
+  nextCursor: String
+  hasMore: Boolean!
+  emptyState: EmptyState
+}
+
+type FeedViewerState {
+  liked: Boolean!
+  saved: Boolean!
+  followingAuthor: Boolean!
+  isOwner: Boolean!
+}
+
+type FollowListResponse {
+  """Directly resolved mapping array of users"""
+  users: [FollowUserType!]!
+
+  """Passed backwards safely"""
+  nextCursor: String
+
+  """Scrolling bounds limit tracking flag"""
+  hasMore: Boolean!
+}
+
+type FollowPayload {
+  """Whether the state change persisted"""
+  success: Boolean!
+
+  """The new resultant state boolean flag natively"""
+  following: Boolean!
+
+  """Detailed logging message or success"""
+  message: String
+
+  """Detailed failure string identifier"""
+  errorCode: String
+}
+
+type FollowUserType {
+  id: String!
+  username: String!
+  avatarUrl: String
+  isFollowing: Boolean!
+}
+
+type FriendType {
+  id: String!
+  username: String!
+  avatarUrl: String
+  fullName: String!
+}
+
+type GoogleOAuthPayload {
+  """Whether the authentication was successful"""
+  success: Boolean!
+
+  """The authenticated user data"""
+  user: UserType
+
+  """JWT access token"""
+  accessToken: String
+
+  """JWT refresh token"""
+  refreshToken: String
+
+  """True if a new account was created"""
+  isNewUser: Boolean!
+
+  """Success or error message"""
+  message: String
+
+  """Specific error code"""
+  errorCode: String
+}
+
+type LikePayload {
+  success: Boolean!
+  liked: Boolean!
+  message: String
+  errorCode: String
+}
+
+type MediaType {
+  url: String!
+  thumbnailUrl: String
+  type: String!
+}
+
+type MediaUploadPayload {
+  success: Boolean!
+  uploadUrl: String
+  mediaId: String
+  expiresIn: Int
+  message: String
+  errorCode: String
+}
+
+type Mutation {
+  """
+  Create a new user account with email and password. Returns user object and JWT tokens for immediate login.
+  """
+  register(email: String!, password: String!, fullName: String! = ""): AuthPayload!
+
+  """
+  Verify email address using verification token. Returns tokens for registration/verification or resetToken for password reset.
+  """
+  verifyEmail(token: String!): AuthPayload!
+
+  """
+  Authenticate existing user with email/password. Returns user data and access/refresh tokens.
+  """
+  login(email: String!, password: String!): AuthPayload!
+
+  """Rotate refresh token for new token pair."""
+  refreshToken(refreshToken: String!): AuthPayload!
+
+  """
+  Add password to OAuth-only account. Allows Google sign-in users to also login with password. Only works if user doesn't already have password.
+  """
+  addPassword(password: String!): AddPasswordPayload!
+
+  """
+  Change password for authenticated user. Requires current password. Can optionally sign out all other devices.
+  """
+  changePassword(currentPassword: String!, newPassword: String!, signOutOtherDevices: Boolean! = false): ChangePasswordPayload!
+
+  """
+  Authenticate user via Google OAuth. Creates account if new user, or logs in existing user. Sets needsUsernameSelection=true for new OAuth users.
+  """
+  googleOauth(idToken: String!): GoogleOAuthPayload!
+
+  """
+  Send one-time password code via email. Supports three purposes: registration, email_verification, password_reset. Rate-limited to 3 requests per 10 minutes.
+  """
+  sendOtp(email: String!, purpose: String!): OTPPayload!
+
+  """
+  Verify OTP code and complete action. For registration/email_verification returns tokens. For password_reset returns resetToken for next step.
+  """
+  verifyOtp(email: String!, code: String!, purpose: String!): VerifyOTPPayload!
+
+  """
+  Request password reset via email. Sends OTP code to user's email address.
+  """
+  resetPassword(email: String!): OTPPayload!
+
+  """
+  Complete password reset using resetToken from OTP verification. Sets new password and optionally signs out all other devices.
+  """
+  confirmPasswordReset(resetToken: String!, newPassword: String!, signOutAllDevices: Boolean! = false): ChangePasswordPayload!
+
+  """
+  Set permanent username after Google OAuth signup. Replaces temporary username (user_XXXXXXXX) with chosen username. Validates availability.
+  """
+  finalizeUsername(username: String!): AuthPayload!
+
+  """Check if a username is available"""
+  checkUsernameAvailability(username: String!): UsernameCheckResult!
+
+  """Get username suggestions based on a name"""
+  suggestUsernames(baseName: String!): [String!]!
+
+  """Set user interests for feed personalization"""
+  setInterests(interests: [String!]!): SetInterestsPayload!
+
+  """Request a signed URL for media upload"""
+  requestMediaUpload(fileName: String!, fileType: String!, fileSize: Int!): MediaUploadPayload!
+
+  """
+  Create a new multimedia app post. Supports Text, Image, and Video variants with nested Scriptures.
+  """
+  createPost(postType: String!, caption: String = null, category: String = null, mediaUrls: [String!] = null, mediaType: String = null, thumbnailUrl: String = null, width: Int! = 0, height: Int! = 0, duration: Int = null, scriptureBook: String = null, scriptureChapter: Int = null, scriptureVerseStart: Int = null, scriptureVerseEnd: Int = null, scriptureVersion: String = "KJV"): PostPayload!
+
+  """Edit the caption of an existing post. Only accessible by post owner."""
+  updatePost(postId: String!, caption: String = null): PostPayload!
+
+  """Soft delete an existing post."""
+  deletePost(postId: String!): PostPayload!
+
+  """Optimistically toggle a 'like' on a specific post."""
+  likePost(postId: String!): LikePayload!
+
+  """Unlike a post"""
+  unlikePost(postId: String!): LikePayload!
+
+  """Create a nested or top-level text comment on a Post payload."""
+  createComment(postId: String!, text: String!, parentCommentId: String = null): CommentPayload!
+
+  """Delete a comment"""
+  deleteComment(commentId: String!): CommentPayload!
+
+  """Like a comment"""
+  likeComment(commentId: String!): LikePayload!
+
+  """Add bookmark saving a post strictly."""
+  savePost(postId: String!, folderId: String = null): SavePayload!
+
+  """Unsave/remove a bookmark"""
+  unsavePost(postId: String!): SavePayload!
+
+  """Create a bookmark folder"""
+  createBookmarkFolder(name: String!): BookmarkFolderPayload!
+
+  """Delete a bookmark folder"""
+  deleteBookmarkFolder(folderId: String!): DeleteFolderPayload!
+
+  """Remove multiple bookmarks at once"""
+  bulkRemoveBookmarks(postIds: [String!]!): BulkRemovePayload!
+
+  """Share a post to another user"""
+  sharePostDirect(postId: String!, recipientId: String!): SharePayload!
+
+  """Share a post externally (generate link)"""
+  sharePostExternal(postId: String!): SharePayload!
+
+  """
+  Optimistically toggle a direct Edge relationship connecting to a User account globally.
+  """
+  followUser(userId: String!): FollowPayload!
+
+  """Delete an existing following Edge relation targeting a User account."""
+  unfollowUser(userId: String!): FollowPayload!
+
+  """Update the authenticated user's public profile information."""
+  updateProfile(bio: String = null, fullName: String = null, avatarUrl: String = null, location: String = null): ProfilePayload!
+
+  """File a Community Guidelines violation against an active node."""
+  reportContent(reason: String!, postId: String = null, commentId: String = null, description: String = null): ReportPayload!
+
+  """Update specific report processing state dynamically (Admin only)."""
+  reviewReport(reportId: String!, status: String!): ReportPayload!
+
+  """Soft delete a notification entity explicitly targeting a UUID."""
+  deleteNotification(id: ID!): DeleteNotificationResponse!
+}
+
+type NotificationActor {
+  username: String!
+  avatarUrl: String!
+}
+
+type NotificationDTO {
+  id: ID!
+  type: String!
+  message: String!
+  isRead: Boolean!
+  createdAt: String!
+  actor: NotificationActor!
+}
+
+type NotificationResponseListDTO {
+  """Requested chunk array directly natively"""
+  notifications: [NotificationDTO!]!
+
+  """Passed backwards safely"""
+  nextCursor: String
+
+  """Scrolling bounds limit tracking flag"""
+  hasMore: Boolean!
+}
+
+type OTPPayload {
+  """Whether the OTP was sent successfully"""
+  success: Boolean!
+
+  """Success or error message"""
+  message: String
+
+  """Seconds until the code expires"""
+  expiresIn: Int
+
+  """Seconds to wait before resend is allowed"""
+  resendAfter: Int
+
+  """The purpose string echoed back"""
+  purpose: String
+
+  """Specific error code if operation failed"""
+  errorCode: String
+}
+
+type PostPayload {
+  """Whether the mutation succeeded"""
+  success: Boolean!
+
+  """The UUID of the affected post"""
+  postId: String
+
+  """Error or success string"""
+  message: String
+
+  """Detailed failure string identifier"""
+  errorCode: String
+}
+
+type ProfilePayload {
+  """Whether the profile updated successfully"""
+  success: Boolean!
+
+  """The updated profile data"""
+  profile: UserProfileType
+
+  """Success or error message"""
+  message: String
+
+  """Code dictating failure reason safely"""
+  errorCode: String
+}
+
+type ProfilePostResponseListDTO {
+  posts: [FeedPost!]!
+  nextCursor: String
+  hasMore: Boolean!
+}
+
+type ProfileStatsType {
+  followersCount: Int!
+  followingCount: Int!
+  postsCount: Int!
+}
+
+type Query {
+  """
+  Get complete data for currently authenticated user. Includes profile details, follower/following counts, posts count, email verification status, and password status (for OAuth users). Cached for 5 minutes.
+  """
+  me: UserType
+
+  """Simple health check for the GraphQL endpoint."""
+  health: String!
+
+  """
+  Generate 4 available username suggestions based on email and optional date of birth. Returns unique, available usernames.
+  """
+  suggestUsernames(email: String!, dob: String = null): [String!]!
+
+  """
+  Get all discovery categories securely formatted for algorithmic content filtering.
+  """
+  discoverCategories: [DiscoverCategory!]!
+
+  """Get the personalized For You content feed reliably."""
+  forYouFeed(cursor: String = null, limit: Int! = 20): FeedResponse!
+
+  """Retrieve the strict chronological Following feed."""
+  followingFeed(cursor: String = null, limit: Int! = 20): FeedResponse!
+
+  """Get the Discover feed by category"""
+  discoverFeed(category: String = null, mediaType: String = null, cursor: String = null, limit: Int! = 20): FeedResponse!
+
+  """
+  Get hierarchical chronologically descending array of all User Nodes following a Profile.
+  """
+  followers(userId: String!, cursor: String = null, limit: Int! = 20): FollowListResponse!
+
+  """
+  Get hierarchical descending list of all User Nodes a particular Profile is following.
+  """
+  following(userId: String!, cursor: String = null, limit: Int! = 20): FollowListResponse!
+
+  """
+  Get highly validated creators algorithmically dynamically curated for the authenticating user.
+  """
+  suggestedCreators(limit: Int! = 10): [SuggestedCreatorType!]!
+
+  """Retrieve a targeted user's public profile and follower statistics."""
+  userProfile(userId: String!): UserProfileType
+
+  """Get paginated list of posts the targeted user has liked."""
+  likedPosts(userId: String!, limit: Int! = 20, cursor: String = null): ProfilePostResponseListDTO!
+
+  """Get hierarchical chronological array of comments bounded to an entity."""
+  postComments(postId: String!, cursor: String = null, limit: Int! = 20): CommentsResponse!
+
+  """Get bookmark folders"""
+  bookmarkFolders: [BookmarkFolderType!]!
+
+  """Get friends list for sharing"""
+  friendsList(search: String = null, limit: Int! = 20): [FriendType!]!
+
+  """Get saved/bookmarked posts"""
+  savedPosts(folderId: String = null, mediaType: String! = "all", cursor: String = null, limit: Int! = 20): SavedPostsResponse!
+
+  """Extract paginated array list of raw Admin reports queued."""
+  listReports(status: String = null, cursor: String = null, limit: Int! = 20): ReportListResponse!
+
+  """
+  Retrieve descending paginated array of authenticated user's notifications natively.
+  """
+  notifications(filter: String! = "all", cursor: String = null, limit: Int! = 20): NotificationResponseListDTO!
+
+  """
+  Retrieve a single post by its UUID with full engagement metrics and viewer context.
+  """
+  post(id: ID!): FeedPost
+
+  """Extract canonical list representing available supported translations."""
+  bibleVersions(language: String = null): [BibleVersion!]!
+
+  """Filter hierarchical mapping structure list of volumes cleanly."""
+  bibleBooks(testament: String! = "all"): [BibleBook!]!
+
+  """
+  Query mapping sequence directly returning bounded text preview literal.
+  """
+  scripture(book: String!, chapter: Int!, verseStart: Int!, verseEnd: Int = null, version: String! = "kjv"): ScriptureResult
+}
+
+type ReportListResponse {
+  """Directly mapped queue items natively"""
+  reports: [ReportType!]!
+
+  """Hash mapped string continuation flag"""
+  nextCursor: String
+
+  """Volume bounds checker boolean"""
+  hasMore: Boolean!
+}
+
+type ReportPayload {
+  """Confirmed processing natively flag"""
+  success: Boolean!
+
+  """Mapped explicit target UUID"""
+  reportId: String
+
+  """String output detail natively"""
+  message: String
+
+  """Detailed failure string identifier"""
+  errorCode: String
+}
+
+type ReportType {
+  id: String!
+  reporterId: String!
+  postId: String
+  commentId: String
+  reason: String!
+  description: String
+  status: String!
+  reviewedBy: String
+  reviewedAt: String
+  createdAt: String!
+}
+
+type SavePayload {
+  success: Boolean!
+  saved: Boolean!
+  message: String
+  errorCode: String
+}
+
+type SavedPostsResponse {
+  posts: [FeedPost!]!
+  nextCursor: String
+  hasMore: Boolean!
+}
+
+type ScriptureResult {
+  """The canonical sequence itself"""
+  text: String!
+
+  """Formatted label string literal ('John 3:16')"""
+  reference: String!
+
+  """Translation metadata"""
+  version: String!
+
+  """Root index mapping"""
+  book: String!
+
+  """Coordinates"""
+  chapter: Int!
+
+  """Coordinates"""
+  verseStart: Int!
+
+  """Coordinates bounded natively"""
+  verseEnd: Int
+}
+
+type SetInterestsPayload {
+  success: Boolean!
+  interests: [String!]!
+  message: String
+  errorCode: String
+}
+
+type SharePayload {
+  success: Boolean!
+  shareId: String
+  shareUrl: String
+  message: String
+  errorCode: String
+}
+
+type SuggestedCreatorType {
+  id: String!
+  username: String!
+  avatarUrl: String
+  bio: String
+  followersCount: Int!
+}
+
+type UserProfileType {
+  id: String!
+  username: String!
+  fullName: String!
+  bio: String!
+  avatarUrl: String
+  location: String!
+  stats: ProfileStatsType!
+  isFollowing: Boolean!
+  isOwnProfile: Boolean!
+  recentPosts: [FeedPost!]!
+  createdAt: String!
+}
+
+type UserSuggestion {
+  id: String!
+  username: String!
+  avatarUrl: String
+  bio: String
+  followersCount: Int!
+}
+
+type UserType {
+  id: String!
+  email: String!
+  username: String
+  fullName: String!
+  bio: String!
+  avatarUrl: String!
+  role: String!
+  isEmailVerified: Boolean!
+  location: String!
+  createdAt: String!
+}
+
+type UsernameCheckResult {
+  available: Boolean!
+  suggestions: [String!]
+  reason: String
+}
+
+type VerifyOTPPayload {
+  """Whether the verification was successful"""
+  success: Boolean!
+
+  """Success or error message"""
+  message: String
+
+  """User data (if applicable)"""
+  user: UserType
+
+  """JWT access token (if applicable)"""
+  accessToken: String
+
+  """JWT refresh token (if applicable)"""
+  refreshToken: String
+
+  """Token to use for confirming password reset"""
+  resetToken: String
+
+  """Specific error code if operation failed"""
+  errorCode: String
+}

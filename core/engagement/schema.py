@@ -187,9 +187,19 @@ def _dto_to_comment(dto) -> CommentType:
 class EngagementMutations:
     """Engagement domain GraphQL mutations."""
 
-    @strawberry.mutation(description="Like a post")
+    @strawberry.mutation(description="Optimistically toggle a 'like' on a specific post.")
     def like_post(self, info: strawberry.types.Info, post_id: str) -> LikePayload:
-        """Like a post."""
+        """
+        Like a post globally tracking metrics.
+
+        Is idempotent so double liking just succeeds. Impacts Discovery algorithms implicitly.
+
+        **Authentication:** Required
+        **Parameters:**
+        - post_id (String, required) - Valid remote UUID
+        **Returns:** LikePayload mapping boolean state
+        **Errors:** UNAUTHENTICATED, NOT_FOUND
+        """
         from core.engagement.services import EngagementService
         from core.shared.exceptions import EngagementError
 
@@ -227,7 +237,7 @@ class EngagementMutations:
         except EngagementError as e:
             return LikePayload(success=False, message=e.message, error_code=e.code)
 
-    @strawberry.mutation(description="Create a comment on a post")
+    @strawberry.mutation(description="Create a nested or top-level text comment on a Post payload.")
     def create_comment(
         self,
         info: strawberry.types.Info,
@@ -235,7 +245,19 @@ class EngagementMutations:
         text: str,
         parent_comment_id: str | None = None,
     ) -> CommentPayload:
-        """Create a comment."""
+        """
+        Create a new chronological comment on a post globally.
+
+        Supports 1 level deep threading. Content moderation filters scan strings natively before insert.
+
+        **Authentication:** Required
+        **Parameters:**
+        - post_id (String, required) - Active Post UUID target
+        - text (String, required) - Comment body
+        - parent_comment_id (String, optional) - Pass for replies
+        **Returns:** CommentPayload extracting nested CommentType exactly
+        **Errors:** UNAUTHENTICATED, VALIDATION_ERROR native limits.
+        """
         from core.engagement.services import EngagementService
         from core.shared.exceptions import EngagementError
 
@@ -298,14 +320,23 @@ class EngagementMutations:
         except EngagementError as e:
             return LikePayload(success=False, message=e.message, error_code=e.code)
 
-    @strawberry.mutation(description="Save/bookmark a post")
+    @strawberry.mutation(description="Add bookmark saving a post strictly.")
     def save_post(
         self,
         info: strawberry.types.Info,
         post_id: str,
         folder_id: str | None = None,
     ) -> SavePayload:
-        """Save a post to bookmarks."""
+        """
+        Save a post directly to a custom user Folder bookmark state natively.
+
+        **Authentication:** Required
+        **Parameters:**
+        - post_id (String, required) - Active Post ID mapping
+        - folder_id (String, optional) - Custom bounding string
+        **Returns:** SavePayload Boolean tracking
+        **Errors:** UNAUTHENTICATED, NOT_FOUND
+        """
         from core.engagement.services import EngagementService
         from core.shared.exceptions import EngagementError
 
@@ -475,7 +506,9 @@ class EngagementMutations:
 class EngagementQueries:
     """Engagement domain GraphQL queries."""
 
-    @strawberry.field(description="Get comments for a post")
+    @strawberry.field(
+        description="Get hierarchical chronological array of comments bounded to an entity."
+    )
     def post_comments(
         self,
         info: strawberry.types.Info,
@@ -483,7 +516,20 @@ class EngagementQueries:
         cursor: str | None = None,
         limit: int = 20,
     ) -> CommentsResponse:
-        """Get paginated comments for a post."""
+        """
+        Get chronologically paginated tree of comments mapping to a distinct post natively.
+
+        Evaluates dynamic `viewer_state` specifically checking owner overrides and like
+        statuses natively per comment.
+
+        **Authentication:** Optional (will yield empty viewer_state recursively if unauthed)
+        **Parameters:**
+        - post_id (String, required) - Extracted Token
+        - cursor (String, optional) - Continuation flag
+        - limit (Int, optional) - Chunk bounds
+        **Returns:** CommentsResponse directly mapped
+        **Errors:** Returns empty lists natively gracefully.
+        """
         from core.engagement.services import EngagementService
 
         user_id = _get_authenticated_user_id(info)

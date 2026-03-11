@@ -8,12 +8,23 @@ from core.users.schema import _get_authenticated_user_id
 
 @strawberry.type
 class ReportPayload:
-    """Response for report mutations."""
+    """
+    Response outlining execution state of a content report safely natively.
 
-    success: bool
-    report_id: str | None = None
-    message: str | None = None
-    error_code: str | None = None
+    **Authentication:** Required
+    **Related operations:** report_content, review_report
+    """
+
+    success: bool = strawberry.field(description="Confirmed processing natively flag")
+    report_id: str | None = strawberry.field(
+        default=None, description="Mapped explicit target UUID"
+    )
+    message: str | None = strawberry.field(
+        default=None, description="String output detail natively"
+    )
+    error_code: str | None = strawberry.field(
+        default=None, description="Detailed failure string identifier"
+    )
 
 
 @strawberry.type
@@ -34,18 +45,27 @@ class ReportType:
 
 @strawberry.type
 class ReportListResponse:
-    """Paginated reports list response."""
+    """
+    Paginated Admin dashboard queue array natively.
 
-    reports: list[ReportType]
-    next_cursor: str | None = None
-    has_more: bool = False
+    **Authentication:** Required (Admin only)
+    **Related operations:** list_reports
+    """
+
+    reports: list[ReportType] = strawberry.field(description="Directly mapped queue items natively")
+    next_cursor: str | None = strawberry.field(
+        default=None, description="Hash mapped string continuation flag"
+    )
+    has_more: bool = strawberry.field(default=False, description="Volume bounds checker boolean")
 
 
 @strawberry.type
 class ModerationMutations:
     """Moderation domain GraphQL mutations."""
 
-    @strawberry.mutation(description="Report a post or comment")
+    @strawberry.mutation(
+        description="File a Community Guidelines violation against an active node."
+    )
     def report_content(
         self,
         info: strawberry.types.Info,
@@ -54,7 +74,19 @@ class ModerationMutations:
         comment_id: str | None = None,
         description: str | None = None,
     ) -> ReportPayload:
-        """Report content for moderation."""
+        """
+        Create an Admin dashboard ticket for explicit user-generated content organically natively.
+
+        Requires EITHER a `post_id` OR `comment_id` passed accurately.
+
+        **Authentication:** Required
+        **Parameters:**
+        - reason (String, required) - Violation code implicitly
+        - post_id/comment_id (String, optional) - Target mapping natively
+        - description (String, optional) - Extra info context
+        **Returns:** ReportPayload confirming queue insertion successfully natively
+        **Errors:** UNAUTHENTICATED, VALIDATION_ERROR native limits.
+        """
         from core.moderation.services import ReportService
         from core.shared.exceptions import ModerationError
 
@@ -78,14 +110,25 @@ class ModerationMutations:
         except ModerationError as e:
             return ReportPayload(success=False, message=e.message, error_code=e.code)
 
-    @strawberry.mutation(description="Review a report (admin only)")
+    @strawberry.mutation(
+        description="Update specific report processing state dynamically (Admin only)."
+    )
     def review_report(
         self,
         info: strawberry.types.Info,
         report_id: str,
         status: str,
     ) -> ReportPayload:
-        """Review and update a report's status."""
+        """
+        Transition report ticket workflow explicitly dynamically.
+
+        **Authentication:** Required (User Role mapping Admin)
+        **Parameters:**
+        - report_id (String, required) - Valid remote ticket
+        - status (String, required) - Resolution context natively
+        **Returns:** ReportPayload tracking transition exactly natively
+        **Errors:** UNAUTHENTICATED, PERMISSION_DENIED
+        """
         from core.moderation.services import ReportService
         from core.shared.exceptions import ModerationError
         from core.users.models import User
@@ -121,7 +164,7 @@ class ModerationMutations:
 class ModerationQueries:
     """Moderation domain GraphQL queries (admin only)."""
 
-    @strawberry.field(description="List content reports (admin only)")
+    @strawberry.field(description="Extract paginated array list of raw Admin reports queued.")
     def list_reports(
         self,
         info: strawberry.types.Info,
@@ -129,7 +172,17 @@ class ModerationQueries:
         cursor: str | None = None,
         limit: int = 20,
     ) -> ReportListResponse:
-        """List reports for admin review."""
+        """
+        Fetch hierarchical descending queue items for platform Admin interface seamlessly.
+
+        **Authentication:** Required (User Role mapped Admins exclusively tightly bounded)
+        **Parameters:**
+        - status (String, optional) - Enum bounded implicitly
+        - cursor (String, optional) - Passes dynamically
+        - limit (Int, optional) - Cap limits natively securely
+        **Returns:** ReportListResponse mapping items cleanly dynamically organically
+        **Errors:** Fails safely yielding empty cleanly natively directly avoiding throws globally.
+        """
         from core.moderation.services import ReportService
         from core.users.models import User
 

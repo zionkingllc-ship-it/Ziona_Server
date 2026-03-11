@@ -8,7 +8,7 @@ from core.follows.schema import FollowMutations, FollowQueries
 from core.media.schema import MediaMutations
 from core.moderation.schema import ModerationMutations, ModerationQueries
 from core.notifications.schema import NotificationMutations, NotificationQueries
-from core.posts.schema import PostMutations
+from core.posts.schema import PostMutations, PostQueries
 from core.profiles.schema import ProfileMutations, ProfileQueries
 from core.scripture.schema import ScriptureQueries
 from core.users.schema import UserMutations, UserQueries
@@ -23,6 +23,7 @@ class Query(
     EngagementQueries,
     ModerationQueries,
     NotificationQueries,
+    PostQueries,
     ScriptureQueries,
     UserQueries,
 ):

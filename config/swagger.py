@@ -26,6 +26,11 @@ def swagger_ui(request):
     </style>
 </head>
 <body>
+    <div style="background-color: #1b1b1b; padding: 15px; text-align: center; font-family: sans-serif;">
+        <a href="/graphql-docs/" style="color: #61dafb; text-decoration: none; font-weight: bold; font-size: 16px;">
+            &#8594; View GraphQL API Documentation (SpectaQL)
+        </a>
+    </div>
     <div id="swagger-ui"></div>
     <script src="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
     <script>

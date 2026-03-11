@@ -1,6 +1,10 @@
+import os
+
+from django.conf import settings
 from django.contrib import admin
 from django.http import JsonResponse
 from django.urls import include, path
+from django.views.static import serve
 from strawberry.django.views import GraphQLView
 
 from config.graphql_schema import schema
@@ -22,6 +26,18 @@ urlpatterns = [
     path("api/auth/", include("core.authentication.urls")),
     path("docs/", swagger_ui, name="swagger-ui"),
     path("api/schema/", openapi_schema, name="openapi-schema"),
+    path(
+        "graphql-docs/",
+        lambda r: serve(
+            r, "index.html", document_root=os.path.join(settings.BASE_DIR, "docs", "graphql-docs")
+        ),
+        name="graphql-docs-index",
+    ),
+    path(
+        "graphql-docs/<path:path>",
+        serve,
+        {"document_root": os.path.join(settings.BASE_DIR, "docs", "graphql-docs")},
+    ),
     path(
         ".well-known/apple-app-site-association",
         apple_app_site_association,

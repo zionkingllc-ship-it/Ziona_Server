@@ -237,7 +237,8 @@ mutation { requestMediaUpload(fileName: "...", fileType: "image/jpeg", fileSize:
 |---|---|
 | `/health/` | Health check |
 | `/admin/` | Django admin panel |
-| `/docs/` | Swagger UI (API documentation) |
+| `/docs/` | Swagger UI (REST API documentation) |
+| `/graphql-docs/` | SpectaQL (GraphQL documentation) |
 | `/api/schema/` | OpenAPI JSON schema |
 
  Running Tests

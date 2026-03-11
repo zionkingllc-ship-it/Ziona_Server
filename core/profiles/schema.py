@@ -3,6 +3,7 @@
 
 import strawberry
 
+from core.feed.schema import FeedPost, _dto_to_feed_post
 from core.users.schema import _get_authenticated_user_id
 
 
@@ -15,15 +16,7 @@ class ProfileStatsType:
     posts_count: int = 0
 
 
-@strawberry.type
-class ProfilePostType:
-    """A post within a user profile."""
-
-    id: str
-    type: str
-    caption: str | None = None
-    share_url: str
-    created_at: str
+# ProfilePostType removed in favor of standard FeedPost from core.feed.schema
 
 
 @strawberry.type
@@ -39,7 +32,7 @@ class UserProfileType:
     stats: ProfileStatsType
     is_following: bool = False
     is_own_profile: bool = False
-    recent_posts: list[ProfilePostType]
+    recent_posts: list[FeedPost]
     created_at: str
 
 
@@ -47,19 +40,31 @@ class UserProfileType:
 class ProfilePostResponseListDTO:
     """Paginated list of profile posts."""
 
-    posts: list[ProfilePostType]
+    posts: list[FeedPost]
     nextCursor: str | None = None
     hasMore: bool = False
 
 
 @strawberry.type
 class ProfilePayload:
-    """Response for profile mutations."""
+    """
+    Response returned when mutating a user's profile contents.
 
-    success: bool
-    profile: UserProfileType | None = None
-    message: str | None = None
-    error_code: str | None = None
+    Contains the fully resolved `UserProfileType` echoing back what exactly changed
+    on the backend seamlessly.
+
+    **Authentication:** Required
+    **Related operations:** update_profile
+    """
+
+    success: bool = strawberry.field(description="Whether the profile updated successfully")
+    profile: UserProfileType | None = strawberry.field(
+        default=None, description="The updated profile data"
+    )
+    message: str | None = strawberry.field(default=None, description="Success or error message")
+    error_code: str | None = strawberry.field(
+        default=None, description="Code dictating failure reason safely"
+    )
 
 
 def _dto_to_profile(dto) -> UserProfileType:
@@ -78,16 +83,7 @@ def _dto_to_profile(dto) -> UserProfileType:
         ),
         is_following=dto.is_following,
         is_own_profile=dto.is_own_profile,
-        recent_posts=[
-            ProfilePostType(
-                id=p.id,
-                type=p.type,
-                caption=p.caption,
-                share_url=p.share_url,
-                created_at=p.created_at,
-            )
-            for p in dto.recent_posts
-        ],
+        recent_posts=[_dto_to_feed_post(p) for p in dto.recent_posts],
         created_at=dto.created_at,
     )
 
@@ -96,13 +92,26 @@ def _dto_to_profile(dto) -> UserProfileType:
 class ProfileQueries:
     """Profile domain GraphQL queries."""
 
-    @strawberry.field(description="Get a user's profile")
+    @strawberry.field(
+        description="Retrieve a targeted user's public profile and follower statistics."
+    )
     def user_profile(
         self,
         info: strawberry.types.Info,
         user_id: str,
     ) -> UserProfileType | None:
-        """Get a user's profile with stats and viewer state."""
+        """
+        Get a specific user's public profile data globally safely.
+
+        Dynamically calculates if the `viewer_id` follows the target user, and populates
+        the `is_following` flag automatically. Fetches their recent public posts array.
+
+        **Authentication:** Optional (will modify viewer state tracking natively)
+        **Parameters:**
+        - user_id (String, required) - The UUID corresponding to the targeted user
+        **Returns:** Nullable UserProfileType
+        **Errors:** Returns None gracefully instead of blowing up the client if blocked/deleted.
+        """
         from core.profiles.services import ProfileService
         from core.shared.exceptions import ProfileError
 
@@ -117,7 +126,7 @@ class ProfileQueries:
         except ProfileError:
             return None
 
-    @strawberry.field(description="Get posts the user has liked")
+    @strawberry.field(description="Get paginated list of posts the targeted user has liked.")
     def liked_posts(
         self,
         info: strawberry.types.Info,
@@ -125,7 +134,20 @@ class ProfileQueries:
         limit: int = 20,
         cursor: str | None = None,
     ) -> ProfilePostResponseListDTO:
-        """Get posts a user has liked with pagination."""
+        """
+        Get chronological cursor paginated feed of posts a user has recently liked.
+
+        Filters for public visibility automatically natively. Re-calculates viewer_state
+        dynamically per post based on the requesting `viewer_id`.
+
+        **Authentication:** Optional
+        **Parameters:**
+        - user_id (String, required) - Remote target to query
+        - limit (Int, optional) - Cap bounds (defaults to 20)
+        - cursor (String, optional) - Pass nextCursor safely backwards
+        **Returns:** ProfilePostResponseListDTO with exact posts array
+        **Errors:** Returns empty array safely on error bounding.
+        """
         from core.profiles.services import ProfileService
 
         viewer_id = _get_authenticated_user_id(info)
@@ -137,16 +159,7 @@ class ProfileQueries:
             viewer_id=viewer_id,
         )
 
-        posts = [
-            ProfilePostType(
-                id=p.id,
-                type=p.type,
-                caption=p.caption,
-                share_url=p.share_url,
-                created_at=p.created_at,
-            )
-            for p in result["posts"]
-        ]
+        posts = [_dto_to_feed_post(p) for p in result["posts"]]
 
         return ProfilePostResponseListDTO(
             posts=posts,
@@ -159,7 +172,7 @@ class ProfileQueries:
 class ProfileMutations:
     """Profile domain GraphQL mutations."""
 
-    @strawberry.mutation(description="Update the authenticated user's profile")
+    @strawberry.mutation(description="Update the authenticated user's public profile information.")
     def update_profile(
         self,
         info: strawberry.types.Info,
@@ -168,7 +181,21 @@ class ProfileMutations:
         avatar_url: str | None = None,
         location: str | None = None,
     ) -> ProfilePayload:
-        """Update profile information."""
+        """
+        Modify existing user's profile content fields selectively natively.
+
+        Fields omitted natively are perfectly ignored yielding partial update guarantees.
+        Limits bio length internally dynamically to platform norms natively.
+
+        **Authentication:** Required
+        **Parameters:**
+        - bio (String, optional) - Public profile blurb
+        - full_name (String, optional) - Display label
+        - avatar_url (String, optional) - Public bucket URL
+        - location (String, optional) - Global location label
+        **Returns:** ProfilePayload echoing the complete updated entity cleanly
+        **Errors:** UNAUTHENTICATED, VALIDATION_ERROR native limits.
+        """
         from core.profiles.services import ProfileService
         from core.shared.exceptions import ProfileError
 
