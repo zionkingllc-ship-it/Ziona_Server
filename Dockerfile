@@ -9,12 +9,22 @@ RUN apt-get update && \
     apt-get install -y --no-install-recommends \
     gcc \
     libpq-dev \
+    curl \
+    && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && apt-get install -y nodejs \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+COPY package*.json ./
+RUN npm install
+
 COPY . .
+
+RUN python manage.py shell -c "from strawberry.printer import print_schema; from config.graphql_schema import schema; open('schema.graphql', 'w').write(print_schema(schema))"
+
+RUN npm run docs:build
 
 RUN python manage.py collectstatic --noinput 2>/dev/null || true
 
