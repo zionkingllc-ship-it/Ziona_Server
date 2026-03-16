@@ -16,9 +16,6 @@ class ProfileStatsType:
     posts_count: int = 0
 
 
-# ProfilePostType removed in favor of standard FeedPost from core.feed.schema
-
-
 @strawberry.type
 class UserProfileType:
     """A user's full profile."""

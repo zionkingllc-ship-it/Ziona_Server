@@ -16,9 +16,9 @@ logger = logging.getLogger(__name__)
 @shared_task(
     bind=True,
     max_retries=3,
-    default_retry_delay=60,  # 1 minute
+    default_retry_delay=60,
     retry_backoff=True,
-    retry_backoff_max=900,  # 15 minutes
+    retry_backoff_max=900,
     retry_jitter=True,
 )
 def send_email_async(
@@ -74,11 +74,9 @@ def send_email_async(
             },
         )
 
-        # Retry with exponential backoff
         try:
             raise self.retry(exc=exc)
         except self.MaxRetriesExceededError:
-            # All retries exhausted - log to Sentry
             logger.error(
                 f"Email failed after 3 retries: {subject}",
                 extra={
@@ -89,5 +87,4 @@ def send_email_async(
                 },
                 exc_info=True,
             )
-            # Sentry auto-captures via logging integration
             return {"success": False, "message": f"Failed after retries: {exc}"}

@@ -285,11 +285,13 @@ class JSDelivrScriptureService:
 
         if verse_end and verse_end > verse_start:
             verses = []
+            structured_verses = []
             for verse_num in range(verse_start, verse_end + 1):
                 verse_data = JSDelivrScriptureService._fetch_single_verse(
                     book_slug, chapter, verse_num, version_id
                 )
                 verses.append(verse_data["text"])
+                structured_verses.append({"number": verse_num, "text": verse_data["text"]})
 
             verse_text = " ".join(verses)
             reference = f"{book} {chapter}:{verse_start}-{verse_end}"
@@ -298,6 +300,7 @@ class JSDelivrScriptureService:
                 book_slug, chapter, verse_start, version_id
             )
             verse_text = verse_data["text"]
+            structured_verses = [{"number": verse_start, "text": verse_text}]
             reference = f"{book} {chapter}:{verse_start}"
 
         display_version = version_id.upper()
@@ -306,6 +309,7 @@ class JSDelivrScriptureService:
 
         result = {
             "text": verse_text,
+            "verses": structured_verses,
             "reference": reference,
             "version": display_version,
             "book": book,

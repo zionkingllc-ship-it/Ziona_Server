@@ -1,8 +1,8 @@
-"""GraphQL schema specific to scripture metadata lookup."""
-
-
 import strawberry
+from graphql import GraphQLError
 
+from core.scripture.constants import FREE_BIBLE_VERSIONS
+from core.scripture.exceptions import VersionNotAvailableError
 from core.scripture.services import ScriptureError, ScriptureService
 
 
@@ -32,21 +32,27 @@ class BibleBook:
 
 
 @strawberry.type
-class ScriptureResult:
+class VerseType:
+    """A single Bible verse."""
+
+    number: int
+    text: str
+
+
+@strawberry.type
+class ScriptureType:
     """
     Explicit verse text payload resulting from exact coordinates mapping.
-
-    **Authentication:** Optional depending on query globally
-    **Related operations:** scripture
     """
 
-    text: str = strawberry.field(description="The canonical sequence itself")
+    verses: list[VerseType]
+    text: str = strawberry.field(description="The full canonical sequence")
     reference: str = strawberry.field(description="Formatted label string literal ('John 3:16')")
     version: str = strawberry.field(description="Translation metadata")
     book: str = strawberry.field(description="Root index mapping")
     chapter: int = strawberry.field(description="Coordinates")
-    verseStart: int = strawberry.field(description="Coordinates")
-    verseEnd: int | None = strawberry.field(
+    verse_start: int = strawberry.field(description="Coordinates")
+    verse_end: int | None = strawberry.field(
         default=None, description="Coordinates bounded natively"
     )
 
@@ -54,11 +60,12 @@ class ScriptureResult:
 @strawberry.type
 class ScriptureQueries:
     @strawberry.field(
-        description="Extract canonical list representing available supported translations."
+        description="Extract canonical list representing available supported free translations."
     )
     def bibleVersions(self, language: str | None = None) -> list[BibleVersion]:
         """
         Get bounded array list mapping metadata for Scripture engine versions natively valid.
+        Currently limited to free tier versions for launch (KJV, ASV, WEB, RV).
 
         **Authentication:** Not required
         **Parameters:**
@@ -106,7 +113,8 @@ class ScriptureQueries:
         ]
 
     @strawberry.field(
-        description="Query mapping sequence directly returning bounded text preview literal."
+        description="Fetch explicit specific coordinates safely previewing verse text literal mapped natively. "
+        "Only free-tier versions (kjv, asv, web, rv) are supported for launch."
     )
     def scripture(
         self,
@@ -115,7 +123,7 @@ class ScriptureQueries:
         verseStart: int,
         verseEnd: int | None = None,
         version: str = "kjv",
-    ) -> ScriptureResult | None:
+    ) -> ScriptureType | None:
         """
         Fetch explicit specific coordinates safely previewing verse text literal mapped natively.
 
@@ -125,9 +133,9 @@ class ScriptureQueries:
         - chapter (Int, required) - Area
         - verseStart (Int, required) - Bounds
         - verseEnd (Int, optional) - Expanded bounds
-        - version (String, optional) - Translation lookup
-        **Returns:** Nullable ScriptureResult text payload explicitly
-        **Errors:** Fails yielding None seamlessly avoiding throws mapping cleanly.
+        - version (String, optional) - Translation lookup (kjv, asv, web, rv)
+        **Returns:** Nullable ScriptureType text payload explicitly
+        **Errors:** Fails yielding None if version is restricted or fetch fails.
         """
         try:
             result = ScriptureService.fetch_verse(
@@ -137,14 +145,23 @@ class ScriptureQueries:
                 verse_end=verseEnd,
                 version=version,
             )
-            return ScriptureResult(
+            return ScriptureType(
                 text=result["text"],
+                verses=[VerseType(number=v["number"], text=v["text"]) for v in result["verses"]],
                 reference=result["reference"],
                 version=result["version"],
                 book=result["book"],
                 chapter=result["chapter"],
-                verseStart=result["verse_start"],
-                verseEnd=result["verse_end"],
+                verse_start=result["verse_start"],
+                verse_end=result["verse_end"],
             )
+        except VersionNotAvailableError as e:
+            raise GraphQLError(
+                str(e),
+                extensions={
+                    "code": "VERSION_NOT_AVAILABLE",
+                    "availableVersions": FREE_BIBLE_VERSIONS,
+                },
+            ) from e
         except ScriptureError:
             return None

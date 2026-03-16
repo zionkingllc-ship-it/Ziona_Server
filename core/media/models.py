@@ -76,6 +76,14 @@ class MediaFile(TimestampedModel):
             models.Index(fields=["user", "status"], name="idx_media_user_status"),
         ]
 
+    @property
+    def url(self) -> str:
+        """Return public URL for the media file."""
+        if not self.storage_path:
+            return ""
+        # Mocking environment-based bucket URL
+        return f"https://storage.googleapis.com/ziona-dev-bucket/{self.storage_path}"
+
     def __str__(self) -> str:
         """Return string representation."""
         return f"{self.file_name} ({self.status})"

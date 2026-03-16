@@ -49,7 +49,6 @@ class OAuthService:
                 settings.GOOGLE_CLIENT_ID,
             )
 
-            # Verify token type
             if google_user_info.get("aud") != settings.GOOGLE_CLIENT_ID:
                 raise AuthenticationError(
                     "Invalid Google token audience",
@@ -67,42 +66,35 @@ class OAuthService:
                 )
 
         except ValueError as e:
-            # Token verification failed natively
             logger.error(f"Google token verification failed: {e}")
             raise AuthenticationError(
                 "Invalid Google authentication token",
                 code="INVALID_OAUTH_TOKEN",
             ) from e
 
-        # Check if email already exists
         existing_user = User.objects.filter(email=email).first()
         is_new_user = False
 
         if existing_user:
             if existing_user.social_auth_provider is None:
-                # Registered via email/password, not Google
                 raise AuthenticationError(
                     "This email is already registered with a password. Please sign in with your password instead, or use 'Forgot Password' to reset it.",
                     code="EMAIL_REGISTERED_WITH_PASSWORD",
                 )
 
             if existing_user.social_auth_provider != "google":
-                # Registered via different OAuth provider
                 raise AuthenticationError(
                     f"This email is already registered via {existing_user.social_auth_provider}. "
                     f"Please sign in with {existing_user.social_auth_provider} instead.",
                     code="EMAIL_REGISTERED_WITH_DIFFERENT_PROVIDER",
                 )
 
-            # Registered via Google - log them in natively
             user = existing_user
 
-            # Check for an old user record lacking the google_id and migrate them
             if not user.google_id:
                 user.google_id = google_id
                 user.save(update_fields=["google_id"])
         else:
-            # New user - create account via Google
             import secrets
 
             temp_username = f"user_{secrets.token_hex(4)}"
@@ -121,7 +113,6 @@ class OAuthService:
                 last_login_ip=ip_address,
             )
 
-            # Enforce disabling email/password bounds immediately
             user.set_unusable_password()
             user.save()
             is_new_user = True

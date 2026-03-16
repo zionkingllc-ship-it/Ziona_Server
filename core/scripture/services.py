@@ -6,9 +6,12 @@ Dynamically routes to JSDelivr CDN for 200+ free Bible translations.
 import logging
 import re
 
+from core.scripture.constants import FREE_BIBLE_VERSIONS
+from core.scripture.exceptions import VersionNotAvailableError
 from core.scripture.providers.jsdelivr import JSDelivrScriptureService
 
 logger = logging.getLogger("core.scripture")
+
 
 BIBLE_BOOKS = [
     "Genesis",
@@ -94,9 +97,9 @@ class ScriptureError(Exception):
 
 
 class ScriptureService:
-    """Main scripture service with hybrid provider routing.
+    """Main scripture service for Ziona Bible lookup.
 
-    Versions are dynamically loaded from the JSDelivr CDN manifest.
+    Routes to JSDelivr CDN for free Bible translations.
     """
 
     @staticmethod
@@ -149,24 +152,26 @@ class ScriptureService:
         verse_end: int | None = None,
         version: str = "kjv",
     ) -> dict:
-        """Fetch Bible verse from CDN.
+        """Fetch Bible verse from the free provider (JSDelivr CDN).
 
-        Accepts both short codes ('kjv') and full IDs ('en-kjv').
-        Validates version against the dynamic manifest.
+        Only supports versions defined in FREE_BIBLE_VERSIONS.
         """
-        version_id = JSDelivrScriptureService._resolve_version_id(version)
+        version_lower = version.lower().strip()
 
-        available_ids = JSDelivrScriptureService.get_version_ids()
-        if version_id not in available_ids:
-            raise ScriptureError(
-                f"Unknown Bible version '{version}'. "
-                "Use the bibleVersions query to see available options.",
-                code="SCRIPTURE_VERSION_NOT_AVAILABLE",
-            )
+        # Normalize short codes if needed (e.g. 'kjv' to 'en-kjv')
+        # We'll check both original and resolved ID against FREE_BIBLE_VERSIONS
+        version_id = JSDelivrScriptureService._resolve_version_id(version_lower)
+
+        # Check if version is allowed in free tier
+        # We check both the input version and the resolved ID
+        allowed_codes = FREE_BIBLE_VERSIONS
+        if version_lower not in allowed_codes and version_id.split("-")[-1] not in allowed_codes:
+            # ALWAYS raise error (not just in debug)
+            raise VersionNotAvailableError(version, allowed_codes)
 
         try:
             return JSDelivrScriptureService.fetch_verse(
-                book, chapter, verse_start, verse_end, version
+                book, chapter, verse_start, verse_end, version_id
             )
         except ValueError as e:
             raise ScriptureError(str(e), code="SCRIPTURE_FETCH_FAILED") from e
@@ -178,22 +183,33 @@ class ScriptureService:
 
     @staticmethod
     def get_available_versions() -> list[dict]:
-        """Return all available Bible versions from CDN manifest."""
-        manifest = JSDelivrScriptureService.get_versions_manifest()
+        """Return restricted list of free Bible versions for launch."""
         versions = []
-        for v in manifest:
-            abbrev = v.get("localVersionAbbreviation", "") or v["id"].split("-", 1)[-1].upper()
-            language = v.get("language", {})
-            versions.append(
-                {
-                    "code": v["id"],
-                    "name": v.get("version", v["id"]),
-                    "abbreviation": abbrev,
-                    "language": language.get("name", "Unknown"),
-                    "scope": JSDelivrScriptureService.normalize_scope(v.get("scope", "Bible")),
-                    "free": True,
-                }
-            )
+
+        try:
+            manifest = JSDelivrScriptureService.get_versions_manifest()
+            for v in manifest:
+                # Extract short code (e.g., 'kjv' from 'en-kjv')
+                short_code = v["id"].split("-")[-1].lower()
+
+                if short_code in FREE_BIBLE_VERSIONS:
+                    abbrev = v.get("localVersionAbbreviation", "") or short_code.upper()
+                    language = v.get("language", {})
+                    versions.append(
+                        {
+                            "code": short_code,  # Use short code for consistency
+                            "name": v.get("version", short_code.upper()),
+                            "abbreviation": abbrev,
+                            "language": language.get("name", "Unknown"),
+                            "scope": JSDelivrScriptureService.normalize_scope(
+                                v.get("scope", "Bible")
+                            ),
+                            "free": True,
+                        }
+                    )
+        except Exception as e:
+            logger.error(f"Failed to fetch free versions manifest: {e}")
+
         return versions
 
     @staticmethod

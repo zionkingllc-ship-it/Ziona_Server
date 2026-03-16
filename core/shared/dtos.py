@@ -41,8 +41,8 @@ class MediaItemDTO(CamelCaseModel):
 
     id: str
     url: str
-    width: int
-    height: int
+    width: int | None = None
+    height: int | None = None
     order: int
 
 
@@ -60,8 +60,8 @@ class VideoMediaDTO(CamelCaseModel):
     url: str
     thumbnail_url: str
     duration: int
-    width: int
-    height: int
+    width: int | None = None
+    height: int | None = None
 
 
 class TextMediaDTO(CamelCaseModel):

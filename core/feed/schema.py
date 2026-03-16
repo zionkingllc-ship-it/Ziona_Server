@@ -3,22 +3,13 @@
 
 import strawberry
 
+from core.media.schema import MediaFileType
+from core.shared.types import MediaType as MediaTypeEnum
 from core.users.schema import _get_authenticated_user_id
 
 
 @strawberry.type
-class MediaType:
-    """
-    Media file (image or video) seamlessly exposing mobile CDN URIs.
-    """
-
-    url: str
-    thumbnail_url: str | None = None
-    type: str = "image"
-
-
-@strawberry.type
-class DiscoverCategory:
+class CategoryType:
     """
     Discovery category strictly formatted for mobile frontend rendering.
 
@@ -83,7 +74,7 @@ class FeedPost:
     share_url: str
     created_at: str
 
-    _media_list: list[MediaType] = strawberry.field(
+    _media_list: list[MediaFileType] = strawberry.field(
         default_factory=list, description="Private holder for extracted media."
     )
 
@@ -93,7 +84,7 @@ class FeedPost:
         return self.caption
 
     @strawberry.field(description="Media files array natively (alias for mapped media DTO)")
-    def media(self) -> list[MediaType]:
+    def media(self) -> list[MediaFileType]:
         """Media files array mapped cleanly matching exactly what mobile expects"""
         return self._media_list
 
@@ -139,19 +130,25 @@ def _dto_to_feed_post(dto) -> FeedPost:
     if dto.media:
         if dto.type == "video":
             media_list.append(
-                MediaType(
+                MediaFileType(
+                    id=dto.id,
                     url=dto.media.url,
-                    thumbnail_url=getattr(dto.media, "thumbnail_url", None) or dto.media.url,
-                    type="video",
+                    thumbnail=getattr(dto.media, "thumbnail_url", None) or dto.media.url,
+                    type=MediaTypeEnum.VIDEO,
+                    width=getattr(dto.media, "width", None),
+                    height=getattr(dto.media, "height", None),
                 )
             )
         elif dto.type == "image":
-            for img in dto.media.images:
+            for img in dto.media.items:
                 media_list.append(
-                    MediaType(
+                    MediaFileType(
+                        id=getattr(img, "id", dto.id),
                         url=img.url,
-                        thumbnail_url=getattr(img, "thumbnail_url", None) or img.url,
-                        type="image",
+                        thumbnail=getattr(img, "thumbnail_url", None) or img.url,
+                        type=MediaTypeEnum.IMAGE,
+                        width=getattr(img, "width", None),
+                        height=getattr(img, "height", None),
                     )
                 )
 
@@ -194,7 +191,7 @@ class FeedQueries:
     @strawberry.field(
         description="Get all discovery categories securely formatted for algorithmic content filtering."
     )
-    def discover_categories(self) -> list[DiscoverCategory]:
+    def discover_categories(self) -> list[CategoryType]:
         """
         Get discovery categories packaged with specific icons and Figma hex colors natively.
 
@@ -206,7 +203,7 @@ class FeedQueries:
         **Errors:** None
         """
         return [
-            DiscoverCategory(
+            CategoryType(
                 id="all",
                 label="All",
                 slug="all",
@@ -215,7 +212,7 @@ class FeedQueries:
                 bd_color="#E5D5B0",
                 order=0,
             ),
-            DiscoverCategory(
+            CategoryType(
                 id="love",
                 label="Love",
                 slug="love",
@@ -224,7 +221,7 @@ class FeedQueries:
                 bd_color="#F5B8C0",
                 order=1,
             ),
-            DiscoverCategory(
+            CategoryType(
                 id="trust",
                 label="Trust",
                 slug="trust",
@@ -233,7 +230,7 @@ class FeedQueries:
                 bd_color="#B8CEE8",
                 order=2,
             ),
-            DiscoverCategory(
+            CategoryType(
                 id="worship",
                 label="Worship",
                 slug="worship",
@@ -242,7 +239,7 @@ class FeedQueries:
                 bd_color="#F5E8B0",
                 order=3,
             ),
-            DiscoverCategory(
+            CategoryType(
                 id="patience",
                 label="Patience",
                 slug="patience",
@@ -251,7 +248,7 @@ class FeedQueries:
                 bd_color="#DCC8E8",
                 order=4,
             ),
-            DiscoverCategory(
+            CategoryType(
                 id="prayer",
                 label="Prayer",
                 slug="prayer",
@@ -261,6 +258,55 @@ class FeedQueries:
                 order=5,
             ),
         ]
+
+    @strawberry.field(
+        description="Get the public or personalized feed. Works with or without authentication."
+    )
+    def feed(
+        self,
+        info: strawberry.types.Info,
+        limit: int = 20,
+        cursor: str | None = None,
+    ) -> FeedResponse:
+        """
+        Get public feed.
+
+        **Authentication:** OPTIONAL
+        - Authenticated: Personalized feed based on follows
+        - Unauthenticated: Public discovery feed
+        """
+        from core.feed.services import FeedService
+
+        user_id = _get_authenticated_user_id(info)
+
+        result = FeedService.get_feed(
+            viewer_id=user_id,
+            cursor=cursor,
+            limit=limit,
+        )
+
+        return FeedResponse(
+            posts=[_dto_to_feed_post(p) for p in result.posts],
+            next_cursor=result.next_cursor,
+            has_more=result.has_more,
+            empty_state=(
+                EmptyState(
+                    message=result.empty_state.message,
+                    suggestions=[
+                        UserSuggestion(
+                            id=s.id,
+                            username=s.username,
+                            avatar_url=s.avatar_url,
+                            bio=s.bio,
+                            followers_count=s.followers_count,
+                        )
+                        for s in result.empty_state.suggestions
+                    ],
+                )
+                if result.empty_state
+                else None
+            ),
+        )
 
     @strawberry.field(description="Get the personalized For You content feed reliably.")
     def for_you_feed(

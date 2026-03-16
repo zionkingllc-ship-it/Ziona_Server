@@ -29,6 +29,29 @@ class FeedService:
     """Service handling feed generation and caching."""
 
     @staticmethod
+    def get_feed(
+        viewer_id: str | None = None,
+        cursor: str | None = None,
+        limit: int = DEFAULT_FEED_LIMIT,
+    ) -> FeedResponseDTO:
+        """Get public or personalized feed.
+
+        Args:
+            viewer_id: UUID of the requesting user (optional).
+            cursor: Post ID for cursor pagination.
+            limit: Page size.
+
+        Returns:
+            FeedResponseDTO.
+        """
+        if viewer_id:
+            # For now, map to for-you feed which handles ranking
+            return FeedService.get_for_you_feed(user_id=viewer_id, cursor=cursor, limit=limit)
+
+        # Unauthenticated: Show popular content
+        return FeedService._public_discovery_feed(cursor, limit)
+
+    @staticmethod
     def get_for_you_feed(
         user_id: str,
         cursor: str | None = None,
@@ -94,7 +117,7 @@ class FeedService:
 
         qs = (
             Post.objects.select_related("user")
-            .prefetch_related("post_media")
+            .prefetch_related("media_files", "post_media")
             .filter(
                 user_id__in=following_ids,
                 deleted_at__isnull=True,
@@ -124,7 +147,7 @@ class FeedService:
         post_dtos = [
             PostService._build_post_dto(
                 post=p,
-                media_items=list(p.post_media.all()),
+                media_items=list(p.media_files.all()) or list(p.post_media.all()),
                 viewer_id=user_id,
             )
             for p in posts
@@ -158,7 +181,7 @@ class FeedService:
 
         qs = (
             Post.objects.select_related("user")
-            .prefetch_related("post_media")
+            .prefetch_related("media_files", "post_media")
             .filter(deleted_at__isnull=True)
             .exclude(user_id=user_id)
             .annotate(
@@ -192,7 +215,7 @@ class FeedService:
         post_dtos = [
             PostService._build_post_dto(
                 post=p,
-                media_items=list(p.post_media.all()),
+                media_items=list(p.media_files.all()) or list(p.post_media.all()),
                 viewer_id=user_id,
             )
             for p in posts
@@ -339,6 +362,53 @@ class FeedService:
                 post=p,
                 media_items=list(p.post_media.all()),
                 viewer_id=user_id,
+            )
+            for p in posts
+        ]
+
+        return FeedResponseDTO(
+            posts=post_dtos,
+            next_cursor=str(posts[-1].id) if has_more and posts else None,
+            has_more=has_more,
+        )
+
+    @staticmethod
+    def _public_discovery_feed(
+        cursor: str | None,
+        limit: int,
+    ) -> FeedResponseDTO:
+        """Feed for unauthenticated users — popular content."""
+        qs = (
+            Post.objects.select_related("user")
+            .prefetch_related("media_files")
+            .filter(deleted_at__isnull=True)
+            .annotate(
+                likes_count=Count("likes", distinct=True),
+                comments_count=Count(
+                    "comments",
+                    filter=Q(comments__deleted_at__isnull=True),
+                    distinct=True,
+                ),
+                shares_count=Count("shares", distinct=True),
+                saves_count=Count("saves", distinct=True),
+                engagement_score=F("likes_count") + F("comments_count") * 2 + F("shares_count") * 3,
+            )
+            .order_by("-engagement_score", "-created_at")
+        )
+
+        if cursor:
+            qs = FeedService._apply_cursor(qs, cursor)
+
+        posts = list(qs[: limit + 1])
+        has_more = len(posts) > limit
+        posts = posts[:limit]
+
+        from core.posts.services import PostService
+
+        post_dtos = [
+            PostService._build_post_dto(
+                post=p,
+                media_items=list(p.media_files.all()) or list(p.post_media.all()),
             )
             for p in posts
         ]

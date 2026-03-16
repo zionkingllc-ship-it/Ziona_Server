@@ -9,7 +9,7 @@ from datetime import datetime, timedelta, timezone
 
 from core.engagement.models import Like, Save
 from core.follows.models import Follow
-from core.posts.models import Post, PostCategory, PostMedia, PostType
+from core.posts.models import Post, PostMedia, PostType
 from core.posts.selectors import PostSelector
 from core.shared.dtos import (
     AuthorDTO,
@@ -50,20 +50,15 @@ class PostService:
         user_id: str,
         post_type: str,
         caption: str | None = None,
-        media_items: list[dict] | None = None,
-        category: str | None = None,
-        scripture_book: str | None = None,
-        scripture_chapter: int | None = None,
-        scripture_verse_start: int | None = None,
-        scripture_verse_end: int | None = None,
-        scripture_version: str = "KJV",
+        category_id: str | None = None,
+        media_ids: list[str] | None = None,
+        media_type: str | None = None,
+        scripture_reference: dict | None = None,
     ) -> PostResponseDTO:
-        """Create a new post and distribute to followers.idation and media linking.
+        """Create a new post matching the agreed mobile contract.
 
         Args:
             user_id: UUID of the post author.
-            post_type: Content type (image, video, text).
-            caption: Post text content.
             media_items: List of media dicts with url, type, thumbnail_url,
                          width, height, duration, order.
             category: Optional faith category.
@@ -74,203 +69,77 @@ class PostService:
         Raises:
             PostError: If validation fails.
         """
+        from core.media.models import MediaFile
         from core.users.models import User
 
-        media_items = media_items or []
+        # 1. Resolve Media IDs
+        resolved_media_files = []
+        if media_ids:
+            resolved_media_files = list(MediaFile.objects.filter(id__in=media_ids))
+            if len(resolved_media_files) != len(media_ids):
+                raise PostError(
+                    message="One or more media IDs not found",
+                    code=ErrorCode.VALIDATION_ERROR,
+                )
 
-        # Validate post type
-        if post_type not in PostType.values:
-            raise PostError(
-                message=f"Invalid post type: {post_type}",
-                code=ErrorCode.INVALID_POST_TYPE,
-            )
-
-        # Validate category
-        if category and category not in PostCategory.values:
-            raise PostError(
-                message=f"Invalid category: {category}",
-                code=ErrorCode.INVALID_CATEGORY,
-            )
-
-        scripture_text = ""
+        # 2. Handle Scripture
         scripture_fields = {}
+        if scripture_reference:
+            from core.scripture.services import ScriptureError, ScriptureService
 
-        # Type-specific validation
-        if post_type == PostType.TEXT:
-            if not caption and not scripture_book:
-                raise PostError(
-                    message="Text posts must have a caption or scripture.",
-                    code=ErrorCode.VALIDATION_ERROR,
+            try:
+                verse_data = ScriptureService.fetch_verse(
+                    book=scripture_reference.get("book"),
+                    chapter=scripture_reference.get("chapter"),
+                    verse_start=scripture_reference.get("verse_start"),
+                    verse_end=scripture_reference.get("verse_end"),
+                    version=scripture_reference.get("version", "kjv"),
                 )
+                scripture_fields = {
+                    "scripture_book": verse_data["book"],
+                    "scripture_chapter": verse_data["chapter"],
+                    "scripture_verse_start": verse_data["verse_start"],
+                    "scripture_verse_end": verse_data["verse_end"],
+                    "scripture_version": verse_data["version"],
+                }
+            except ScriptureError as e:
+                raise PostError(message=e.message, code=ErrorCode.VALIDATION_ERROR) from e
 
-            if scripture_book and scripture_chapter and scripture_verse_start:
-                from core.scripture.services import ScriptureError, ScriptureService
-
-                try:
-                    verse_data = ScriptureService.fetch_verse(
-                        book=scripture_book,
-                        chapter=scripture_chapter,
-                        verse_start=scripture_verse_start,
-                        verse_end=scripture_verse_end,
-                        version=scripture_version,
-                    )
-                    scripture_text = verse_data["text"]
-                    scripture_fields = {
-                        "scripture_book": verse_data["book"],
-                        "scripture_chapter": verse_data["chapter"],
-                        "scripture_verse_start": verse_data["verse_start"],
-                        "scripture_verse_end": verse_data["verse_end"],
-                        "scripture_version": verse_data["version"],
-                    }
-                except ScriptureError as e:
-                    raise PostError(
-                        message=e.message,
-                        code=ErrorCode.VALIDATION_ERROR,
-                    ) from e
-
-            combined_len = len(caption or "") + len(scripture_text)
-            if combined_len > TEXT_POST_MAX_CAPTION:
-                raise PostError(
-                    message=f"Text payload cap is {TEXT_POST_MAX_CAPTION} chars (including scripture). You provided {combined_len}.",
-                    code="TEXT_POST_TOO_LONG_WITH_SCRIPTURE"
-                    if scripture_text
-                    else ErrorCode.VALIDATION_ERROR,
-                )
-            if media_items:
-                raise PostError(
-                    message="Text posts cannot have media attachments.",
-                    code=ErrorCode.VALIDATION_ERROR,
-                )
-
-        elif post_type == PostType.IMAGE:
-            if not media_items:
-                raise PostError(
-                    message=f"Image posts require {IMAGE_MIN_COUNT}-{IMAGE_MAX_COUNT} images",
-                    code=ErrorCode.IMAGE_COUNT_INVALID,
-                )
-            if len(media_items) < IMAGE_MIN_COUNT or len(media_items) > IMAGE_MAX_COUNT:
-                raise PostError(
-                    message=f"Image posts require {IMAGE_MIN_COUNT}-{IMAGE_MAX_COUNT} images",
-                    code=ErrorCode.IMAGE_COUNT_INVALID,
-                    extensions={
-                        "min_count": IMAGE_MIN_COUNT,
-                        "max_count": IMAGE_MAX_COUNT,
-                        "actual_count": len(media_items),
-                    },
-                )
-            for item in media_items:
-                if item.get("media_type") != "image":
-                    raise PostError(
-                        message="Image posts can only contain image media",
-                        code=ErrorCode.MEDIA_TYPE_MISMATCH,
-                    )
-            if caption and len(caption) > MEDIA_POST_MAX_CAPTION:
-                raise PostError(
-                    message=f"Caption limited to {MEDIA_POST_MAX_CAPTION} characters",
-                    code=ErrorCode.TEXT_POST_TOO_LONG,
-                )
-
-        elif post_type == PostType.VIDEO:
-            if len(media_items) != 1:
-                raise PostError(
-                    message="Video posts require exactly 1 video",
-                    code=ErrorCode.IMAGE_COUNT_INVALID,
-                )
-            video = media_items[0]
-            if video.get("media_type") != "video":
-                raise PostError(
-                    message="Video posts must contain video media",
-                    code=ErrorCode.MEDIA_TYPE_MISMATCH,
-                )
-            duration = video.get("duration", 0)
-            if duration < VIDEO_MIN_DURATION:
-                raise PostError(
-                    message=f"Video must be at least {VIDEO_MIN_DURATION} seconds",
-                    code=ErrorCode.VIDEO_TOO_SHORT,
-                    extensions={
-                        "min_duration": VIDEO_MIN_DURATION,
-                        "actual_duration": duration,
-                    },
-                )
-            if duration > VIDEO_MAX_DURATION:
-                raise PostError(
-                    message=f"Video cannot exceed {VIDEO_MAX_DURATION} seconds",
-                    code=ErrorCode.VIDEO_TOO_LONG,
-                    extensions={
-                        "max_duration": VIDEO_MAX_DURATION,
-                        "actual_duration": duration,
-                    },
-                )
-            if caption and len(caption) > MEDIA_POST_MAX_CAPTION:
-                raise PostError(
-                    message=f"Caption limited to {MEDIA_POST_MAX_CAPTION} characters",
-                    code=ErrorCode.TEXT_POST_TOO_LONG,
-                )
-        else:
-            if len(caption or "") > MEDIA_POST_MAX_CAPTION:
-                raise PostError(
-                    message=f"Caption exceeds {MEDIA_POST_MAX_CAPTION} items.",
-                    code=ErrorCode.VALIDATION_ERROR,
-                )
-
-            if scripture_book and scripture_chapter and scripture_verse_start:
-                from core.scripture.services import ScriptureError, ScriptureService
-
-                try:
-                    verse_data = ScriptureService.fetch_verse(
-                        book=scripture_book,
-                        chapter=scripture_chapter,
-                        verse_start=scripture_verse_start,
-                        verse_end=scripture_verse_end,
-                        version=scripture_version,
-                    )
-                    scripture_fields = {
-                        "scripture_book": verse_data["book"],
-                        "scripture_chapter": verse_data["chapter"],
-                        "scripture_verse_start": verse_data["verse_start"],
-                        "scripture_verse_end": verse_data["verse_end"],
-                        "scripture_version": verse_data["version"],
-                    }
-                except ScriptureError as e:
-                    raise PostError(
-                        message=e.message,
-                        code=ErrorCode.VALIDATION_ERROR,
-                    ) from e
-
+        # 3. Create Post Record
         try:
             user = User.objects.get(id=user_id, deleted_at__isnull=True)
         except User.DoesNotExist:
-            raise PostError(
-                message="User not found",
-                code=ErrorCode.USER_NOT_FOUND,
-            ) from None
+            raise PostError(message="User not found", code=ErrorCode.USER_NOT_FOUND) from None
+
+        # Map mobile types to internal models
+        internal_post_type = post_type.lower()
+        if post_type == "TEXT":
+            internal_post_type = "text"
+        if post_type == "MEDIA":
+            internal_post_type = "image"  # Default to image
+        if post_type == "BIBLE":
+            internal_post_type = "text"  # Bible posts are text-based or new type
+
+        # Refine type based on resolved media
+        if media_type == "VIDEO" or any(m.media_type == "video" for m in resolved_media_files):
+            internal_post_type = "video"
+        elif any(m.media_type == "image" for m in resolved_media_files):
+            internal_post_type = "image"
 
         post = Post.objects.create(
             user=user,
-            post_type=post_type,
+            post_type=internal_post_type,
             caption=caption or "",
-            category=category,
-            media_count=len(media_items),
+            category=category_id,
+            media_count=len(resolved_media_files),
             **scripture_fields,
         )
 
-        post_media_objects = []
-        for idx, item in enumerate(media_items):
-            post_media_objects.append(
-                PostMedia(
-                    post=post,
-                    media_url=item["media_url"],
-                    media_type=item["media_type"],
-                    thumbnail_url=item.get("thumbnail_url", ""),
-                    order=idx,
-                    width=item.get("width", 0),
-                    height=item.get("height", 0),
-                    duration=item.get("duration"),
-                )
-            )
-        if post_media_objects:
-            PostMedia.objects.bulk_create(post_media_objects)
+        # 4. Associate Media
+        if resolved_media_files:
+            post.media_files.set(resolved_media_files)
 
+        # 5. Invalidate Cache
         try:
             from core.feed.tasks import invalidate_followers_feed_cache
 
@@ -278,19 +147,9 @@ class PostService:
         except Exception:
             logger.warning("Failed to queue feed cache invalidation")
 
-        logger.info(
-            "post_created",
-            extra={
-                "post_id": str(post.id),
-                "user_id": str(user.id),
-                "post_type": post_type,
-                "media_count": len(media_items),
-            },
-        )
-
         return PostService._build_post_dto(
             post,
-            list(post.post_media.all()),
+            resolved_media_files,
             viewer_id=str(user.id),
             is_owner=True,
         )
@@ -446,27 +305,36 @@ class PostService:
             avatar_url=post.user.avatar_url or None,
         )
 
-        if post.post_type == PostType.IMAGE:
-            media = ImageMediaDTO(
-                items=[
+        if post.post_type in [PostType.IMAGE, "image", "image_post"]:
+            media_items_dto = []
+            # Sort if they have order attr, otherwise use as is
+            sorted_items = sorted(media_items, key=lambda x: getattr(x, "order", 0))
+            for m in sorted_items:
+                m_id = str(getattr(m, "id", ""))
+                m_url = getattr(m, "url", getattr(m, "media_url", ""))
+                m_width = getattr(m, "width", 0)
+                m_height = getattr(m, "height", 0)
+                media_items_dto.append(
                     MediaItemDTO(
-                        id=str(m.id),
-                        url=m.media_url,
-                        width=m.width,
-                        height=m.height,
-                        order=m.order,
+                        id=m_id,
+                        url=m_url,
+                        width=m_width,
+                        height=m_height,
+                        order=getattr(m, "order", 0),
                     )
-                    for m in sorted(media_items, key=lambda x: x.order)
-                ],
-            )
-        elif post.post_type == PostType.VIDEO and media_items:
+                )
+            media = ImageMediaDTO(items=media_items_dto)
+        elif (post.post_type in [PostType.VIDEO, "video"]) and media_items:
             v = media_items[0]
+            v_url = getattr(v, "url", getattr(v, "media_url", ""))
+            v_thumb = getattr(v, "thumbnail_url", getattr(v, "thumbnail_path", ""))
+            v_duration = getattr(v, "duration", 0)
             media = VideoMediaDTO(
-                url=v.media_url,
-                thumbnail_url=v.thumbnail_url or "",
-                duration=v.duration or 0,
-                width=v.width,
-                height=v.height,
+                url=v_url,
+                thumbnail_url=v_thumb or "",
+                duration=v_duration or 0,
+                width=getattr(v, "width", 0),
+                height=getattr(v, "height", 0),
             )
         else:
             media = TextMediaDTO()

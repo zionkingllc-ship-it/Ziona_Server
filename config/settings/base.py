@@ -247,3 +247,7 @@ LOGGING = {
         },
     },
 }
+
+# Bible API Configuration
+API_BIBLE_KEY = env("API_BIBLE_KEY", default=None)
+ENABLE_PREMIUM_BIBLE_VERSIONS = env.bool("ENABLE_PREMIUM_BIBLE_VERSIONS", default=False)

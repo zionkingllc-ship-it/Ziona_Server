@@ -65,6 +65,12 @@ class Post(SoftDeleteModel):
     media_count = models.IntegerField(default=0)
     view_count = models.IntegerField(default=0)
     is_mature_content = models.BooleanField(default=False)
+    media_files = models.ManyToManyField(
+        "media.MediaFile",
+        related_name="posts",
+        blank=True,
+        help_text="Attached media files via uploadMedia",
+    )
 
     scripture_book = models.CharField(max_length=50, blank=True, null=True)
     scripture_chapter = models.IntegerField(blank=True, null=True)

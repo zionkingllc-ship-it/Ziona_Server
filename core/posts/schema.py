@@ -1,43 +1,41 @@
-from __future__ import annotations
+from typing import Optional
 
 import strawberry
 
-from core.feed.schema import FeedPost
+from core.feed.schema import CategoryType
+from core.media.schema import MediaFileType
+from core.shared.types import ErrorType, MediaType, PostType
 from core.users.schema import _get_authenticated_user_id
 
 
-@strawberry.type
-class MediaItemInput:
-    """Input for a single media attachment."""
+@strawberry.input
+class ScriptureInput:
+    book: str
+    chapter: int
+    verse_start: int
+    verse_end: int | None = None
+    version: str | None = "kjv"
 
-    url: str
-    media_type: str
-    thumbnail_url: str | None = None
-    width: int = 0
-    height: int = 0
-    duration: int | None = None
-    order: int = 0
+
+@strawberry.type
+class CreatePostPayload:
+    """
+    Standard response wrapper for Post mutations.
+    """
+
+    success: bool = strawberry.field(description="Whether the mutation succeeded")
+    post: Optional["Post"] = strawberry.field(default=None, description="The resulting post")
+    error: ErrorType | None = strawberry.field(default=None, description="Explicit error info")
 
 
 @strawberry.type
 class PostPayload:
-    """
-    Standard response wrapper for Post mutations.
+    """Legacy response wrapper for update/delete post mutations."""
 
-    Contains the resulting `post_id` used for frontend routing on success.
-
-    **Authentication:** Required
-    **Related operations:** create_post, update_post, delete_post
-    """
-
-    success: bool = strawberry.field(description="Whether the mutation succeeded")
-    post_id: str | None = strawberry.field(
-        default=None, description="The UUID of the affected post"
-    )
-    message: str | None = strawberry.field(default=None, description="Error or success string")
-    error_code: str | None = strawberry.field(
-        default=None, description="Detailed failure string identifier"
-    )
+    success: bool
+    post_id: str | None = None
+    message: str | None = None
+    error_code: str | None = None
 
 
 @strawberry.type
@@ -45,91 +43,90 @@ class PostMutations:
     """Post domain GraphQL mutations."""
 
     @strawberry.mutation(
-        description="Create a new multimedia app post. Supports Text, Image, and Video variants with nested Scriptures."
+        description="Create a new multimedia app post. Supports Text, Media, and Bible variants."
     )
     def create_post(
         self,
         info: strawberry.types.Info,
-        post_type: str,
+        post_type: PostType,
         caption: str | None = None,
-        category: str | None = None,
-        media_urls: list[str] | None = None,
-        media_type: str | None = None,
-        thumbnail_url: str | None = None,
-        width: int = 0,
-        height: int = 0,
-        duration: int | None = None,
-        scripture_book: str | None = None,
-        scripture_chapter: int | None = None,
-        scripture_verse_start: int | None = None,
-        scripture_verse_end: int | None = None,
-        scripture_version: str | None = "KJV",
-    ) -> PostPayload:
+        category_id: str | None = None,
+        media_ids: list[str] | None = None,
+        media_type: MediaType | None = None,
+        scripture_reference: ScriptureInput | None = None,
+    ) -> CreatePostPayload:
         """
-        Create a new content post globally.
+        Create a new post.
 
-        This handles all 3 media configurations dynamically: Images (up to 10), Video (single 80s chunk),
-        and Text (no media needed). Attaches scripture safely globally if bounded.
+        **Steps:**
+        1. Upload media first using uploadMedia mutation
+        2. Get mediaId from upload response
+        3. Call createPost with mediaIds
 
-        **Authentication:** Required
-        **Parameters:**
-        - post_type (String, required) - Defines boundary rules
-        - caption (String, optional) - Allowed for all types
-        - media_urls ([String], optional) - Media paths mapped cleanly
-        - scripture_* (Various, optional) - Formats a dynamic Bible preview natively
-        **Returns:** PostPayload resolving to the inserted database `post_id`
-        **Errors:** UNAUTHENTICATED, VALIDATION_ERROR native limits.
+        **Validation:**
+        - TEXT posts: Only caption or scripture required
+        - MEDIA posts: mediaIds and mediaType required
+        - BIBLE posts: scriptureReference required
         """
         from core.posts.services import PostService
         from core.shared.exceptions import PostError
 
         user_id = _get_authenticated_user_id(info)
         if not user_id:
-            return PostPayload(
+            return CreatePostPayload(
                 success=False,
-                message="Authentication required",
-                error_code="UNAUTHORIZED",
+                error=ErrorType(code="UNAUTHORIZED", message="Authentication required"),
+            )
+
+        # Validate post type specific requirements
+        if post_type == PostType.TEXT and media_ids:
+            return CreatePostPayload(
+                success=False,
+                error=ErrorType(
+                    code="INVALID_POST_TYPE",
+                    message="TEXT posts cannot have media",
+                    field="mediaIds",
+                ),
+            )
+
+        if post_type == PostType.MEDIA and not media_ids:
+            return CreatePostPayload(
+                success=False,
+                error=ErrorType(
+                    code="MISSING_REQUIRED_FIELD",
+                    message="MEDIA posts require mediaIds",
+                    field="mediaIds",
+                ),
+            )
+
+        if post_type == PostType.BIBLE and not scripture_reference:
+            return CreatePostPayload(
+                success=False,
+                error=ErrorType(
+                    code="MISSING_REQUIRED_FIELD",
+                    message="BIBLE posts require scripture_reference",
+                    field="scripture_reference",
+                ),
             )
 
         try:
-            media_items = None
-            if media_urls:
-                media_items = [
-                    {
-                        "media_url": url,
-                        "media_type": media_type or post_type,
-                        "thumbnail_url": thumbnail_url,
-                        "width": width,
-                        "height": height,
-                        "duration": duration,
-                        "order": i,
-                    }
-                    for i, url in enumerate(media_urls)
-                ]
-
-            result = PostService.create_post(
+            post_dto = PostService.create_post(
                 user_id=user_id,
-                post_type=post_type,
+                post_type=post_type.value,
                 caption=caption,
-                media_items=media_items,
-                category=category,
-                scripture_book=scripture_book,
-                scripture_chapter=scripture_chapter,
-                scripture_verse_start=scripture_verse_start,
-                scripture_verse_end=scripture_verse_end,
-                scripture_version=scripture_version or "KJV",
+                category_id=category_id,
+                media_ids=media_ids,
+                media_type=media_type.value if media_type else None,
+                scripture_reference=scripture_reference.__dict__ if scripture_reference else None,
             )
 
-            return PostPayload(
-                success=True,
-                post_id=result.id,
-            )
-        except PostError as e:
-            return PostPayload(
-                success=False,
-                message=e.message,
-                error_code=e.code,
-            )
+            # We'll map PostResponseDTO to the Post GraphQL type
+            # Need to define the Post type first
+            return CreatePostPayload(success=True, post=_dto_to_post(post_dto))
+        except (PostError, ValueError) as e:
+            code = getattr(e, "code", "VALIDATION_ERROR")
+            message = getattr(e, "message", str(e))
+            return CreatePostPayload(success=False, error=ErrorType(code=code, message=message))
 
     @strawberry.mutation(
         description="Edit the caption of an existing post. Only accessible by post owner."
@@ -219,6 +216,82 @@ class PostMutations:
 
 
 @strawberry.type
+class Post:
+    id: str
+    caption: str | None
+    post_type: str
+    created_at: str
+    share_url: str
+    category_id: str | None = None
+
+    _dto: strawberry.Private[object] = None
+
+    @strawberry.field
+    def text(self) -> str | None:
+        """Post caption/text - mobile expects 'text' field cleanly"""
+        return self.caption
+
+    @strawberry.field
+    def media(self) -> list[MediaFileType]:
+        """Return media files with full structure."""
+        media_list = []
+        if not self._dto or not self._dto.media:
+            return media_list
+
+        if self.post_type.lower() == "video":
+            media_list.append(
+                MediaFileType(
+                    id=self.id,  # Using post ID for single video for now, or resolving from DTO
+                    url=self._dto.media.url,
+                    type=MediaType.VIDEO,
+                    width=getattr(self._dto.media, "width", 0),
+                    height=getattr(self._dto.media, "height", 0),
+                    thumbnail=getattr(self._dto.media, "thumbnail_url", ""),
+                )
+            )
+        elif self.post_type.lower() == "image":
+            for img in self._dto.media.items:
+                media_list.append(
+                    MediaFileType(
+                        id=img.id,
+                        url=img.url,
+                        type=MediaType.IMAGE,
+                        width=img.width,
+                        height=img.height,
+                    )
+                )
+        return media_list
+
+    @strawberry.field
+    def category(self) -> CategoryType | None:
+        """Full category object."""
+        from core.feed.schema import FeedQueries
+
+        if not self.category_id:
+            return None
+
+        # Resolve from static list or service
+        categories = FeedQueries().discover_categories()
+        for cat in categories:
+            if cat.id == self.category_id:
+                return CategoryType(id=cat.id, label=cat.label, slug=cat.slug, icon=cat.icon)
+        return None
+
+
+def _dto_to_post(dto) -> Post:
+    """Map PostResponseDTO to GraphQL Post type."""
+    return Post(
+        id=dto.id,
+        caption=dto.caption,
+        post_type=dto.type,
+        created_at=dto.created_at,
+        share_url=dto.share_url,
+        category_id=dto.category_id,
+        _dto=dto,
+    )
+
+
+@strawberry.type
 class PostQueries:
     """Post domain GraphQL queries."""
 
@@ -229,7 +302,7 @@ class PostQueries:
         self,
         info: strawberry.types.Info,
         id: strawberry.ID,
-    ) -> FeedPost | None:
+    ) -> Post | None:
         """
         Fetch a single post entity by ID safely.
 
@@ -242,7 +315,6 @@ class PostQueries:
         **Returns:** Nullable FeedPost
         **Errors:** Returns None gracefully if post is missing or deleted.
         """
-        from core.feed.schema import _dto_to_feed_post
         from core.posts.services import PostService
         from core.shared.exceptions import PostError
 
@@ -250,6 +322,6 @@ class PostQueries:
 
         try:
             result = PostService.get_post(post_id=str(id), viewer_id=viewer_id)
-            return _dto_to_feed_post(result)
+            return _dto_to_post(result)
         except PostError:
             return None

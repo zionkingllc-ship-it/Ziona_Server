@@ -19,8 +19,9 @@ logger = logging.getLogger("core.media")
 ALLOWED_TYPES = {
     "image/jpeg": {"ext": "jpg", "media_type": MediaType.IMAGE, "max_size": 10 * 1024 * 1024},
     "image/png": {"ext": "png", "media_type": MediaType.IMAGE, "max_size": 10 * 1024 * 1024},
-    "image/webp": {"ext": "webp", "media_type": MediaType.IMAGE, "max_size": 10 * 1024 * 1024},
-    "video/mp4": {"ext": "mp4", "media_type": MediaType.VIDEO, "max_size": 100 * 1024 * 1024},
+    "image/jpg": {"ext": "jpg", "media_type": MediaType.IMAGE, "max_size": 10 * 1024 * 1024},
+    "video/mp4": {"ext": "mp4", "media_type": MediaType.VIDEO, "max_size": 50 * 1024 * 1024},
+    "video/quicktime": {"ext": "mov", "media_type": MediaType.VIDEO, "max_size": 50 * 1024 * 1024},
 }
 
 MAGIC_BYTES = {
@@ -142,6 +143,64 @@ class MediaService:
         }
 
     @staticmethod
+    def upload_media(user_id: str, file: Any, media_type: str) -> MediaFile:
+        """Process an uploaded file and create a MediaFile record.
+
+        Args:
+            user_id: ID of the uploader.
+            file: The uploaded file object (e.g., from Strawberry Upload).
+            media_type: 'IMAGE' or 'VIDEO'.
+
+        Returns:
+            Created MediaFile instance.
+        """
+        from django.core.files.storage import default_storage
+
+        from core.media.services import extract_dimensions
+
+        # 1. Basic Validation
+        content_type = getattr(file, "content_type", "")
+        if content_type not in ALLOWED_TYPES:
+            raise MediaError(f"Unsupported file type: {content_type}", code="INVALID_FILE_TYPE")
+
+        limit = ALLOWED_TYPES[content_type]["max_size"]
+        if file.size > limit:
+            raise MediaError(
+                f"File too large. Limit is {limit // (1024*1024)}MB", code="FILE_TOO_LARGE"
+            )
+
+        # 2. Save File Temporarily or to Storage
+        ext = ALLOWED_TYPES[content_type]["ext"]
+        media_id = str(uuid.uuid4())
+        storage_path = f"uploads/{user_id}/{media_type.lower()}s/{media_id}.{ext}"
+
+        # In a real app, we'd use default_storage.save(storage_path, file)
+        # For Ziona, we'll simulate saving and then processing
+        actual_path = default_storage.save(storage_path, file)
+
+        # 3. Extract metadata
+        # We need the local path for ffprobe/PIL if not on cloud
+        try:
+            full_path = default_storage.path(actual_path)
+            width, height = extract_dimensions(full_path, media_type)
+        except (NotImplementedError, Exception):
+            # Fallback if path() isn't available (e.g. S3/GCS without local mirror)
+            width, height = 0, 0
+
+        # 4. Create record
+        return MediaFile.objects.create(
+            user_id=user_id,
+            file_name=getattr(file, "name", "upload"),
+            file_type=content_type,
+            file_size=file.size,
+            media_type=media_type.lower(),
+            storage_path=actual_path,
+            status=MediaStatus.READY,  # For simple upload, mark as ready
+            width=width,
+            height=height,
+        )
+
+    @staticmethod
     def confirm_upload(media_id: str, user_id: str) -> MediaFile:
         """Mark an upload as complete and trigger processing.
 
@@ -259,6 +318,36 @@ def _generate_gcp_signed_url(
         method=method,
         content_type=content_type if method == "PUT" else None,
     )
+
+
+def extract_dimensions(file_path: str, media_type: str) -> tuple[int, int]:
+    """Extract width and height from media file."""
+    if media_type.upper() == "IMAGE":
+        from PIL import Image
+
+        try:
+            with Image.open(file_path) as img:
+                return img.width, img.height
+        except Exception as e:
+            logger.warning(f"Failed to extract image dimensions: {e}")
+            return 0, 0
+
+    elif media_type.upper() == "VIDEO":
+        import json
+        import subprocess
+
+        try:
+            cmd = ["ffprobe", "-v", "quiet", "-print_format", "json", "-show_streams", file_path]
+            output = subprocess.check_output(cmd).decode("utf-8")  # noqa: S603
+            data = json.loads(output)
+            for stream in data.get("streams", []):
+                if stream.get("codec_type") == "video":
+                    return int(stream.get("width", 0)), int(stream.get("height", 0))
+        except Exception as e:
+            logger.warning(f"Failed to extract video dimensions: {e}")
+            return 0, 0
+
+    return 0, 0
 
 
 def validate_magic_bytes(file_content: bytes, declared_type: str) -> bool:
