@@ -69,6 +69,23 @@ class PostService:
         Raises:
             PostError: If validation fails.
         """
+        # 0. Validate Caption Length
+        if caption:
+            max_len = (
+                TEXT_POST_MAX_CAPTION if post_type.lower() == "text" else MEDIA_POST_MAX_CAPTION
+            )
+            if scripture_reference and post_type.lower() == "text" and len(caption) > 500:
+                raise PostError(
+                    message="Caption limited to 500 characters for posts with scripture",
+                    code=ErrorCode.TEXT_POST_TOO_LONG_WITH_SCRIPTURE,
+                )
+
+            if len(caption) > max_len:
+                raise PostError(
+                    message=f"Caption limited to {max_len} characters",
+                    code=ErrorCode.TEXT_POST_TOO_LONG,
+                )
+
         from core.media.models import MediaFile
         from core.users.models import User
 

@@ -5,8 +5,9 @@ from django.core.cache import cache
 
 from core.posts.models import PostType
 from core.posts.services import PostService
+from core.scripture.exceptions import ScriptureError
 from core.scripture.providers.jsdelivr import JSDelivrScriptureService
-from core.scripture.services import ScriptureError, ScriptureService
+from core.scripture.services import ScriptureService
 from core.shared.exceptions import PostError
 from core.users.models import User
 
@@ -173,9 +174,11 @@ class TestScriptureService:
             user_id=str(user.id),
             post_type=PostType.TEXT,
             caption="Here is a short caption.",
-            scripture_book="John",
-            scripture_chapter=3,
-            scripture_verse_start=16,
+            scripture_reference={
+                "book": "John",
+                "chapter": 3,
+                "verse_start": 16,
+            },
         )
 
         assert post_dto is not None
@@ -196,25 +199,31 @@ class TestScriptureService:
                 user_id=str(user.id),
                 post_type=PostType.TEXT,
                 caption="B" * 350,
-                scripture_book="John",
-                scripture_chapter=3,
-                scripture_verse_start=16,
+                scripture_reference={
+                    "book": "John",
+                    "chapter": 3,
+                    "verse_start": 16,
+                },
             )
 
         assert exc_info.value.code == "TEXT_POST_TOO_LONG_WITH_SCRIPTURE"
 
     def test_available_versions_returns_all_manifest_versions(self):
-        """10. get_available_versions returns all versions from manifest."""
-        versions = ScriptureService.get_available_versions()
-        assert len(versions) == len(MOCK_MANIFEST)
-        assert all(v["free"] for v in versions)
+        """10. get_available_versions returns all versions from manifest (filtered by FREE_BIBLE_VERSIONS)."""
+        # Patch where it's imported in services.py
+        with patch(
+            "core.scripture.services.FREE_BIBLE_VERSIONS", ["kjv", "asv", "web", "rv09", "t4t"]
+        ):
+            versions = ScriptureService.get_available_versions()
+            assert len(versions) == len(MOCK_MANIFEST)
+            assert all(v["free"] for v in versions)
 
-        for v in versions:
-            assert "code" in v
-            assert "name" in v
-            assert "abbreviation" in v
-            assert "language" in v
-            assert "scope" in v
+            for v in versions:
+                assert "code" in v
+                assert "name" in v
+                assert "abbreviation" in v
+                assert "language" in v
+                assert "scope" in v
 
     def test_scope_normalization(self):
         """11. Scope values are normalized correctly."""
@@ -227,10 +236,11 @@ class TestScriptureService:
 
     def test_nt_version_rejects_ot_book(self):
         """12. NT-only version raises error when fetching OT book."""
-        with pytest.raises(ScriptureError) as exc_info:
-            ScriptureService.fetch_verse("Genesis", 1, 1, version="en-t4t")
-        assert exc_info.value.code == "SCRIPTURE_FETCH_FAILED"
-        assert "New Testament only" in str(exc_info.value)
+        with patch("core.scripture.services.FREE_BIBLE_VERSIONS", ["t4t"]):
+            with pytest.raises(ScriptureError) as exc_info:
+                ScriptureService.fetch_verse("Genesis", 1, 1, version="en-t4t")
+            assert exc_info.value.code == "SCRIPTURE_FETCH_FAILED"
+            assert "New Testament only" in str(exc_info.value)
 
     def test_version_resolution_short_codes(self):
         """13. Short codes resolve to full CDN IDs."""

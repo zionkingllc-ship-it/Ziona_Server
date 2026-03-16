@@ -13,6 +13,7 @@ class ErrorCode(str, Enum):
     """Standardized error codes matching the mobile TypeScript spec."""
 
     TEXT_POST_TOO_LONG = "TEXT_POST_TOO_LONG"
+    TEXT_POST_TOO_LONG_WITH_SCRIPTURE = "TEXT_POST_TOO_LONG_WITH_SCRIPTURE"
     VIDEO_TOO_SHORT = "VIDEO_TOO_SHORT"
     VIDEO_TOO_LONG = "VIDEO_TOO_LONG"
     IMAGE_COUNT_INVALID = "IMAGE_COUNT_INVALID"

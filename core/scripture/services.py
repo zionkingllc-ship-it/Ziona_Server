@@ -7,7 +7,7 @@ import logging
 import re
 
 from core.scripture.constants import FREE_BIBLE_VERSIONS
-from core.scripture.exceptions import VersionNotAvailableError
+from core.scripture.exceptions import ScriptureError, VersionNotAvailableError
 from core.scripture.providers.jsdelivr import JSDelivrScriptureService
 
 logger = logging.getLogger("core.scripture")
@@ -87,13 +87,7 @@ BIBLE_BOOKS = [
 REFERENCE_REGEX = re.compile(r"^((?:\d\s+)?[A-Za-z\s]+?)\s+(\d+):(\d+)(?:-(\d+))?$")
 
 
-class ScriptureError(Exception):
-    """Raised when scripture operations fail."""
-
-    def __init__(self, message: str, code: str = "SCRIPTURE_ERROR"):
-        self.message = message
-        self.code = code
-        super().__init__(message)
+# Exceptions are now in core.scripture.exceptions
 
 
 class ScriptureService:
