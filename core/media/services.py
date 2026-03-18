@@ -35,9 +35,17 @@ MAGIC_BYTES = {
 class MediaError(Exception):
     """Raised when media operations fail."""
 
-    def __init__(self, message: str, code: str = "MEDIA_ERROR"):
+    def __init__(
+        self,
+        message: str,
+        code: str = "MEDIA_ERROR",
+        field: str | None = None,
+        details: dict | None = None,
+    ):
         self.message = message
         self.code = code
+        self.field = field
+        self.details = details
         super().__init__(message)
 
 
@@ -74,7 +82,9 @@ class MediaService:
         if file_type not in ALLOWED_TYPES:
             raise MediaError(
                 f"File type '{file_type}' not allowed. Accepted: JPEG, PNG, WEBP, MP4",
-                code="INVALID_FILE_TYPE",
+                code="INVALID_MEDIA_TYPE",
+                field="fileType",
+                details={"allowedTypes": ["image/jpeg", "image/png", "image/webp", "video/mp4"]},
             )
 
         type_config = ALLOWED_TYPES[file_type]
@@ -83,7 +93,9 @@ class MediaService:
             max_mb = type_config["max_size"] / (1024 * 1024)
             raise MediaError(
                 f"File size exceeds maximum of {max_mb:.0f} MB",
-                code="FILE_TOO_LARGE",
+                code="MEDIA_TOO_LARGE",
+                field="fileSize",
+                details={"maxSize": type_config["max_size"], "receivedSize": file_size},
             )
 
         if file_size <= 0:
@@ -161,12 +173,16 @@ class MediaService:
         # 1. Basic Validation
         content_type = getattr(file, "content_type", "")
         if content_type not in ALLOWED_TYPES:
-            raise MediaError(f"Unsupported file type: {content_type}", code="INVALID_FILE_TYPE")
+            raise MediaError(
+                f"Unsupported file type: {content_type}", code="INVALID_MEDIA_TYPE", field="file"
+            )
 
         limit = ALLOWED_TYPES[content_type]["max_size"]
         if file.size > limit:
             raise MediaError(
-                f"File too large. Limit is {limit // (1024*1024)}MB", code="FILE_TOO_LARGE"
+                f"File too large. Limit is {limit // (1024*1024)}MB",
+                code="MEDIA_TOO_LARGE",
+                field="file",
             )
 
         # 2. Save File Temporarily or to Storage

@@ -2,8 +2,8 @@ import strawberry
 from graphql import GraphQLError
 
 from core.scripture.constants import FREE_BIBLE_VERSIONS
-from core.scripture.exceptions import VersionNotAvailableError
-from core.scripture.services import ScriptureError, ScriptureService
+from core.scripture.exceptions import ScriptureError, VersionNotAvailableError
+from core.scripture.services import ScriptureService
 
 
 @strawberry.type

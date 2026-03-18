@@ -2,6 +2,7 @@ import strawberry
 from strawberry.schema import Schema
 
 from core.authentication.schema import AuthMutations, AuthQueries
+from core.circles.schema import CircleMutations, CircleQueries
 from core.engagement.schema import EngagementMutations, EngagementQueries
 from core.feed.schema import FeedQueries
 from core.follows.schema import FollowMutations, FollowQueries
@@ -26,6 +27,7 @@ class Query(
     PostQueries,
     ScriptureQueries,
     UserQueries,
+    CircleQueries,
 ):
     """Root query type — extends all domain queries."""
 
@@ -43,6 +45,7 @@ class Mutation(
     ProfileMutations,
     ModerationMutations,
     NotificationMutations,
+    CircleMutations,
 ):
     """Root mutation type — extends all domain mutations."""
 

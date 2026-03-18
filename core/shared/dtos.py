@@ -93,7 +93,7 @@ class PostResponseDTO(CamelCaseModel):
     """Canonical post response matching mobile TypeScript spec."""
 
     id: str
-    type: Literal["video", "image", "text"]
+    type: Literal["video", "image", "text", "bible"]
     created_at: str  # ISO 8601
     caption: str | None = None
     category_id: str | None = None
@@ -103,6 +103,13 @@ class PostResponseDTO(CamelCaseModel):
     viewer_state: ViewerStateDTO | None = None
     share_url: str
     scripture: ScriptureDTO | None = None
+
+
+class ScriptureVerseDTO(CamelCaseModel):
+    """A single verse inside a scripture block."""
+
+    number: int
+    text: str
 
 
 class ScriptureDTO(CamelCaseModel):
@@ -115,6 +122,7 @@ class ScriptureDTO(CamelCaseModel):
     chapter: int
     verse_start: int
     verse_end: int | None = None
+    verses: list[ScriptureVerseDTO] = []
 
 
 PostResponseDTO.model_rebuild()

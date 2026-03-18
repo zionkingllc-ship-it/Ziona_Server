@@ -56,7 +56,7 @@ def share_preview(request: HttpRequest, post_id: str) -> HttpResponse:
     """
     post = (
         Post.objects.select_related("user")
-        .prefetch_related("post_media")
+        .prefetch_related("media_files", "post_media")
         .filter(id=post_id, deleted_at__isnull=True)
         .first()
     )
@@ -64,10 +64,15 @@ def share_preview(request: HttpRequest, post_id: str) -> HttpResponse:
     if not post:
         return HttpResponse("Post not found", status=404)
 
-    media = post.post_media.first()
+    # Try media_files first (new path), fallback to post_media (legacy)
+    media = post.media_files.first() or post.post_media.first()
     preview_image = None
     if media:
-        preview_image = media.thumbnail_url or media.media_url
+        preview_image = (
+            getattr(media, "thumbnail_url", None)
+            or getattr(media, "url", None)
+            or getattr(media, "media_url", None)
+        )
 
     context = {
         "post": post,

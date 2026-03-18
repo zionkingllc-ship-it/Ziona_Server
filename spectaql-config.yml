@@ -8,8 +8,8 @@ info:
     Comprehensive Developer Documentation for the Ziona Platform GraphQL API.
     
     This API serves operations across domains including Authentication, 
-    Profiles, Posts, Feed algorithms, Engagement actions, and canonical 
-    Scripture (Free Tier).
+    Profiles, Posts, Feed algorithms, Engagement actions, Faith Circles (Milestone 3), 
+    and canonical Scripture (Free Tier).
 
   version: 1.0.0
 servers:

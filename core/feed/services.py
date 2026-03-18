@@ -142,16 +142,7 @@ class FeedService:
         has_more = len(posts) > limit
         posts = posts[:limit]
 
-        from core.posts.services import PostService
-
-        post_dtos = [
-            PostService._build_post_dto(
-                post=p,
-                media_items=list(p.media_files.all()) or list(p.post_media.all()),
-                viewer_id=user_id,
-            )
-            for p in posts
-        ]
+        post_dtos = FeedService._bulk_build_post_dtos(posts, user_id)
 
         return FeedResponseDTO(
             posts=post_dtos,
@@ -210,16 +201,18 @@ class FeedService:
         has_more = len(posts) > limit
         posts = posts[:limit]
 
-        from core.posts.services import PostService
-
-        post_dtos = [
-            PostService._build_post_dto(
-                post=p,
-                media_items=list(p.media_files.all()) or list(p.post_media.all()),
-                viewer_id=user_id,
+        if not posts:
+            suggestions = FeedService._get_empty_state_suggestions(user_id)
+            return FeedResponseDTO(
+                posts=[],
+                has_more=False,
+                empty_state=EmptyStateDTO(
+                    message="Check back later for new discovery content!",
+                    suggestions=suggestions,
+                ),
             )
-            for p in posts
-        ]
+
+        post_dtos = FeedService._bulk_build_post_dtos(posts, user_id)
 
         return FeedResponseDTO(
             posts=post_dtos,
@@ -242,7 +235,7 @@ class FeedService:
 
         qs = (
             Post.objects.select_related("user")
-            .prefetch_related("post_media")
+            .prefetch_related("media_files", "post_media")
             .filter(deleted_at__isnull=True)
             .exclude(user_id=user_id)
             .annotate(
@@ -281,16 +274,7 @@ class FeedService:
                 ),
             )
 
-        from core.posts.services import PostService
-
-        post_dtos = [
-            PostService._build_post_dto(
-                post=p,
-                media_items=list(p.post_media.all()),
-                viewer_id=user_id,
-            )
-            for p in posts
-        ]
+        post_dtos = FeedService._bulk_build_post_dtos(posts, user_id)
 
         return FeedResponseDTO(
             posts=post_dtos,
@@ -309,7 +293,7 @@ class FeedService:
 
         qs = (
             Post.objects.select_related("user")
-            .prefetch_related("post_media")
+            .prefetch_related("media_files", "post_media")
             .filter(deleted_at__isnull=True)
             .exclude(user_id=user_id)
             .annotate(
@@ -355,16 +339,7 @@ class FeedService:
                 ),
             )
 
-        from core.posts.services import PostService
-
-        post_dtos = [
-            PostService._build_post_dto(
-                post=p,
-                media_items=list(p.post_media.all()),
-                viewer_id=user_id,
-            )
-            for p in posts
-        ]
+        post_dtos = FeedService._bulk_build_post_dtos(posts, user_id)
 
         return FeedResponseDTO(
             posts=post_dtos,
@@ -380,7 +355,7 @@ class FeedService:
         """Feed for unauthenticated users — popular content."""
         qs = (
             Post.objects.select_related("user")
-            .prefetch_related("media_files")
+            .prefetch_related("media_files", "post_media")
             .filter(deleted_at__isnull=True)
             .annotate(
                 likes_count=Count("likes", distinct=True),
@@ -403,15 +378,7 @@ class FeedService:
         has_more = len(posts) > limit
         posts = posts[:limit]
 
-        from core.posts.services import PostService
-
-        post_dtos = [
-            PostService._build_post_dto(
-                post=p,
-                media_items=list(p.media_files.all()) or list(p.post_media.all()),
-            )
-            for p in posts
-        ]
+        post_dtos = FeedService._bulk_build_post_dtos(posts, viewer_id=None)
 
         return FeedResponseDTO(
             posts=post_dtos,
@@ -449,4 +416,71 @@ class FeedService:
                 followers_count=s.get("followers_count", 0),
             )
             for s in suggestions_data
+        ]
+
+    @staticmethod
+    def _bulk_build_post_dtos(
+        posts: list,
+        viewer_id: str | None = None,
+    ) -> list:
+        """Build PostResponseDTOs for a list of posts with bulk viewer state fetching.
+
+        Instead of 3 queries per post (liked/saved/following), this method
+        fetches all viewer state data in just 3 total queries.
+
+        Args:
+            posts: List of Post instances (annotated with counts).
+            viewer_id: Optional viewer user ID.
+
+        Returns:
+            List of PostResponseDTO instances.
+        """
+        from core.posts.services import PostService
+
+        if not posts:
+            return []
+
+        post_ids = [str(p.id) for p in posts]
+        author_ids = list({str(p.user_id) for p in posts})
+
+        liked_post_ids: set = set()
+        saved_post_ids: set = set()
+        following_user_ids: set = set()
+
+        if viewer_id:
+            from core.engagement.models import Like, Save
+            from core.follows.models import Follow
+
+            liked_post_ids = set(
+                Like.objects.filter(user_id=viewer_id, post_id__in=post_ids).values_list(
+                    "post_id", flat=True
+                )
+            )
+            # Convert UUIDs to strings for set lookup
+            liked_post_ids = {str(pid) for pid in liked_post_ids}
+
+            saved_post_ids = set(
+                Save.objects.filter(user_id=viewer_id, post_id__in=post_ids).values_list(
+                    "post_id", flat=True
+                )
+            )
+            saved_post_ids = {str(pid) for pid in saved_post_ids}
+
+            following_user_ids = set(
+                Follow.objects.filter(
+                    follower_id=viewer_id, following_id__in=author_ids
+                ).values_list("following_id", flat=True)
+            )
+            following_user_ids = {str(uid) for uid in following_user_ids}
+
+        return [
+            PostService._build_post_dto(
+                post=p,
+                media_items=list(p.media_files.all()),
+                viewer_id=viewer_id,
+                liked_post_ids=liked_post_ids,
+                saved_post_ids=saved_post_ids,
+                following_user_ids=following_user_ids,
+            )
+            for p in posts
         ]

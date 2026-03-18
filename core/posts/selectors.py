@@ -32,7 +32,7 @@ class PostSelector:
         """
         return (
             Post.objects.select_related("user")
-            .prefetch_related("post_media")
+            .prefetch_related("media_files", "post_media")
             .filter(id=post_id, deleted_at__isnull=True)
             .first()
         )

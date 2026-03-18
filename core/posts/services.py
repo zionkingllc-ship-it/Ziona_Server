@@ -9,7 +9,7 @@ from datetime import datetime, timedelta, timezone
 
 from core.engagement.models import Like, Save
 from core.follows.models import Follow
-from core.posts.models import Post, PostMedia, PostType
+from core.posts.models import Post, PostType
 from core.posts.selectors import PostSelector
 from core.shared.dtos import (
     AuthorDTO,
@@ -59,9 +59,12 @@ class PostService:
 
         Args:
             user_id: UUID of the post author.
-            media_items: List of media dicts with url, type, thumbnail_url,
-                         width, height, duration, order.
-            category: Optional faith category.
+            post_type: Post type string (text, image, video).
+            caption: Post caption text.
+            category_id: Optional faith category ID.
+            media_ids: List of media file UUIDs.
+            media_type: Optional media type hint (IMAGE/VIDEO).
+            scripture_reference: Optional dict with book, chapter, verse_start, etc.
 
         Returns:
             PostResponseDTO with full post data.
@@ -77,13 +80,15 @@ class PostService:
             if scripture_reference and post_type.lower() == "text" and len(caption) > 500:
                 raise PostError(
                     message="Caption limited to 500 characters for posts with scripture",
-                    code=ErrorCode.TEXT_POST_TOO_LONG_WITH_SCRIPTURE,
+                    code="CAPTION_TOO_LONG",
+                    extensions={"field": "caption", "maxLength": 500},
                 )
 
             if len(caption) > max_len:
                 raise PostError(
                     message=f"Caption limited to {max_len} characters",
-                    code=ErrorCode.TEXT_POST_TOO_LONG,
+                    code="CAPTION_TOO_LONG",
+                    extensions={"field": "caption", "maxLength": max_len},
                 )
 
         from core.media.models import MediaFile
@@ -129,13 +134,15 @@ class PostService:
             raise PostError(message="User not found", code=ErrorCode.USER_NOT_FOUND) from None
 
         # Map mobile types to internal models
+        # Note for mobile engineers: GraphQL Enum is TEXT, MEDIA, BIBLE
+        # Django internal representations are text, image, video.
         internal_post_type = post_type.lower()
         if post_type == "TEXT":
             internal_post_type = "text"
         if post_type == "MEDIA":
             internal_post_type = "image"  # Default to image
         if post_type == "BIBLE":
-            internal_post_type = "text"  # Bible posts are text-based or new type
+            internal_post_type = "text"  # Bible posts are text-based natively
 
         # Refine type based on resolved media
         if media_type == "VIDEO" or any(m.media_type == "video" for m in resolved_media_files):
@@ -192,7 +199,7 @@ class PostService:
                 code=ErrorCode.POST_NOT_FOUND,
             )
 
-        media_items = list(post.post_media.all())
+        media_items = list(post.media_files.all())
         return PostService._build_post_dto(post, media_items, viewer_id=viewer_id)
 
     @staticmethod
@@ -255,7 +262,7 @@ class PostService:
             extra={"post_id": str(post.id), "user_id": user_id},
         )
 
-        media_items = list(post.post_media.all())
+        media_items = list(post.media_files.all())
         return PostService._build_post_dto(post, media_items, viewer_id=user_id)
 
     @staticmethod
@@ -301,9 +308,12 @@ class PostService:
     @staticmethod
     def _build_post_dto(
         post: Post,
-        media_items: list[PostMedia],
+        media_items: list | None = None,
         viewer_id: str | None = None,
         is_owner: bool | None = None,
+        liked_post_ids: set | None = None,
+        saved_post_ids: set | None = None,
+        following_user_ids: set | None = None,
     ) -> PostResponseDTO:
         """Build a PostResponseDTO from a Post model instance.
 
@@ -325,7 +335,7 @@ class PostService:
         if post.post_type in [PostType.IMAGE, "image", "image_post"]:
             media_items_dto = []
             # Sort if they have order attr, otherwise use as is
-            sorted_items = sorted(media_items, key=lambda x: getattr(x, "order", 0))
+            sorted_items = sorted(media_items or [], key=lambda x: getattr(x, "order", 0))
             for m in sorted_items:
                 m_id = str(getattr(m, "id", ""))
                 m_url = getattr(m, "url", getattr(m, "media_url", ""))
@@ -356,33 +366,53 @@ class PostService:
         else:
             media = TextMediaDTO()
 
+        def _get_count(post, attr, fallback_qs=None):
+            val = getattr(post, attr, None)
+            if val is not None:
+                return val
+            return fallback_qs.count() if fallback_qs is not None else 0
+
         stats = StatsDTO(
-            likes_count=getattr(post, "likes_count", 0) or post.likes.count()
-            if not hasattr(post, "likes_count")
-            else getattr(post, "likes_count", 0),
-            comments_count=getattr(post, "comments_count", 0)
-            or post.comments.filter(deleted_at__isnull=True).count()
-            if not hasattr(post, "comments_count")
-            else getattr(post, "comments_count", 0),
-            shares_count=getattr(post, "shares_count", 0) or post.shares.count()
-            if not hasattr(post, "shares_count")
-            else getattr(post, "shares_count", 0),
-            saves_count=getattr(post, "saves_count", 0) or post.saves.count()
-            if not hasattr(post, "saves_count")
-            else getattr(post, "saves_count", 0),
+            likes_count=_get_count(post, "likes_count", post.likes),
+            comments_count=_get_count(
+                post, "comments_count", post.comments.filter(deleted_at__isnull=True)
+            ),
+            shares_count=_get_count(post, "shares_count", post.shares),
+            saves_count=_get_count(post, "saves_count", post.saves),
         )
 
         viewer_state = None
         if viewer_id:
+            post_id_str = str(post.id)
+            user_id_str = str(post.user_id)
+
+            # Use bulk-fetched sets if available, otherwise fall back to individual queries
+            if liked_post_ids is not None:
+                is_liked = post_id_str in liked_post_ids
+            else:
+                is_liked = Like.objects.filter(user_id=viewer_id, post_id=post.id).exists()
+
+            if saved_post_ids is not None:
+                is_saved = post_id_str in saved_post_ids
+            else:
+                is_saved = Save.objects.filter(user_id=viewer_id, post_id=post.id).exists()
+
+            if following_user_ids is not None:
+                is_following = (
+                    user_id_str in following_user_ids if user_id_str != viewer_id else False
+                )
+            else:
+                is_following = (
+                    Follow.objects.filter(follower_id=viewer_id, following_id=post.user_id).exists()
+                    if user_id_str != viewer_id
+                    else False
+                )
+
             viewer_state = ViewerStateDTO(
-                liked=Like.objects.filter(user_id=viewer_id, post_id=post.id).exists(),
-                saved=Save.objects.filter(user_id=viewer_id, post_id=post.id).exists(),
-                following_author=Follow.objects.filter(
-                    follower_id=viewer_id, following_id=post.user_id
-                ).exists()
-                if str(post.user_id) != viewer_id
-                else False,
-                is_owner=is_owner if is_owner is not None else (str(post.user_id) == viewer_id),
+                liked=is_liked,
+                saved=is_saved,
+                following_author=is_following,
+                is_owner=is_owner if is_owner is not None else (user_id_str == viewer_id),
             )
 
         scripture = None
@@ -405,6 +435,7 @@ class PostService:
                     chapter=result["chapter"],
                     verse_start=result["verse_start"],
                     verse_end=result["verse_end"],
+                    verses=result.get("verses", []),
                 )
             except Exception:
                 reference = (
@@ -420,6 +451,7 @@ class PostService:
                     chapter=post.scripture_chapter,
                     verse_start=post.scripture_verse_start,
                     verse_end=post.scripture_verse_end,
+                    verses=[],
                 )
 
         return PostResponseDTO(

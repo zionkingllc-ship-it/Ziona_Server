@@ -79,3 +79,9 @@ public/docs/
 node_modules/
 package-lock.json.bak
 
+# Local Configuration & Temp
+pyrightconfig.json
+schema.graphql
+output.json
+*.bak
+

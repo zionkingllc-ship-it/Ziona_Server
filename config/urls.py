@@ -4,6 +4,7 @@ from django.conf import settings
 from django.contrib import admin
 from django.http import JsonResponse
 from django.urls import include, path
+from django.views.decorators.csrf import csrf_exempt
 from django.views.static import serve
 from strawberry.django.views import GraphQLView
 
@@ -20,8 +21,13 @@ urlpatterns = [
     path("health/", include("health_check.urls")),
     path(
         "graphql/",
-        GraphQLView.as_view(schema=schema),
+        csrf_exempt(GraphQLView.as_view(schema=schema)),
         name="graphql",
+    ),
+    path(
+        "graphql",
+        csrf_exempt(GraphQLView.as_view(schema=schema)),
+        name="graphql_no_slash",
     ),
     path("api/auth/", include("core.authentication.urls")),
     path("docs/", swagger_ui, name="swagger-ui"),

@@ -1,11 +1,17 @@
 """GraphQL types and queries for the feed domain."""
 
 
+import dataclasses
+import logging
+
 import strawberry
 
 from core.media.schema import MediaFileType
 from core.shared.types import MediaType as MediaTypeEnum
+from core.shared.types import PostType, ScriptureVerse
 from core.users.schema import _get_authenticated_user_id
+
+logger = logging.getLogger("core.feed")
 
 
 @strawberry.type
@@ -57,6 +63,20 @@ class FeedViewerState:
 
 
 @strawberry.type
+class FeedPostScripture:
+    """Scripture reference within a feed post."""
+
+    reference: str
+    text: str
+    version: str = "KJV"
+    book: str
+    chapter: int
+    verse_start: int
+    verse_end: int | None = None
+    verses: list[ScriptureVerse] = strawberry.field(default_factory=list)
+
+
+@strawberry.type
 class FeedPost:
     """
     A post in the feed efficiently packed with discovery metadata.
@@ -65,18 +85,17 @@ class FeedPost:
     """
 
     id: str
-    type: str
+    post_type: PostType
     caption: str | None = None
-    category_id: str | None = None
+    _category_id: strawberry.Private[str | None] = None
     author: FeedPostAuthor
     stats: FeedPostStats
     viewer_state: FeedViewerState | None = None
     share_url: str
     created_at: str
+    scripture: FeedPostScripture | None = None
 
-    _media_list: list[MediaFileType] = strawberry.field(
-        default_factory=list, description="Private holder for extracted media."
-    )
+    _media_list: strawberry.Private[list[MediaFileType]] = dataclasses.field(default_factory=list)
 
     @strawberry.field(description="Post text content securely (alias for caption)")
     def text(self) -> str | None:
@@ -87,6 +106,27 @@ class FeedPost:
     def media(self) -> list[MediaFileType]:
         """Media files array mapped cleanly matching exactly what mobile expects"""
         return self._media_list
+
+    @strawberry.field(description="Full category object natively")
+    def category(self) -> CategoryType | None:
+        if not self._category_id:
+            return None
+        # discover_categories is defined lower, just call it directly
+        queries = FeedQueries()
+        categories = queries.discover_categories()
+        for cat in categories:
+            if cat.id == self._category_id:
+                return CategoryType(
+                    id=cat.id,
+                    label=cat.label,
+                    slug=cat.slug,
+                    icon=cat.icon,
+                    bg_color=cat.bg_color,
+                    bd_color=cat.bd_color,
+                    order=cat.order,
+                )
+        logger.warning("Category not found category_id=%s", self._category_id)
+        return None
 
 
 @strawberry.type
@@ -152,11 +192,21 @@ def _dto_to_feed_post(dto) -> FeedPost:
                     )
                 )
 
+    post_t = dto.type.lower() if getattr(dto, "type", None) else "text"
+    mapped_type = (
+        PostType.MEDIA
+        if post_t in ("image", "video")
+        else (PostType.BIBLE if post_t == "bible" else PostType.TEXT)
+    )
+
+    if post_t not in ("image", "video", "text", "bible"):
+        logger.warning("Unknown post type in feed DTO dto_type=%s post_id=%s", post_t, dto.id)
+
     return FeedPost(
         id=dto.id,
-        type=dto.type,
+        post_type=mapped_type,
         caption=dto.caption,
-        category_id=dto.category_id,
+        _category_id=dto.category_id,
         author=FeedPostAuthor(
             id=dto.author.id,
             username=dto.author.username,
@@ -180,6 +230,23 @@ def _dto_to_feed_post(dto) -> FeedPost:
         ),
         share_url=dto.share_url,
         created_at=dto.created_at,
+        scripture=(
+            FeedPostScripture(
+                reference=dto.scripture.reference,
+                text=dto.scripture.text,
+                version=dto.scripture.version,
+                book=dto.scripture.book,
+                chapter=dto.scripture.chapter,
+                verse_start=dto.scripture.verse_start,
+                verse_end=dto.scripture.verse_end,
+                verses=[
+                    ScriptureVerse(number=v.number, text=v.text)
+                    for v in getattr(dto.scripture, "verses", [])
+                ],
+            )
+            if dto.scripture
+            else None
+        ),
         _media_list=media_list,
     )
 
@@ -278,6 +345,7 @@ class FeedQueries:
         from core.feed.services import FeedService
 
         user_id = _get_authenticated_user_id(info)
+        logger.info("feed_query user_id=%s limit=%d cursor=%s", user_id, limit, cursor)
 
         result = FeedService.get_feed(
             viewer_id=user_id,
@@ -428,11 +496,28 @@ class FeedQueries:
             return FeedResponse(posts=[], has_more=False)
 
         result = FeedService.get_discover_feed(
-            user_id=user_id, category=category, media_type=media_type, cursor=cursor, limit=limit
+            user_id=user_id, category=category, cursor=cursor, limit=limit
         )
 
         return FeedResponse(
             posts=[_dto_to_feed_post(p) for p in result.posts],
             next_cursor=result.next_cursor,
             has_more=result.has_more,
+            empty_state=(
+                EmptyState(
+                    message=result.empty_state.message,
+                    suggestions=[
+                        UserSuggestion(
+                            id=s.id,
+                            username=s.username,
+                            avatar_url=s.avatar_url,
+                            bio=s.bio,
+                            followers_count=s.followers_count,
+                        )
+                        for s in result.empty_state.suggestions
+                    ],
+                )
+                if result.empty_state
+                else None
+            ),
         )

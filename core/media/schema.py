@@ -1,10 +1,13 @@
 """GraphQL types and mutations for the media domain."""
 
+import logging
 
 import strawberry
 from strawberry.file_uploads import Upload
 
 from core.shared.types import ErrorType, MediaType
+
+logger = logging.getLogger("core.media")
 
 
 @strawberry.type
@@ -33,8 +36,8 @@ class MediaUploadPayload:
 class MediaMutations:
     """Media domain mutations."""
 
-    @strawberry.mutation(description="Upload media file (image or video)")
-    def upload_media(
+    @strawberry.mutation(description="Directly upload media file (image or video) seamlessly")
+    def direct_upload_media(
         self,
         info: strawberry.types.Info,
         file: Upload,
@@ -61,6 +64,7 @@ class MediaMutations:
                 error=ErrorType(code="UNAUTHORIZED", message="Authentication required"),
             )
 
+        logger.info("direct_upload user_id=%s media_type=%s", user_id, media_type.value)
         try:
             # Service handles validation and upload
             media_file = MediaService.upload_media(
@@ -78,14 +82,18 @@ class MediaMutations:
         except (MediaError, ValueError) as e:
             code = getattr(e, "code", "VALIDATION_ERROR")
             message = getattr(e, "message", str(e))
+            logger.warning("direct_upload_failed user_id=%s code=%s", user_id, code)
             field = getattr(e, "field", "file")
+            details = getattr(e, "details", None)
             return MediaUploadPayload(
                 success=False,
-                error=ErrorType(code=code, message=message, field=field),
+                error=ErrorType(code=code, message=message, field=field, details=details),
             )
 
-    @strawberry.mutation(description="Request a signed URL for media upload")
-    def request_media_upload(
+    @strawberry.mutation(
+        description="Request a signed URL for media upload correctly matching uploadMedia mapping"
+    )
+    def upload_media(
         self,
         info: strawberry.types.Info,
         file_name: str,
@@ -103,6 +111,7 @@ class MediaMutations:
                 error=ErrorType(code="UNAUTHORIZED", message="Authentication required"),
             )
 
+        logger.info("upload_media user_id=%s file=%s size=%d", user_id, file_name, file_size)
         try:
             result = MediaService.generate_upload_url(
                 user_id=user_id,
@@ -117,7 +126,14 @@ class MediaMutations:
                 expires_in=result["expires_in"],
             )
         except MediaError as e:
+            code = getattr(e, "code", "VALIDATION_ERROR")
+            message = getattr(e, "message", str(e))
+            logger.warning(
+                "upload_media_failed user_id=%s code=%s file=%s", user_id, code, file_name
+            )
+            field = getattr(e, "field", "file")
+            details = getattr(e, "details", None)
             return MediaUploadPayload(
                 success=False,
-                error=ErrorType(code=e.code, message=e.message),
+                error=ErrorType(code=code, message=message, field=field, details=details),
             )

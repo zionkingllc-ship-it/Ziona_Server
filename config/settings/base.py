@@ -53,6 +53,7 @@ LOCAL_APPS = [
     "core.feed",
     "core.profiles",
     "core.notifications",
+    "core.circles",  # NEW Phase 3 App
 ]
 
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
@@ -155,6 +156,17 @@ CORS_ALLOWED_ORIGINS = env.list(
     default=["http://localhost:3000", "http://localhost:19006"],
 )
 CORS_ALLOW_CREDENTIALS = True
+CORS_ALLOW_HEADERS = [
+    "accept",
+    "accept-encoding",
+    "authorization",
+    "content-type",
+    "dnt",
+    "origin",
+    "user-agent",
+    "x-csrftoken",
+    "x-requested-with",
+]
 
 
 JWT_SECRET_KEY = env("JWT_SECRET_KEY", default=SECRET_KEY)
