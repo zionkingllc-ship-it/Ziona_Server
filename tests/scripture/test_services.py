@@ -186,8 +186,8 @@ class TestScriptureService:
         assert post_dto.scripture.text == "Short verse."
 
     @patch("core.scripture.providers.jsdelivr.requests.get")
-    def test_text_post_with_scripture_over_300_chars_fails(self, mock_get):
-        """9. test_text_post_with_scripture_over_300_chars_fails"""
+    def test_text_post_with_scripture_over_500_chars_fails(self, mock_get):
+        """9. test_text_post_with_scripture_over_500_chars_fails"""
         mock_response = MagicMock()
         mock_response.json.return_value = {"text": "A" * 200}
         mock_get.return_value = mock_response
@@ -198,7 +198,7 @@ class TestScriptureService:
             PostService.create_post(
                 user_id=str(user.id),
                 post_type=PostType.TEXT,
-                caption="B" * 350,
+                caption="B" * 550,
                 scripture_reference={
                     "book": "John",
                     "chapter": 3,
@@ -206,7 +206,7 @@ class TestScriptureService:
                 },
             )
 
-        assert exc_info.value.code == "TEXT_POST_TOO_LONG_WITH_SCRIPTURE"
+        assert exc_info.value.code == "CAPTION_TOO_LONG"
 
     def test_available_versions_returns_all_manifest_versions(self):
         """10. get_available_versions returns all versions from manifest (filtered by FREE_BIBLE_VERSIONS)."""
