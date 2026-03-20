@@ -110,21 +110,19 @@ class TestSchemaAlignment:
     def test_scripture_query_alignment(self, auth_client):
         """Verify scripture query returns structured verses array (PART 5)."""
         query = """
-        query GetScripture($book: String!, $chapter: Int!, $verseStart: Int!) {
-          scripture(book: $book, chapter: $chapter, verseStart: $verseStart) {
+        query GetScripture($book: String!, $chapter: Int!, $version: String!) {
+          scripture(book: $book, chapter: $chapter, version: $version) {
+            book
+            chapter
+            version
             verses {
               number
               text
             }
-            reference
-            version
-            book
-            chapter
-            verseStart
           }
         }
         """
-        variables = {"book": "John", "chapter": 3, "verseStart": 16}
+        variables = {"book": "John", "chapter": 3, "version": "kjv"}
         from django.core.cache import cache
 
         cache.clear()
@@ -146,4 +144,39 @@ class TestSchemaAlignment:
         assert len(data["verses"]) > 0
         assert data["book"] == "John"
         assert data["chapter"] == 3
-        assert data["verseStart"] == 16
+        assert data["version"] == "kjv"
+
+    def test_scripture_range_query_alignment(self, auth_client):
+        """Verify scriptureRange query returns concatenated string."""
+        query = """
+        query GetScriptureRange($book: String!, $chapter: Int!, $version: String!, $verseStart: Int!, $verseEnd: Int!) {
+          scriptureRange(book: $book, chapter: $chapter, version: $version, verseStart: $verseStart, verseEnd: $verseEnd)
+        }
+        """
+        variables = {
+            "book": "John",
+            "chapter": 3,
+            "version": "kjv",
+            "verseStart": 16,
+            "verseEnd": 17,
+        }
+        from django.core.cache import cache
+
+        cache.clear()
+
+        response = auth_client.post(
+            "/graphql/",
+            data=json.dumps({"query": query, "variables": variables}),
+            content_type="application/json",
+        )
+        content = json.loads(response.content)
+
+        assert (
+            response.status_code == 200
+        ), f"Expected 200 but got {response.status_code}: {content}"
+        if "errors" in content:
+            pytest.fail(f"GraphQL errors: {content['errors']}")
+
+        data = content["data"]["scriptureRange"]
+        assert isinstance(data, str)
+        assert len(data) > 0
