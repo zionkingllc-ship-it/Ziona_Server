@@ -163,6 +163,13 @@ class ScriptureService:
             # ALWAYS raise error (not just in debug)
             raise VersionNotAvailableError(version, allowed_codes)
 
+        # Validate verse range
+        if verse_end is not None and verse_end < verse_start:
+            raise ScriptureError(
+                f"verseEnd ({verse_end}) must be >= verseStart ({verse_start})",
+                code="VERSE_RANGE_INVALID",
+            )
+
         try:
             return JSDelivrScriptureService.fetch_verse(
                 book, chapter, verse_start, verse_end, version_id
@@ -174,6 +181,98 @@ class ScriptureService:
                 f"Failed to fetch scripture: {e!s}",
                 code="SCRIPTURE_FETCH_FAILED",
             ) from e
+
+    # ── Validation helpers ───────────────────────────────────────────
+
+    @staticmethod
+    def _validate_version(version: str) -> str:
+        """Validate and resolve a version string. Returns the CDN version_id.
+
+        Raises VersionNotAvailableError if not in free tier.
+        """
+        version_lower = version.lower().strip()
+        version_id = JSDelivrScriptureService._resolve_version_id(version_lower)
+        allowed_codes = FREE_BIBLE_VERSIONS
+        if version_lower not in allowed_codes and version_id.split("-")[-1] not in allowed_codes:
+            raise VersionNotAvailableError(version, allowed_codes)
+        return version_id
+
+    @staticmethod
+    def _validate_book(book: str) -> str:
+        """Validate a book name and return its CDN slug.
+
+        Raises ScriptureError(INVALID_BOOK) if not found.
+        """
+        book_slug = JSDelivrScriptureService.BOOK_SLUGS.get(book)
+        if not book_slug:
+            # Try case-insensitive lookup
+            lower_to_slug = {k.lower(): v for k, v in JSDelivrScriptureService.BOOK_SLUGS.items()}
+            book_slug = lower_to_slug.get(book.lower())
+        if not book_slug:
+            raise ScriptureError(
+                f"Unknown Bible book: '{book}'",
+                code="INVALID_BOOK",
+            )
+        return book_slug
+
+    @staticmethod
+    def _validate_chapter(book: str, chapter: int) -> None:
+        """Validate chapter number against the book's known chapter count.
+
+        Raises ScriptureError(INVALID_CHAPTER) if out of range.
+        """
+        all_books = ScriptureService.get_books_list("all")
+        book_lower = book.lower()
+        for b in all_books:
+            if b["name"].lower() == book_lower or b["slug"] == book_lower:
+                if chapter < 1 or chapter > b["chapters"]:
+                    raise ScriptureError(
+                        f"'{book}' has {b['chapters']} chapters, "
+                        f"but chapter {chapter} was requested.",
+                        code="INVALID_CHAPTER",
+                    )
+                return
+        # Book not found in list — shouldn't happen after _validate_book,
+        # but just in case, silently allow (CDN will 404 if truly invalid).
+
+    # ── Full chapter fetch ───────────────────────────────────────────
+
+    @staticmethod
+    def fetch_chapter(
+        book: str,
+        chapter: int,
+        version: str = "kjv",
+    ) -> list[dict]:
+        """Fetch ALL verses in a chapter.
+
+        Returns a list of {"number": int, "text": str} dicts sorted by verse
+        number. Validates version, book, and chapter before fetching.
+
+        Raises:
+            VersionNotAvailableError — version not in free tier
+            ScriptureError(INVALID_BOOK) — book not found
+            ScriptureError(INVALID_CHAPTER) — chapter out of range
+            ScriptureError(CHAPTER_NOT_FOUND) — CDN returned no verses
+        """
+        version_id = ScriptureService._validate_version(version)
+        book_slug = ScriptureService._validate_book(book)
+        ScriptureService._validate_chapter(book, chapter)
+
+        try:
+            verses = JSDelivrScriptureService.fetch_chapter(book_slug, chapter, version_id)
+        except Exception as e:
+            raise ScriptureError(
+                f"Failed to fetch chapter: {e!s}",
+                code="SCRIPTURE_FETCH_FAILED",
+            ) from e
+
+        if not verses:
+            raise ScriptureError(
+                f"No verses found for {book} chapter {chapter}.",
+                code="CHAPTER_NOT_FOUND",
+            )
+
+        return verses
 
     @staticmethod
     def get_available_versions() -> list[dict]:

@@ -6,6 +6,7 @@ Source: https://github.com/wldeh/bible-api via JSDelivr
 """
 
 import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 
 import requests
@@ -339,3 +340,67 @@ class JSDelivrScriptureService:
             return response.json()
         except requests.RequestException as e:
             raise Exception(f"Failed to fetch scripture: {e!s}") from e
+
+    @staticmethod
+    def _try_fetch_verse(book_slug: str, chapter: int, verse: int, version_id: str) -> dict | None:
+        """Attempt to fetch a single verse; return None on 404 / failure."""
+        url = (
+            f"{JSDelivrScriptureService.BASE_URL}/{version_id}"
+            f"/books/{book_slug}/chapters/{chapter}/verses/{verse}.json"
+        )
+        try:
+            response = requests.get(url, timeout=2)
+            if response.status_code == 404:
+                return None
+            response.raise_for_status()
+            data = response.json()
+            return {"number": verse, "text": data.get("text", "")}
+        except requests.RequestException:
+            return None
+
+    @staticmethod
+    def fetch_chapter(
+        book_slug: str,
+        chapter: int,
+        version_id: str,
+        *,
+        max_verses: int = 200,
+    ) -> list[dict]:
+        """Fetch ALL verses in a chapter using parallel requests.
+
+        Submits up to `max_verses` requests concurrently via ThreadPoolExecutor.
+        Collects successful results and discards 404s (missing verse numbers).
+
+        Returns a sorted list of {"number": int, "text": str} dicts.
+        """
+        cache_key = f"scripture:chapter:{version_id}:{book_slug}:{chapter}"
+        cached = cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+        verses: list[dict] = []
+
+        with ThreadPoolExecutor(max_workers=max_verses) as executor:
+            futures = {
+                executor.submit(
+                    JSDelivrScriptureService._try_fetch_verse,
+                    book_slug,
+                    chapter,
+                    v,
+                    version_id,
+                ): v
+                for v in range(1, max_verses + 1)
+            }
+
+            for future in as_completed(futures):
+                result = future.result()
+                if result is not None:
+                    verses.append(result)
+
+        verses.sort(key=lambda v: v["number"])
+
+        if verses:
+            # Cache for 24 hours (static content)
+            cache.set(cache_key, verses, 86400)
+
+        return verses

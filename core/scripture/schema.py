@@ -4,6 +4,7 @@ from graphql import GraphQLError
 from core.scripture.constants import FREE_BIBLE_VERSIONS
 from core.scripture.exceptions import ScriptureError, VersionNotAvailableError
 from core.scripture.services import ScriptureService
+from core.shared.types import ScriptureVerse
 
 
 @strawberry.type
@@ -32,29 +33,13 @@ class BibleBook:
 
 
 @strawberry.type
-class VerseType:
-    """A single Bible verse."""
+class ScriptureResponse:
+    """Full chapter response containing all verses."""
 
-    number: int
-    text: str
-
-
-@strawberry.type
-class ScriptureType:
-    """
-    Explicit verse text payload resulting from exact coordinates mapping.
-    """
-
-    verses: list[VerseType]
-    text: str = strawberry.field(description="The full canonical sequence")
-    reference: str = strawberry.field(description="Formatted label string literal ('John 3:16')")
-    version: str = strawberry.field(description="Translation metadata")
-    book: str = strawberry.field(description="Root index mapping")
-    chapter: int = strawberry.field(description="Coordinates")
-    verse_start: int = strawberry.field(description="Coordinates")
-    verse_end: int | None = strawberry.field(
-        default=None, description="Coordinates bounded natively"
-    )
+    book: str = strawberry.field(description="Book name ('John')")
+    chapter: int = strawberry.field(description="Chapter number")
+    version: str = strawberry.field(description="Translation version ('kjv')")
+    verses: list[ScriptureVerse] = strawberry.field(description="All verses in the chapter")
 
 
 @strawberry.type
@@ -113,47 +98,37 @@ class ScriptureQueries:
         ]
 
     @strawberry.field(
-        description="Fetch explicit specific coordinates safely previewing verse text literal mapped natively. "
-        "Only free-tier versions (kjv, asv, web, rv) are supported for launch."
+        description="Fetch all verses in a chapter. Returns a ScriptureResponse "
+        "with book, chapter, version, and every verse in the chapter."
     )
     def scripture(
         self,
         book: str,
         chapter: int,
-        verseStart: int,
-        verseEnd: int | None = None,
         version: str = "kjv",
-    ) -> ScriptureType | None:
+    ) -> ScriptureResponse:
         """
-        Fetch explicit specific coordinates safely previewing verse text literal mapped natively.
+        Fetch all verses in a specific chapter.
 
         **Authentication:** Not required
         **Parameters:**
-        - book (String, required) - Volume
-        - chapter (Int, required) - Area
-        - verseStart (Int, required) - Bounds
-        - verseEnd (Int, optional) - Expanded bounds
-        - version (String, optional) - Translation lookup (kjv, asv, web, rv)
-        **Returns:** Nullable ScriptureType text payload explicitly
-        **Errors:** Fails yielding None if version is restricted or fetch fails.
+        - book (String!, required) — Book name (e.g. "John")
+        - chapter (Int!, required) — Chapter number
+        - version (String!, optional, default "kjv") — Bible translation
+        **Returns:** ScriptureResponse with all verses
+        **Errors:**
+        - INVALID_BOOK — book not found
+        - INVALID_CHAPTER — chapter exceeds book's chapters
+        - CHAPTER_NOT_FOUND — no verses returned from CDN
+        - VERSION_NOT_AVAILABLE — version not in free tier
         """
         try:
-            result = ScriptureService.fetch_verse(
+            verses = ScriptureService.fetch_chapter(book=book, chapter=chapter, version=version)
+            return ScriptureResponse(
                 book=book,
                 chapter=chapter,
-                verse_start=verseStart,
-                verse_end=verseEnd,
-                version=version,
-            )
-            return ScriptureType(
-                text=result["text"],
-                verses=[VerseType(number=v["number"], text=v["text"]) for v in result["verses"]],
-                reference=result["reference"],
-                version=result["version"],
-                book=result["book"],
-                chapter=result["chapter"],
-                verse_start=result["verse_start"],
-                verse_end=result["verse_end"],
+                version=version.lower().strip(),
+                verses=[ScriptureVerse(number=v["number"], text=v["text"]) for v in verses],
             )
         except VersionNotAvailableError as e:
             raise GraphQLError(
@@ -163,5 +138,66 @@ class ScriptureQueries:
                     "availableVersions": FREE_BIBLE_VERSIONS,
                 },
             ) from e
-        except ScriptureError:
-            return None
+        except ScriptureError as e:
+            raise GraphQLError(
+                str(e),
+                extensions={"code": e.code},
+            ) from e
+
+    @strawberry.field(
+        description="Fetch verses in a range and return combined text as a single string. "
+        "No verse numbers included — just the concatenated text."
+    )
+    def scriptureRange(
+        self,
+        book: str,
+        chapter: int,
+        version: str = "kjv",
+        verseStart: int = 1,
+        verseEnd: int | None = None,
+    ) -> str:
+        """
+        Fetch a verse range and return the combined text.
+
+        **Authentication:** Not required
+        **Parameters:**
+        - book (String!, required) — Book name
+        - chapter (Int!, required) — Chapter number
+        - version (String!, optional, default "kjv") — Translation
+        - verseStart (Int!, required) — First verse number
+        - verseEnd (Int, optional) — Last verse number (defaults to verseStart)
+        **Returns:** Combined verse text (String!)
+        **Errors:**
+        - INVALID_BOOK — book not found
+        - VERSE_RANGE_INVALID — verseEnd < verseStart
+        - VERSION_NOT_AVAILABLE — version not in free tier
+        """
+        # Validate verse range
+        if verseEnd is not None and verseEnd < verseStart:
+            raise GraphQLError(
+                f"verseEnd ({verseEnd}) must be >= verseStart ({verseStart})",
+                extensions={"code": "VERSE_RANGE_INVALID"},
+            )
+
+        try:
+            result = ScriptureService.fetch_verse(
+                book=book,
+                chapter=chapter,
+                verse_start=verseStart,
+                verse_end=verseEnd,
+                version=version,
+            )
+            return result["text"]
+        except VersionNotAvailableError as e:
+            raise GraphQLError(
+                str(e),
+                extensions={
+                    "code": "VERSION_NOT_AVAILABLE",
+                    "availableVersions": FREE_BIBLE_VERSIONS,
+                },
+            ) from e
+        except ScriptureError as e:
+            raise GraphQLError(
+                str(e),
+                extensions={"code": e.code},
+            ) from e

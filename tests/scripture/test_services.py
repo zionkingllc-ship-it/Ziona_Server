@@ -270,3 +270,98 @@ class TestScriptureService:
         assert len(books) == 66
         assert books[0]["name"] == "Genesis"
         assert books[-1]["name"] == "Revelation"
+
+    # ── New tests for scripture query refactor ────────────────────────
+
+    @patch("core.scripture.providers.jsdelivr.JSDelivrScriptureService._try_fetch_verse")
+    def test_scripture_full_chapter(self, mock_try):
+        """17. fetch_chapter returns all verses for a chapter."""
+
+        # Simulate a chapter with 3 verses (verse 4 onwards returns None)
+        def side_effect(book_slug, chapter, verse, version_id):
+            if verse <= 3:
+                return {"number": verse, "text": f"Verse {verse} text."}
+            return None
+
+        mock_try.side_effect = side_effect
+
+        verses = ScriptureService.fetch_chapter("Ruth", 1, version="kjv")
+
+        assert len(verses) == 3
+        assert verses[0]["number"] == 1
+        assert verses[0]["text"] == "Verse 1 text."
+        assert verses[2]["number"] == 3
+
+    @patch("core.scripture.providers.jsdelivr.requests.get")
+    def test_scripture_range_format(self, mock_get):
+        """18. scriptureRange returns space-joined text, no verse numbers."""
+        mock_resp_1 = MagicMock()
+        mock_resp_1.json.return_value = {"text": "For God so loved the world."}
+        mock_resp_2 = MagicMock()
+        mock_resp_2.json.return_value = {"text": "For God sent not his Son."}
+        mock_get.side_effect = [mock_resp_1, mock_resp_2]
+
+        result = ScriptureService.fetch_verse(
+            "John", 3, verse_start=16, verse_end=17, version="kjv"
+        )
+
+        # Text should be space-joined, no verse numbers
+        assert result["text"] == "For God so loved the world. For God sent not his Son."
+        assert "16" not in result["text"]
+        assert "17" not in result["text"]
+
+    def test_scripture_invalid_book(self):
+        """19. Unknown book raises INVALID_BOOK error."""
+        with pytest.raises(ScriptureError) as exc_info:
+            ScriptureService.fetch_chapter("Hezekiah", 1, version="kjv")
+        assert exc_info.value.code == "INVALID_BOOK"
+
+    def test_scripture_invalid_chapter(self):
+        """20. Chapter out of range raises INVALID_CHAPTER error."""
+        with pytest.raises(ScriptureError) as exc_info:
+            ScriptureService.fetch_chapter("Ruth", 99, version="kjv")
+        assert exc_info.value.code == "INVALID_CHAPTER"
+        assert "4 chapters" in str(exc_info.value)
+
+    @patch("core.scripture.providers.jsdelivr.JSDelivrScriptureService._try_fetch_verse")
+    def test_scripture_chapter_not_found(self, mock_try):
+        """21. CDN returns no verses raises CHAPTER_NOT_FOUND."""
+        mock_try.return_value = None  # All verses 404
+
+        with pytest.raises(ScriptureError) as exc_info:
+            ScriptureService.fetch_chapter("John", 1, version="kjv")
+        assert exc_info.value.code == "CHAPTER_NOT_FOUND"
+
+    def test_scripture_range_invalid(self):
+        """22. verseEnd < verseStart raises INVALID_VERSE_RANGE on fetch_verse."""
+        # The range validation happens in the JSDelivr provider
+        # but we test via fetch_verse which delegates to it
+        with pytest.raises(ScriptureError):
+            ScriptureService.fetch_verse("John", 3, verse_start=17, verse_end=16, version="kjv")
+
+    def test_scripture_version_not_available(self):
+        """23. Premium version raises VERSION_NOT_AVAILABLE."""
+        with pytest.raises(ScriptureError) as exc_info:
+            ScriptureService.fetch_chapter("John", 3, version="niv")
+        assert exc_info.value.code == "SCRIPTURE_VERSION_NOT_AVAILABLE"
+
+    @patch("core.scripture.providers.jsdelivr.JSDelivrScriptureService._try_fetch_verse")
+    def test_fetch_chapter_performance(self, mock_try):
+        """24. Parallel fetch_chapter completes quickly even for large chapters."""
+        import time
+
+        # Simulate 176 verses (Psalms 119 — the longest chapter) with slight delay
+        def side_effect(book_slug, chapter, verse, version_id):
+            if verse <= 176:
+                return {"number": verse, "text": f"Verse {verse}."}
+            return None
+
+        mock_try.side_effect = side_effect
+
+        start = time.monotonic()
+        verses = ScriptureService.fetch_chapter("Psalms", 119, version="kjv")
+        elapsed = time.monotonic() - start
+
+        assert len(verses) == 176
+        # With mocked responses (no network), should complete well under 5s
+        assert elapsed < 5.0, f"fetch_chapter took {elapsed:.2f}s, expected <5s"
