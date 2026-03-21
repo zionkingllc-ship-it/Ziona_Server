@@ -264,7 +264,7 @@ def _dto_to_feed_post(dto) -> FeedPost:
             FeedPostScripture(
                 reference=dto.scripture.reference,
                 text=dto.scripture.text,
-                version=dto.scripture.version,
+                translation=dto.scripture.version,
                 book=dto.scripture.book,
                 chapter=dto.scripture.chapter,
                 verse_start=dto.scripture.verse_start,

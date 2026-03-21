@@ -218,6 +218,10 @@ class TestSchemaAlignment:
             user_id=str(user.id), post_type="text", caption="Test union post", category_id="1"
         )
 
+        from django.core.cache import cache
+
+        cache.clear()
+
         query = """
         query GetFeedUnions {
           feed {

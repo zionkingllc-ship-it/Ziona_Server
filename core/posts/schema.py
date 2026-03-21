@@ -388,7 +388,7 @@ class Post:
         return PostScripture(
             reference=self._dto.scripture.reference,
             text=self._dto.scripture.text,
-            version=self._dto.scripture.version,
+            translation=self._dto.scripture.version,
             book=self._dto.scripture.book,
             chapter=self._dto.scripture.chapter,
             verse_start=self._dto.scripture.verse_start,
