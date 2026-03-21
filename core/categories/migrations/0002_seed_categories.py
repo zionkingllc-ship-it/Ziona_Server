@@ -56,7 +56,7 @@ def seed_categories(apps, schema_editor):
             "label": "Prayer",
             "slug": "prayer",
             "icon": "https://storage.googleapis.com/ziona-media-dev/categories/images/prayer.png",
-            "bg_color": "#D8F3ECE8",
+            "bg_color": "#D8F3EC",
             "bd_color": "#226858",
             "order": 6,
         },
