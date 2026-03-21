@@ -3,6 +3,7 @@ from datetime import timedelta
 from pathlib import Path
 
 import environ
+from celery.schedules import crontab
 
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
@@ -185,6 +186,17 @@ CELERY_TASK_TRACK_STARTED = True
 CELERY_TASK_TIME_LIMIT = 300
 CELERY_BEAT_SCHEDULER = "django_celery_beat.schedulers:DatabaseScheduler"
 
+CELERY_BEAT_SCHEDULE = {
+    "send-daily-anchor-notifications": {
+        "task": "core.notifications.tasks.send_daily_anchor_notifications",
+        "schedule": crontab(hour=18, minute=0),
+    },
+    "cleanup-old-notifications": {
+        "task": "core.notifications.tasks.cleanup_old_notifications",
+        "schedule": crontab(day_of_week=0, hour=2, minute=0),
+    },
+}
+
 
 GCP_STORAGE_BUCKET = env("GCP_STORAGE_BUCKET", default="ziona-media-dev")
 GCP_CREDENTIALS_FILE = env("GCP_CREDENTIALS_FILE", default="")
@@ -199,6 +211,7 @@ DEFAULT_FROM_EMAIL = env("DEFAULT_FROM_EMAIL", default="noreply@ziona.app")
 
 
 FIREBASE_CREDENTIALS_FILE = env("FIREBASE_CREDENTIALS_FILE", default="")
+FIREBASE_PROJECT_ID = env("FIREBASE_PROJECT_ID", default="")
 
 
 ENCRYPTION_KEY = env("ENCRYPTION_KEY", default="")

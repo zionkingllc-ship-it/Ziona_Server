@@ -1,115 +1,94 @@
-"""
-Notification placeholder tasks.
-
-These are stub tasks that will be implemented in Milestone 3.
-For now they log the notification intent and return.
-"""
-
 import logging
+from datetime import timedelta
 
 from celery import shared_task
+from django.utils import timezone
 
-logger = logging.getLogger("core.notifications")
+from core.circles.models import Anchor
+from core.notifications.models import Notification, NotificationStatus, NotificationType
+from core.notifications.services import create_notification
+
+logger = logging.getLogger(__name__)
 
 
-@shared_task(name="notifications.send_comment_mention_notification")
-def send_comment_mention_notification(
-    mentioned_user_ids: list[str],
-    commenter_id: str,
-    comment_id: str,
-    post_id: str,
-) -> None:
-    """Send a notification to users mentioned in a comment.
-
-    Placeholder — will be implemented in Milestone 3 (Push Notifications).
-
-    Args:
-        mentioned_user_ids: List of mentioned user UUIDs.
-        commenter_id: UUID of the commenter.
-        comment_id: UUID of the comment.
-        post_id: UUID of the post.
+@shared_task
+def send_daily_anchor_notifications():
     """
-    logger.info(
-        "notification_placeholder:comment_mention",
-        extra={
-            "mentioned_user_ids": mentioned_user_ids,
-            "commenter_id": commenter_id,
-            "comment_id": comment_id,
-            "post_id": post_id,
-        },
+    Daily task to batch all new anchors from the last 24 hours
+    and send a single notification to each relevant circle member.
+    """
+    now = timezone.now()
+    yesterday = now - timedelta(days=1)
+
+    # Fetch anchors published in the last 24 hours that haven't been notified yet
+    # Optimize to prevent N+1 queries when looping memberships
+    anchors = (
+        Anchor.objects.filter(
+            published_at__gte=yesterday,
+            published_at__lte=now,
+            is_notified=False,
+            deleted_at__isnull=True,
+        )
+        .select_related("circle")
+        .prefetch_related("circle__memberships__user")
     )
 
+    if not anchors.exists():
+        logger.info("No new anchors to notify about.")
+        return
 
-@shared_task(name="notifications.send_follow_notification")
-def send_follow_notification(
-    follower_id: str,
-    following_id: str,
-) -> None:
-    """Send a notification when someone follows a user.
+    user_circle_map = {}
+    anchor_ids = []
 
-    Placeholder — will be implemented in Milestone 3.
+    for anchor in anchors:
+        circle = anchor.circle
+        if not circle:
+            continue
 
-    Args:
-        follower_id: UUID of the new follower.
-        following_id: UUID of the followed user.
-    """
-    logger.info(
-        "notification_placeholder:follow",
-        extra={
-            "follower_id": follower_id,
-            "following_id": following_id,
-        },
-    )
+        anchor_ids.append(anchor.id)
 
+        for membership in circle.memberships.all():
+            user = membership.user
+            uid = user.id
+            if uid not in user_circle_map:
+                user_circle_map[uid] = set()
+            user_circle_map[uid].add(circle.name)
 
-@shared_task(name="notifications.send_share_notification")
-def send_share_notification(
-    sharer_id: str,
-    recipient_id: str,
-    post_id: str,
-    share_id: str,
-) -> None:
-    """Send a notification when a post is shared with a user.
+    # Mark anchors as notified efficiently
+    if anchor_ids:
+        Anchor.objects.filter(id__in=anchor_ids).update(is_notified=True, updated_at=timezone.now())
 
-    Placeholder — will be implemented in Milestone 3.
+    # Create batched notifications
+    for uid, circle_names in user_circle_map.items():
+        if len(circle_names) == 1:
+            circles_str = f"'{list(circle_names)[0]}'"
+        else:
+            circles_str = f"{len(circle_names)} circles"
 
-    Args:
-        sharer_id: UUID of the sharing user.
-        recipient_id: UUID of the recipient.
-        post_id: UUID of the shared post.
-        share_id: UUID of the share record.
-    """
-    logger.info(
-        "notification_placeholder:share",
-        extra={
-            "sharer_id": sharer_id,
-            "recipient_id": recipient_id,
-            "post_id": post_id,
-            "share_id": share_id,
-        },
-    )
+        message = f"New anchor posts in {circles_str}"
+
+        try:
+            create_notification(
+                user_id=uid,
+                type_str=NotificationType.NEW_ANCHOR,
+                reference_id=None,
+                reference_type="circle_batch",
+                message=message,
+            )
+        except Exception as e:
+            logger.error(
+                f"Failed to create daily anchor notification for user {uid}: {e}", exc_info=True
+            )
+
+    logger.info(f"Sent daily anchor notifications to {len(user_circle_map)} users.")
 
 
-@shared_task(name="notifications.send_like_notification")
-def send_like_notification(
-    liker_id: str,
-    post_id: str,
-    post_author_id: str,
-) -> None:
-    """Send a notification when a post is liked.
+@shared_task
+def cleanup_old_notifications():
+    """Delete soft-deleted notifications older than 90 days."""
+    cutoff = timezone.now() - timedelta(days=90)
+    deleted_count, _ = Notification.objects.filter(
+        status=NotificationStatus.DELETED, created_at__lt=cutoff
+    ).delete()
 
-    Placeholder — will be implemented in Milestone 3.
-
-    Args:
-        liker_id: UUID of the user who liked.
-        post_id: UUID of the liked post.
-        post_author_id: UUID of the post author.
-    """
-    logger.info(
-        "notification_placeholder:like",
-        extra={
-            "liker_id": liker_id,
-            "post_id": post_id,
-            "post_author_id": post_author_id,
-        },
-    )
+    logger.info(f"Cleaned up {deleted_count} old deleted notifications.")
