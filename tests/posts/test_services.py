@@ -30,10 +30,20 @@ class TestCreatePost:
 
         with pytest.raises(PostError):
             PostService.create_post(
+                user_id=str(user_a.id), post_type="text", category_id="invalid-999"
+            )
+
+    def test_create_post_invalid_category(self, user_a):
+        from core.posts.services import PostService
+        from core.shared.exceptions import PostError
+
+        with pytest.raises(PostError) as excinfo:
+            PostService.create_post(
                 user_id=str(user_a.id),
                 post_type="text",
-                caption="x" * 501,
+                category_id="invalid-abc",
             )
+        assert excinfo.value.code == "INVALID_CATEGORY"
 
     def test_create_image_post(self, user_a, db):
         from core.media.models import MediaFile

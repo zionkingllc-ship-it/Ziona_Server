@@ -84,10 +84,9 @@ class TestSchemaAlignment:
             posts {
               id
               caption
-              media {
-                url
-                type
-              }
+              image { items { url } }
+              video { url }
+              text { message }
             }
             hasMore
           }
@@ -180,3 +179,105 @@ class TestSchemaAlignment:
         data = content["data"]["scriptureRange"]
         assert isinstance(data, str)
         assert len(data) > 0
+
+    def test_create_post_media_urls_only(self, auth_client, user):
+        """Verify createPost accepts mediaUrls seamlessly"""
+        mutation = """
+        mutation CreateMediaUrl($postType: PostType!, $caption: String, $mediaUrls: [String!]) {
+          createPost(postType: $postType, caption: $caption, mediaUrls: $mediaUrls) {
+            success
+            error { code }
+            post { media { url } }
+          }
+        }
+        """
+        response = auth_client.post(
+            "/graphql/",
+            data=json.dumps(
+                {
+                    "query": mutation,
+                    "variables": {
+                        "postType": "MEDIA",
+                        "caption": "Url test",
+                        "mediaUrls": ["https://storage.googleapis.com/test.jpg"],
+                    },
+                }
+            ),
+            content_type="application/json",
+        )
+        data = json.loads(response.content)["data"]["createPost"]
+        assert data["success"] is True
+        assert len(data["post"]["media"]) == 1
+
+    def test_feed_union_and_category_resolution(self, auth_client, user):
+        """Verify feed returns strict unions and full category bodies"""
+        # Create a post tied to category 1 (All)
+        from core.posts.services import PostService
+
+        PostService.create_post(
+            user_id=str(user.id), post_type="text", caption="Test union post", category_id="1"
+        )
+
+        query = """
+        query GetFeedUnions {
+          feed {
+            posts {
+              type
+              category { id label slug icon bgColor bdColor order }
+              text { message scripture { reference } }
+              image { items { url } }
+              video { url }
+            }
+          }
+        }
+        """
+        response = auth_client.post(
+            "/graphql/", data=json.dumps({"query": query}), content_type="application/json"
+        )
+        content = json.loads(response.content)
+        assert "errors" not in content
+
+        posts = content["data"]["feed"]["posts"]
+        text_post = next(
+            p for p in posts if p["text"] and p["text"]["message"] == "Test union post"
+        )
+
+        # Verify 7 properties on Category
+        assert text_post["category"]["id"] == "1"
+        assert text_post["category"]["label"] == "All"
+        assert text_post["image"] is None
+        assert text_post["video"] is None
+
+    def test_create_scripture_fields(self, auth_client):
+        """Verify createPost parses root scripture scalars properly"""
+        from unittest.mock import patch
+
+        with patch("core.scripture.services.ScriptureService.fetch_verse") as mock_fetch:
+            mock_fetch.return_value = {
+                "reference": "John 11:35",
+                "text": "Jesus wept.",
+                "version": "KJV",
+                "book": "John",
+                "chapter": 11,
+                "verse_start": 35,
+                "verse_end": None,
+                "verses": [],
+            }
+            mutation = """
+        mutation CreateBible($postType: PostType!, $book: String!, $chap: Int!, $vs: Int!) {
+          createPost(postType: $postType, scriptureBook: $book, scriptureChapter: $chap, scriptureVerseStart: $vs) {
+            success
+            post { scripture { book chapter verseStart } }
+          }
+        }
+        """
+        variables = {"postType": "BIBLE", "book": "John", "chap": 11, "vs": 35}
+        response = auth_client.post(
+            "/graphql/",
+            data=json.dumps({"query": mutation, "variables": variables}),
+            content_type="application/json",
+        )
+        data = json.loads(response.content)["data"]["createPost"]
+
+        assert data["success"] is True
+        assert data["post"]["scripture"]["book"] == "John"

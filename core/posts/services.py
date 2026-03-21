@@ -52,7 +52,12 @@ class PostService:
         caption: str | None = None,
         category_id: str | None = None,
         media_ids: list[str] | None = None,
+        media_urls: list[str] | None = None,
         media_type: str | None = None,
+        thumbnail_url: str | None = None,
+        width: int | None = None,
+        height: int | None = None,
+        duration: int | None = None,
         scripture_reference: dict | None = None,
     ) -> PostResponseDTO:
         """Create a new post matching the agreed mobile contract.
@@ -91,10 +96,16 @@ class PostService:
                     extensions={"field": "caption", "maxLength": max_len},
                 )
 
+        import re
+
+        from core.categories.models import Category
         from core.media.models import MediaFile
         from core.users.models import User
 
-        # 1. Resolve Media IDs
+        if category_id and not Category.objects.filter(id=category_id).exists():
+            raise PostError(message="Invalid category ID", code="INVALID_CATEGORY")
+
+        # 1. Resolve Media IDs or URLs
         resolved_media_files = []
         if media_ids:
             resolved_media_files = list(MediaFile.objects.filter(id__in=media_ids))
@@ -103,6 +114,37 @@ class PostService:
                     message="One or more media IDs not found",
                     code=ErrorCode.VALIDATION_ERROR,
                 )
+        elif media_urls:
+            url_pattern = re.compile(
+                r"^(?:http|ftp)s?://"
+                r"(?:(?:[A-Z0-9](?:[A-Z0-9-]{0,61}[A-Z0-9])?\.)+(?:[A-Z]{2,6}\.?|[A-Z0-9-]{2,}\.?)|"
+                r"localhost|"
+                r"\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})"
+                r"(?::\d+)?"
+                r"(?:/?|[/?]\S+)$",
+                re.IGNORECASE,
+            )
+
+            for url in media_urls:
+                if not re.match(url_pattern, url):
+                    raise PostError(message=f"Invalid media URL: {url}", code="INVALID_MEDIA_URL")
+
+                ext = url.split("?")[0].split(".")[-1].lower() if "." in url.split("?")[0] else ""
+                inferred_type = "video" if ext in ["mp4", "mov", "webm"] else "image"
+                media_file = MediaFile.objects.create(
+                    user_id=user_id,
+                    storage_path=url,
+                    file_name=url.split("/")[-1] or "media_url",
+                    file_type="video/mp4" if inferred_type == "video" else "image/jpeg",
+                    file_size=0,
+                    media_type=inferred_type,
+                    thumbnail_path=thumbnail_url if thumbnail_url else "",
+                    width=width,
+                    height=height,
+                    duration=duration if inferred_type == "video" else None,
+                    status="ready",
+                )
+                resolved_media_files.append(media_file)
 
         # 2. Handle Scripture
         scripture_fields = {}
@@ -154,7 +196,7 @@ class PostService:
             user=user,
             post_type=internal_post_type,
             caption=caption or "",
-            category=category_id,
+            category_id=category_id,
             media_count=len(resolved_media_files),
             **scripture_fields,
         )

@@ -54,7 +54,8 @@ LOCAL_APPS = [
     "core.feed",
     "core.profiles",
     "core.notifications",
-    "core.circles",  # NEW Phase 3 App
+    "core.categories",
+    "core.circles",
 ]
 
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS

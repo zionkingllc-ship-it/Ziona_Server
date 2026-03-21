@@ -68,12 +68,29 @@ class FeedPostScripture:
 
     reference: str
     text: str
-    version: str = "KJV"
+    translation: str = strawberry.field(name="translation", default="KJV")
     book: str
     chapter: int
     verse_start: int
     verse_end: int | None = None
     verses: list[ScriptureVerse] = strawberry.field(default_factory=list)
+
+
+@strawberry.type
+class ImageData:
+    items: list[MediaFileType]
+
+
+@strawberry.type
+class VideoData:
+    url: str
+    thumbnail_url: str | None = None
+
+
+@strawberry.type
+class TextData:
+    message: str | None = None
+    scripture: FeedPostScripture | None = None
 
 
 @strawberry.type
@@ -85,7 +102,7 @@ class FeedPost:
     """
 
     id: str
-    post_type: PostType
+    post_type: PostType = strawberry.field(name="type")
     caption: str | None = None
     _category_id: strawberry.Private[str | None] = None
     author: FeedPostAuthor
@@ -93,19 +110,32 @@ class FeedPost:
     viewer_state: FeedViewerState | None = None
     share_url: str
     created_at: str
-    scripture: FeedPostScripture | None = None
+    _scripture: strawberry.Private[FeedPostScripture | None] = None
 
     _media_list: strawberry.Private[list[MediaFileType]] = dataclasses.field(default_factory=list)
 
-    @strawberry.field(description="Post text content securely (alias for caption)")
-    def text(self) -> str | None:
-        """Post caption/text - mobile expects 'text' field cleanly"""
-        return self.caption
+    @strawberry.field(description="Image data array mapping")
+    def image(self) -> ImageData | None:
+        if self.post_type == PostType.MEDIA and any(
+            m.type == MediaTypeEnum.IMAGE for m in self._media_list
+        ):
+            return ImageData(items=[m for m in self._media_list if m.type == MediaTypeEnum.IMAGE])
+        return None
 
-    @strawberry.field(description="Media files array natively (alias for mapped media DTO)")
-    def media(self) -> list[MediaFileType]:
-        """Media files array mapped cleanly matching exactly what mobile expects"""
-        return self._media_list
+    @strawberry.field(description="Video metadata mapping")
+    def video(self) -> VideoData | None:
+        if self.post_type == PostType.MEDIA and any(
+            m.type == MediaTypeEnum.VIDEO for m in self._media_list
+        ):
+            v = next(m for m in self._media_list if m.type == MediaTypeEnum.VIDEO)
+            return VideoData(url=v.url, thumbnail_url=v.thumbnail)
+        return None
+
+    @strawberry.field(description="Text/Bible content cleanly segregated")
+    def text(self) -> TextData | None:
+        if self.post_type in (PostType.TEXT, PostType.BIBLE):
+            return TextData(message=self.caption, scripture=self._scripture)
+        return None
 
     @strawberry.field(description="Full category object natively")
     def category(self) -> CategoryType | None:
@@ -173,7 +203,7 @@ def _dto_to_feed_post(dto) -> FeedPost:
                 MediaFileType(
                     id=dto.id,
                     url=dto.media.url,
-                    thumbnail=getattr(dto.media, "thumbnail_url", None) or dto.media.url,
+                    thumbnail_url=getattr(dto.media, "thumbnail_url", None) or dto.media.url,
                     type=MediaTypeEnum.VIDEO,
                     width=getattr(dto.media, "width", None),
                     height=getattr(dto.media, "height", None),
@@ -185,7 +215,7 @@ def _dto_to_feed_post(dto) -> FeedPost:
                     MediaFileType(
                         id=getattr(img, "id", dto.id),
                         url=img.url,
-                        thumbnail=getattr(img, "thumbnail_url", None) or img.url,
+                        thumbnail_url=getattr(img, "thumbnail_url", None) or img.url,
                         type=MediaTypeEnum.IMAGE,
                         width=getattr(img, "width", None),
                         height=getattr(img, "height", None),
@@ -230,7 +260,7 @@ def _dto_to_feed_post(dto) -> FeedPost:
         ),
         share_url=dto.share_url,
         created_at=dto.created_at,
-        scripture=(
+        _scripture=(
             FeedPostScripture(
                 reference=dto.scripture.reference,
                 text=dto.scripture.text,
@@ -269,61 +299,20 @@ class FeedQueries:
         **Returns:** Array of valid DiscoverCategory objects
         **Errors:** None
         """
+        from core.categories.models import Category
+
+        categories = Category.objects.all().order_by("order")
         return [
             CategoryType(
-                id="all",
-                label="All",
-                slug="all",
-                icon="circle-stack",
-                bg_color="#F5EDD7",
-                bd_color="#E5D5B0",
-                order=0,
-            ),
-            CategoryType(
-                id="love",
-                label="Love",
-                slug="love",
-                icon="heart",
-                bg_color="#FADADD",
-                bd_color="#F5B8C0",
-                order=1,
-            ),
-            CategoryType(
-                id="trust",
-                label="Trust",
-                slug="trust",
-                icon="shield",
-                bg_color="#D4E3F7",
-                bd_color="#B8CEE8",
-                order=2,
-            ),
-            CategoryType(
-                id="worship",
-                label="Worship",
-                slug="worship",
-                icon="harp",
-                bg_color="#FFF4D4",
-                bd_color="#F5E8B0",
-                order=3,
-            ),
-            CategoryType(
-                id="patience",
-                label="Patience",
-                slug="patience",
-                icon="hourglass",
-                bg_color="#F0E6F7",
-                bd_color="#DCC8E8",
-                order=4,
-            ),
-            CategoryType(
-                id="prayer",
-                label="Prayer",
-                slug="prayer",
-                icon="praying-hands",
-                bg_color="#D4F7F0",
-                bd_color="#B8E8DD",
-                order=5,
-            ),
+                id=cat.id,
+                label=cat.label,
+                slug=cat.slug,
+                icon=cat.icon,
+                bg_color=cat.bg_color,
+                bd_color=cat.bd_color,
+                order=cat.order,
+            )
+            for cat in categories
         ]
 
     @strawberry.field(

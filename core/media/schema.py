@@ -17,7 +17,7 @@ class MediaFileType:
     type: MediaType  # ENUM (IMAGE or VIDEO)
     width: int | None = None
     height: int | None = None
-    thumbnail: str | None = None  # For videos
+    thumbnail_url: str | None = None  # For videos
 
 
 @strawberry.type

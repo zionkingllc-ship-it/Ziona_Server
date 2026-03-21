@@ -55,9 +55,9 @@ class Post(SoftDeleteModel):
         db_index=True,
     )
     caption = models.TextField(max_length=2200, blank=True, null=True)
-    category = models.CharField(
-        max_length=50,
-        choices=PostCategory.choices,
+    category = models.ForeignKey(
+        "categories.Category",
+        on_delete=models.SET_NULL,
         blank=True,
         null=True,
         db_index=True,

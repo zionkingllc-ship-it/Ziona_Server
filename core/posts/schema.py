@@ -53,10 +53,19 @@ class PostMutations:
         info: strawberry.types.Info,
         post_type: PostType,
         caption: str | None = None,
-        category_id: strawberry.ID | None = None,
+        category: str | None = None,
         media_ids: list[str] | None = None,
+        media_urls: list[str] | None = None,
         media_type: MediaType | None = None,
-        scripture_reference: ScriptureInput | None = None,
+        thumbnail_url: str | None = None,
+        width: int | None = None,
+        height: int | None = None,
+        duration: int | None = None,
+        scripture_book: str | None = None,
+        scripture_chapter: int | None = None,
+        scripture_verse_start: int | None = None,
+        scripture_verse_end: int | None = None,
+        scripture_translation: str | None = None,
     ) -> CreatePostPayload:
         """
         Create a new post.
@@ -93,35 +102,52 @@ class PostMutations:
                 ),
             )
 
-        if post_type == PostType.MEDIA and not media_ids:
+        if post_type == PostType.MEDIA and not media_ids and not media_urls:
             return CreatePostPayload(
                 success=False,
                 error=ErrorType(
-                    code="MEDIA_REQUIRED_FOR_MEDIA_POST",
-                    message="MEDIA posts require mediaIds",
-                    field="mediaIds",
+                    code="MEDIA_REQUIRED",
+                    message="MEDIA posts require mediaIds or mediaUrls",
+                    field="mediaUrls",
                 ),
             )
 
-        if post_type == PostType.BIBLE and not scripture_reference:
+        if post_type == PostType.BIBLE and not (
+            scripture_book and scripture_chapter and scripture_verse_start
+        ):
             return CreatePostPayload(
                 success=False,
                 error=ErrorType(
-                    code="MISSING_REQUIRED_FIELD",
-                    message="BIBLE posts require scripture_reference",
-                    field="scripture_reference",
+                    code="SCRIPTURE_FIELDS_REQUIRED",
+                    message="BIBLE posts require explicit scripture fields",
+                    field="scripture_book",
                 ),
             )
 
         try:
+            scripture_reference = None
+            if scripture_book and scripture_chapter and scripture_verse_start:
+                scripture_reference = {
+                    "book": scripture_book,
+                    "chapter": scripture_chapter,
+                    "verse_start": scripture_verse_start,
+                    "verse_end": scripture_verse_end,
+                    "version": scripture_translation or "kjv",
+                }
+
             post_dto = PostService.create_post(
                 user_id=user_id,
                 post_type=post_type.value,
                 caption=caption,
-                category_id=str(category_id) if category_id else None,
+                category_id=category,
                 media_ids=media_ids,
+                media_urls=media_urls,
                 media_type=media_type.value if media_type else None,
-                scripture_reference=scripture_reference.__dict__ if scripture_reference else None,
+                thumbnail_url=thumbnail_url,
+                width=width,
+                height=height,
+                duration=duration,
+                scripture_reference=scripture_reference,
             )
 
             # We'll map PostResponseDTO to the Post GraphQL type
@@ -266,7 +292,7 @@ class PostScripture:
 
     reference: str
     text: str
-    version: str = "KJV"
+    translation: str = strawberry.field(name="translation", default="KJV")
     book: str
     chapter: int
     verse_start: int
@@ -317,7 +343,7 @@ class Post:
                     type=MediaType.VIDEO,
                     width=getattr(self._dto.media, "width", 0),
                     height=getattr(self._dto.media, "height", 0),
-                    thumbnail=getattr(self._dto.media, "thumbnail_url", ""),
+                    thumbnail_url=getattr(self._dto.media, "thumbnail_url", ""),
                 )
             )
         elif raw_type == "image":
