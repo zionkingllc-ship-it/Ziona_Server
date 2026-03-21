@@ -212,10 +212,26 @@ class TestSchemaAlignment:
     def test_feed_union_and_category_resolution(self, auth_client, user):
         """Verify feed returns strict unions and full category bodies"""
         # Create a post tied to category 1 (All)
+        from core.categories.models import Category
         from core.posts.services import PostService
+        from core.users.models import User
+
+        Category.objects.get_or_create(
+            id="1",
+            defaults={
+                "label": "All",
+                "slug": "all",
+                "bg_color": "#000",
+                "bd_color": "#000",
+                "order": 1,
+            },
+        )
+
+        # Author feeds exclude the user's own posts natively.
+        author = User.objects.create(email="authorx@test.com", username="authorx")
 
         PostService.create_post(
-            user_id=str(user.id), post_type="text", caption="Test union post", category_id="1"
+            user_id=str(author.id), post_type="text", caption="Test union post", category_id="1"
         )
 
         from django.core.cache import cache
@@ -239,12 +255,30 @@ class TestSchemaAlignment:
             "/graphql/", data=json.dumps({"query": query}), content_type="application/json"
         )
         content = json.loads(response.content)
-        assert "errors" not in content
+        if "errors" in content:
+            pytest.fail(f"GraphQL errors returned: {content['errors']}")
 
-        posts = content["data"]["feed"]["posts"]
-        text_post = next(
-            p for p in posts if p["text"] and p["text"]["message"] == "Test union post"
-        )
+        data = content.get("data")
+        if not data:
+            pytest.fail(f"No data in response: {content}")
+
+        feed = data.get("feed")
+        if not feed:
+            pytest.fail(f"No feed in data: {content}")
+
+        posts = feed.get("posts", [])
+
+        text_post = None
+        for p in posts:
+            if not p:
+                continue
+            text_data = p.get("text")
+            if text_data and text_data.get("message") == "Test union post":
+                text_post = p
+                break
+
+        if not text_post:
+            pytest.fail(f"Post not found in feed array: {posts}")
 
         # Verify 7 properties on Category
         assert text_post["category"]["id"] == "1"
