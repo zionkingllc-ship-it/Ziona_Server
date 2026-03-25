@@ -46,10 +46,10 @@ class TestForYouFeed:
         result = FeedService.get_for_you_feed(str(user_b.id))
         assert len(result.posts) > 0
 
-    def test_excludes_own_posts(self, user_a, posts):
+    def test_includes_own_posts(self, user_a, posts):
         result = FeedService.get_for_you_feed(str(user_a.id))
-        for p in result.posts:
-            assert p.author.id != str(user_a.id)
+        own_posts_present = any(p.author.id == str(user_a.id) for p in result.posts)
+        assert own_posts_present, "Expected own posts to be included per user request"
 
     def test_pagination(self, user_b, posts):
         result = FeedService.get_for_you_feed(str(user_b.id), limit=2)
@@ -90,7 +90,7 @@ class TestDiscoverFeed:
         result = FeedService.get_discover_feed(str(user_b.id))
         assert len(result.posts) > 0
 
-    def test_discover_excludes_own(self, user_a, posts):
+    def test_discover_includes_own(self, user_a, posts):
         result = FeedService.get_discover_feed(str(user_a.id))
-        for p in result.posts:
-            assert p.author.id != str(user_a.id)
+        own_posts_present = any(p.author.id == str(user_a.id) for p in result.posts)
+        assert own_posts_present, "Expected own posts to be included per user request"

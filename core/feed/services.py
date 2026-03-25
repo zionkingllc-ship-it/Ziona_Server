@@ -184,7 +184,7 @@ class FeedService:
             Post.objects.select_related("user")
             .prefetch_related("media_files", "post_media")
             .filter(deleted_at__isnull=True)
-            .exclude(user_id=user_id)
+            # .exclude(user_id=user_id)  # Temporarily disabled per user request
             .annotate(
                 likes_count=Count("likes", distinct=True),
                 comments_count=Count(
@@ -247,7 +247,7 @@ class FeedService:
             Post.objects.select_related("user")
             .prefetch_related("media_files", "post_media")
             .filter(deleted_at__isnull=True)
-            # .exclude(user_id=user_id)  # TODO: Re-enable self-exclusion in production
+            # .exclude(user_id=user_id)  # Temporarily disabled per user request
             .annotate(
                 likes_count=Count("likes", distinct=True),
                 comments_count=Count(
@@ -305,7 +305,7 @@ class FeedService:
             Post.objects.select_related("user")
             .prefetch_related("media_files", "post_media")
             .filter(deleted_at__isnull=True)
-            # .exclude(user_id=user_id)  # TODO: Re-enable self-exclusion in production
+            # .exclude(user_id=user_id)  # Temporarily disabled per user request
             .annotate(
                 likes_count=Count("likes", distinct=True),
                 comments_count=Count(
