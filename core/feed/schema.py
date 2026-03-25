@@ -388,10 +388,13 @@ class FeedQueries:
         from core.feed.services import FeedService
 
         user_id = _get_authenticated_user_id(info)
-        if not user_id:
-            return FeedResponse(posts=[], has_more=False)
 
-        result = FeedService.get_for_you_feed(user_id=user_id, cursor=cursor, limit=limit)
+        # Architecturally sound fallback: Unauthenticated users get the public discovery feed
+        # instead of a broken empty array.
+        if not user_id:
+            result = FeedService.get_feed(viewer_id=None, cursor=cursor, limit=limit)
+        else:
+            result = FeedService.get_for_you_feed(user_id=user_id, cursor=cursor, limit=limit)
 
         return FeedResponse(
             posts=[_dto_to_feed_post(p) for p in result.posts],
