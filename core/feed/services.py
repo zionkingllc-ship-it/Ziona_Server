@@ -80,9 +80,19 @@ class FeedService:
 
         is_new_user = (timezone.now() - user.created_at).days < NEW_USER_THRESHOLD_DAYS
 
+        logger.info(f"Total posts in DB: {Post.objects.count()}")
+        logger.info(f"Active posts: {Post.objects.filter(deleted_at__isnull=True).count()}")
+        logger.info(f"Posts with category: {Post.objects.filter(category__isnull=False).count()}")
+
         if is_new_user:
-            return FeedService._new_user_feed(user_id, cursor, limit)
-        return FeedService._returning_user_feed(user_id, cursor, limit)
+            result = FeedService._new_user_feed(user_id, cursor, limit)
+        else:
+            result = FeedService._returning_user_feed(user_id, cursor, limit)
+
+        logger.info(f"Posts after filtering: {len(result.posts)}")
+        logger.info(f"First 3 posts: {[p.id for p in result.posts[:3]]}")
+
+        return result
 
     @staticmethod
     def get_following_feed(
