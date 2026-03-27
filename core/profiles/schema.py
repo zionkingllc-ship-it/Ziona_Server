@@ -4,6 +4,7 @@
 import strawberry
 
 from core.feed.schema import FeedPost, _dto_to_feed_post
+from core.shared.types import ErrorType
 from core.users.schema import _get_authenticated_user_id
 
 
@@ -17,6 +18,14 @@ class ProfileStatsType:
 
 
 @strawberry.type
+class ProfileViewerState:
+    """Viewer's relationship to a profile."""
+
+    following_author: bool = False
+    is_owner: bool = False
+
+
+@strawberry.type
 class UserProfileType:
     """A user's full profile."""
 
@@ -27,8 +36,7 @@ class UserProfileType:
     avatar_url: str | None = None
     location: str
     stats: ProfileStatsType
-    is_following: bool = False
-    is_own_profile: bool = False
+    viewer_state: ProfileViewerState | None = None
     recent_posts: list[FeedPost]
     created_at: str
 
@@ -58,6 +66,7 @@ class ProfilePayload:
     profile: UserProfileType | None = strawberry.field(
         default=None, description="The updated profile data"
     )
+    error: ErrorType | None = strawberry.field(default=None, description="Explicit error info")
     message: str | None = strawberry.field(default=None, description="Success or error message")
     error_code: str | None = strawberry.field(
         default=None, description="Code dictating failure reason safely"
@@ -78,8 +87,10 @@ def _dto_to_profile(dto) -> UserProfileType:
             following_count=dto.stats.following_count,
             posts_count=dto.stats.posts_count,
         ),
-        is_following=dto.is_following,
-        is_own_profile=dto.is_own_profile,
+        viewer_state=ProfileViewerState(
+            following_author=dto.is_following,
+            is_owner=dto.is_own_profile,
+        ),
         recent_posts=[_dto_to_feed_post(p) for p in dto.recent_posts],
         created_at=dto.created_at,
     )
@@ -221,4 +232,5 @@ class ProfileMutations:
                 success=False,
                 message=e.message,
                 error_code=e.code,
+                error=ErrorType(code=e.code, message=e.message),
             )

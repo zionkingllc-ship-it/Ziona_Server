@@ -2,6 +2,7 @@
 
 import strawberry
 
+from core.shared.types import ErrorType
 from core.users.models import User
 from core.users.schema import UserType
 
@@ -35,6 +36,7 @@ class AuthPayload:
         default=None,
         description="Specific error code if operation failed (e.g. INVALID_CREDENTIALS)",
     )
+    error: ErrorType | None = strawberry.field(default=None)
 
 
 @strawberry.type
@@ -54,6 +56,7 @@ class AddPasswordPayload:
     error_code: str | None = strawberry.field(
         default=None, description="Specific error code if operation failed (e.g. UNAUTHENTICATED)"
     )
+    error: ErrorType | None = strawberry.field(default=None)
 
 
 @strawberry.type
@@ -76,6 +79,7 @@ class ChangePasswordPayload:
         default=None,
         description="Specific error code if operation failed (e.g. INVALID_CREDENTIALS)",
     )
+    error: ErrorType | None = strawberry.field(default=None)
 
 
 @strawberry.type
@@ -103,6 +107,7 @@ class OTPPayload:
     error_code: str | None = strawberry.field(
         default=None, description="Specific error code if operation failed"
     )
+    error: ErrorType | None = strawberry.field(default=None)
 
 
 @strawberry.type
@@ -131,6 +136,7 @@ class VerifyOTPPayload:
     error_code: str | None = strawberry.field(
         default=None, description="Specific error code if operation failed"
     )
+    error: ErrorType | None = strawberry.field(default=None)
 
 
 @strawberry.type
@@ -155,6 +161,7 @@ class GoogleOAuthPayload:
     )
     message: str | None = strawberry.field(default=None, description="Success or error message")
     error_code: str | None = strawberry.field(default=None, description="Specific error code")
+    error: ErrorType | None = strawberry.field(default=None)
 
 
 @strawberry.type

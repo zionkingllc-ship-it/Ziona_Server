@@ -18,6 +18,7 @@ class MediaFileType:
     width: int | None = None
     height: int | None = None
     thumbnail_url: str | None = None  # For videos
+    duration: int | None = None  # For videos
 
 
 @strawberry.type

@@ -4,6 +4,8 @@
 import strawberry
 
 from core.feed.schema import FeedPost, _dto_to_feed_post
+from core.posts.schema import PostStats
+from core.shared.types import ErrorType
 from core.users.schema import _get_authenticated_user_id
 
 
@@ -13,6 +15,8 @@ class LikePayload:
 
     success: bool
     liked: bool = False
+    stats: PostStats | None = None
+    error: ErrorType | None = None
     message: str | None = None
     error_code: str | None = None
 
@@ -23,6 +27,8 @@ class SavePayload:
 
     success: bool
     saved: bool = False
+    stats: PostStats | None = None
+    error: ErrorType | None = None
     message: str | None = None
     error_code: str | None = None
 
@@ -72,6 +78,7 @@ class CommentPayload:
 
     success: bool
     comment: CommentType | None = None
+    error: ErrorType | None = None
     message: str | None = None
     error_code: str | None = None
 
@@ -101,6 +108,7 @@ class BookmarkFolderPayload:
 
     success: bool
     folder: BookmarkFolderType | None = None
+    error: ErrorType | None = None
     message: str | None = None
     error_code: str | None = None
 
@@ -110,6 +118,7 @@ class DeleteFolderPayload:
     """Response for folder deletion."""
 
     success: bool
+    error: ErrorType | None = None
     message: str | None = None
     moved_posts_count: int = 0
     error_code: str | None = None
@@ -121,6 +130,7 @@ class BulkRemovePayload:
 
     success: bool
     removed_count: int = 0
+    error: ErrorType | None = None
     message: str | None = None
     error_code: str | None = None
 
@@ -141,6 +151,8 @@ class SharePayload:
     success: bool
     share_id: str | None = None
     share_url: str | None = None
+    stats: PostStats | None = None
+    error: ErrorType | None = None
     message: str | None = None
     error_code: str | None = None
 
@@ -213,9 +225,23 @@ class EngagementMutations:
 
         try:
             result = EngagementService.like_post(user_id, post_id)
-            return LikePayload(success=True, liked=result.liked)
+            from core.posts.services import PostService
+
+            p = PostService.get_post(post_id, user_id)
+            stats = PostStats(
+                likes_count=p.stats.likes_count,
+                comments_count=p.stats.comments_count,
+                shares_count=p.stats.shares_count,
+                saves_count=p.stats.saves_count,
+            )
+            return LikePayload(success=True, liked=result.liked, stats=stats)
         except EngagementError as e:
-            return LikePayload(success=False, message=e.message, error_code=e.code)
+            return LikePayload(
+                success=False,
+                message=e.message,
+                error_code=e.code,
+                error=ErrorType(code=e.code, message=e.message),
+            )
 
     @strawberry.mutation(description="Unlike a post")
     def unlike_post(self, info: strawberry.types.Info, post_id: str) -> LikePayload:
@@ -233,9 +259,23 @@ class EngagementMutations:
 
         try:
             result = EngagementService.unlike_post(user_id, post_id)
-            return LikePayload(success=True, liked=result.liked)
+            from core.posts.services import PostService
+
+            p = PostService.get_post(post_id, user_id)
+            stats = PostStats(
+                likes_count=p.stats.likes_count,
+                comments_count=p.stats.comments_count,
+                shares_count=p.stats.shares_count,
+                saves_count=p.stats.saves_count,
+            )
+            return LikePayload(success=True, liked=result.liked, stats=stats)
         except EngagementError as e:
-            return LikePayload(success=False, message=e.message, error_code=e.code)
+            return LikePayload(
+                success=False,
+                message=e.message,
+                error_code=e.code,
+                error=ErrorType(code=e.code, message=e.message),
+            )
 
     @strawberry.mutation(description="Create a nested or top-level text comment on a Post payload.")
     def create_comment(
@@ -350,9 +390,23 @@ class EngagementMutations:
 
         try:
             result = EngagementService.save_post(user_id, post_id, folder_id)
-            return SavePayload(success=True, saved=result.saved)
+            from core.posts.services import PostService
+
+            p = PostService.get_post(post_id, user_id)
+            stats = PostStats(
+                likes_count=p.stats.likes_count,
+                comments_count=p.stats.comments_count,
+                shares_count=p.stats.shares_count,
+                saves_count=p.stats.saves_count,
+            )
+            return SavePayload(success=True, saved=result.saved, stats=stats)
         except EngagementError as e:
-            return SavePayload(success=False, message=e.message, error_code=e.code)
+            return SavePayload(
+                success=False,
+                message=e.message,
+                error_code=e.code,
+                error=ErrorType(code=e.code, message=e.message),
+            )
 
     @strawberry.mutation(description="Unsave/remove a bookmark")
     def unsave_post(self, info: strawberry.types.Info, post_id: str) -> SavePayload:
@@ -367,8 +421,25 @@ class EngagementMutations:
                 error_code="UNAUTHORIZED",
             )
 
-        result = EngagementService.unsave_post(user_id, post_id)
-        return SavePayload(success=True, saved=result.saved)
+        try:
+            result = EngagementService.unsave_post(user_id, post_id)
+            from core.posts.services import PostService
+
+            p = PostService.get_post(post_id, user_id)
+            stats = PostStats(
+                likes_count=p.stats.likes_count,
+                comments_count=p.stats.comments_count,
+                shares_count=p.stats.shares_count,
+                saves_count=p.stats.saves_count,
+            )
+            return SavePayload(success=True, saved=result.saved, stats=stats)
+        except Exception as e:
+            return SavePayload(
+                success=False,
+                message=str(e),
+                error_code="UNSAVE_ERROR",
+                error=ErrorType(code="UNSAVE_ERROR", message=str(e)),
+            )
 
     @strawberry.mutation(description="Create a bookmark folder")
     def create_bookmark_folder(
@@ -473,9 +544,23 @@ class EngagementMutations:
 
         try:
             result = ShareService.share_post_direct(user_id, post_id, recipient_id)
-            return SharePayload(success=True, share_id=result.share_id)
+            from core.posts.services import PostService
+
+            p = PostService.get_post(post_id, user_id)
+            stats = PostStats(
+                likes_count=p.stats.likes_count,
+                comments_count=p.stats.comments_count,
+                shares_count=p.stats.shares_count,
+                saves_count=p.stats.saves_count,
+            )
+            return SharePayload(success=True, share_id=result.share_id, stats=stats)
         except ShareError as e:
-            return SharePayload(success=False, message=e.message, error_code=e.code)
+            return SharePayload(
+                success=False,
+                message=e.message,
+                error_code=e.code,
+                error=ErrorType(code=e.code, message=e.message),
+            )
 
     @strawberry.mutation(description="Share a post externally (generate link)")
     def share_post_external(self, info: strawberry.types.Info, post_id: str) -> SharePayload:
@@ -493,13 +578,28 @@ class EngagementMutations:
 
         try:
             result = ShareService.share_post_external(user_id, post_id)
+            from core.posts.services import PostService
+
+            p = PostService.get_post(post_id, user_id)
+            stats = PostStats(
+                likes_count=p.stats.likes_count,
+                comments_count=p.stats.comments_count,
+                shares_count=p.stats.shares_count,
+                saves_count=p.stats.saves_count,
+            )
             return SharePayload(
                 success=True,
                 share_id=result.share_id,
                 share_url=result.share_url,
+                stats=stats,
             )
         except ShareError as e:
-            return SharePayload(success=False, message=e.message, error_code=e.code)
+            return SharePayload(
+                success=False,
+                message=e.message,
+                error_code=e.code,
+                error=ErrorType(code=e.code, message=e.message),
+            )
 
 
 @strawberry.type

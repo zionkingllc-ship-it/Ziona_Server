@@ -17,7 +17,7 @@ class ScriptureInput:
     chapter: int
     verse_start: int
     verse_end: int | None = None
-    version: str | None = "kjv"
+    translation: str | None = "kjv"
 
 
 @strawberry.type
@@ -39,6 +39,7 @@ class PostPayload:
     post_id: str | None = None
     message: str | None = None
     error_code: str | None = None
+    error: ErrorType | None = strawberry.field(default=None)
 
 
 @strawberry.type
@@ -304,7 +305,7 @@ class PostScripture:
 class Post:
     id: str
     caption: str | None
-    post_type: PostType
+    post_type: PostType = strawberry.field(name="type")
     created_at: str
     share_url: str
 

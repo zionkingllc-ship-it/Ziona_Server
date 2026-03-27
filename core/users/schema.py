@@ -3,6 +3,7 @@ from typing import Annotated
 
 import strawberry
 
+from core.shared.types import ErrorType
 from core.users.models import User
 
 logger = logging.getLogger("core.users")
@@ -74,6 +75,7 @@ class SetInterestsPayload:
     interests: list[str] = strawberry.field(default_factory=list)
     message: str | None = None
     error_code: str | None = None
+    error: ErrorType | None = strawberry.field(default=None)
 
 
 def _get_authenticated_user_id(info: strawberry.types.Info) -> str | None:

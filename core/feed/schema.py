@@ -85,6 +85,9 @@ class ImageData:
 class VideoData:
     url: str
     thumbnail_url: str | None = None
+    duration: int | None = None
+    width: int | None = None
+    height: int | None = None
 
 
 @strawberry.type
@@ -128,7 +131,13 @@ class FeedPost:
             m.type == MediaTypeEnum.VIDEO for m in self._media_list
         ):
             v = next(m for m in self._media_list if m.type == MediaTypeEnum.VIDEO)
-            return VideoData(url=v.url, thumbnail_url=v.thumbnail)
+            return VideoData(
+                url=v.url,
+                thumbnail_url=v.thumbnail_url,
+                duration=v.duration,
+                width=v.width,
+                height=v.height,
+            )
         return None
 
     @strawberry.field(description="Text/Bible content cleanly segregated")
@@ -207,6 +216,7 @@ def _dto_to_feed_post(dto) -> FeedPost:
                     type=MediaTypeEnum.VIDEO,
                     width=getattr(dto.media, "width", None),
                     height=getattr(dto.media, "height", None),
+                    duration=getattr(dto.media, "duration", None),
                 )
             )
         elif dto.type == "image":

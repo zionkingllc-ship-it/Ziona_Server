@@ -38,7 +38,7 @@ class ScriptureResponse:
 
     book: str = strawberry.field(description="Book name ('John')")
     chapter: int = strawberry.field(description="Chapter number")
-    version: str = strawberry.field(description="Translation version ('kjv')")
+    translation: str = strawberry.field(description="Translation version ('kjv')")
     verses: list[ScriptureVerse] = strawberry.field(description="All verses in the chapter")
 
 
@@ -105,7 +105,7 @@ class ScriptureQueries:
         self,
         book: str,
         chapter: int,
-        version: str = "kjv",
+        translation: str = "kjv",
     ) -> ScriptureResponse:
         """
         Fetch all verses in a specific chapter.
@@ -123,11 +123,11 @@ class ScriptureQueries:
         - VERSION_NOT_AVAILABLE — version not in free tier
         """
         try:
-            verses = ScriptureService.fetch_chapter(book=book, chapter=chapter, version=version)
+            verses = ScriptureService.fetch_chapter(book=book, chapter=chapter, version=translation)
             return ScriptureResponse(
                 book=book,
                 chapter=chapter,
-                version=version.lower().strip(),
+                translation=translation.lower().strip(),
                 verses=[ScriptureVerse(number=v["number"], text=v["text"]) for v in verses],
             )
         except VersionNotAvailableError as e:
@@ -152,7 +152,7 @@ class ScriptureQueries:
         self,
         book: str,
         chapter: int,
-        version: str = "kjv",
+        translation: str = "kjv",
         verseStart: int = 1,
         verseEnd: int | None = None,
     ) -> str:
@@ -185,7 +185,7 @@ class ScriptureQueries:
                 chapter=chapter,
                 verse_start=verseStart,
                 verse_end=verseEnd,
-                version=version,
+                version=translation,
             )
             return result["text"]
         except VersionNotAvailableError as e:

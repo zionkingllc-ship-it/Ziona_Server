@@ -3,28 +3,8 @@
 
 import strawberry
 
+from core.shared.types import ErrorType
 from core.users.schema import _get_authenticated_user_id
-
-
-@strawberry.type
-class ReportPayload:
-    """
-    Response outlining execution state of a content report safely natively.
-
-    **Authentication:** Required
-    **Related operations:** report_content, review_report
-    """
-
-    success: bool = strawberry.field(description="Confirmed processing natively flag")
-    report_id: str | None = strawberry.field(
-        default=None, description="Mapped explicit target UUID"
-    )
-    message: str | None = strawberry.field(
-        default=None, description="String output detail natively"
-    )
-    error_code: str | None = strawberry.field(
-        default=None, description="Detailed failure string identifier"
-    )
 
 
 @strawberry.type
@@ -41,6 +21,28 @@ class ReportType:
     reviewed_by: str | None = None
     reviewed_at: str | None = None
     created_at: str
+
+
+@strawberry.type
+class ReportPayload:
+    """
+    Response outlining execution state of a content report safely natively.
+
+    **Authentication:** Required
+    **Related operations:** report_content, review_report
+    """
+
+    success: bool = strawberry.field(description="Confirmed processing natively flag")
+    report: ReportType | None = strawberry.field(
+        default=None, description="Mapped explicit target UUID"
+    )
+    error: ErrorType | None = strawberry.field(default=None, description="Explicit error info")
+    message: str | None = strawberry.field(
+        default=None, description="String output detail natively"
+    )
+    error_code: str | None = strawberry.field(
+        default=None, description="Detailed failure string identifier"
+    )
 
 
 @strawberry.type
@@ -106,9 +108,29 @@ class ModerationMutations:
                 comment_id=comment_id,
                 description=description,
             )
-            return ReportPayload(success=True, report_id=result["report_id"])
+            from core.moderation.models import Report
+
+            r = Report.objects.get(id=result["report_id"])
+            report_obj = ReportType(
+                id=str(r.id),
+                reporter_id=str(r.reporter_id),
+                post_id=str(r.post_id) if r.post_id else None,
+                comment_id=str(r.comment_id) if r.comment_id else None,
+                reason=r.reason,
+                description=r.description,
+                status=r.status,
+                reviewed_by=str(r.reviewed_by_id) if r.reviewed_by_id else None,
+                reviewed_at=r.reviewed_at.isoformat() if r.reviewed_at else None,
+                created_at=r.created_at.isoformat(),
+            )
+            return ReportPayload(success=True, report=report_obj)
         except ModerationError as e:
-            return ReportPayload(success=False, message=e.message, error_code=e.code)
+            return ReportPayload(
+                success=False,
+                message=e.message,
+                error_code=e.code,
+                error=ErrorType(code=e.code, message=e.message),
+            )
 
     @strawberry.mutation(
         description="Update specific report processing state dynamically (Admin only)."
@@ -155,9 +177,29 @@ class ModerationMutations:
                 reviewer_id=user_id,
                 status=status,
             )
-            return ReportPayload(success=True, report_id=result["report_id"])
+            from core.moderation.models import Report
+
+            r = Report.objects.get(id=result["report_id"])
+            report_obj = ReportType(
+                id=str(r.id),
+                reporter_id=str(r.reporter_id),
+                post_id=str(r.post_id) if r.post_id else None,
+                comment_id=str(r.comment_id) if r.comment_id else None,
+                reason=r.reason,
+                description=r.description,
+                status=r.status,
+                reviewed_by=str(r.reviewed_by_id) if r.reviewed_by_id else None,
+                reviewed_at=r.reviewed_at.isoformat() if r.reviewed_at else None,
+                created_at=r.created_at.isoformat(),
+            )
+            return ReportPayload(success=True, report=report_obj)
         except ModerationError as e:
-            return ReportPayload(success=False, message=e.message, error_code=e.code)
+            return ReportPayload(
+                success=False,
+                message=e.message,
+                error_code=e.code,
+                error=ErrorType(code=e.code, message=e.message),
+            )
 
 
 @strawberry.type

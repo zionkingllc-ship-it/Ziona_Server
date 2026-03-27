@@ -5,6 +5,7 @@ Tracks uploaded media files, their processing status,
 and metadata. Files are stored in GCP Cloud Storage.
 """
 
+from django.conf import settings
 from django.db import models
 
 from core.shared.models import TimestampedModel
@@ -81,8 +82,8 @@ class MediaFile(TimestampedModel):
         """Return public URL for the media file."""
         if not self.storage_path:
             return ""
-        # Mocking environment-based bucket URL
-        return f"https://storage.googleapis.com/ziona-dev-bucket/{self.storage_path}"
+
+        return f"https://storage.googleapis.com/{settings.GCP_STORAGE_BUCKET}/{self.storage_path}"
 
     def __str__(self) -> str:
         """Return string representation."""

@@ -3,6 +3,8 @@
 
 import strawberry
 
+from core.profiles.schema import ProfileStatsType
+from core.shared.types import ErrorType
 from core.users.schema import _get_authenticated_user_id
 
 
@@ -22,6 +24,10 @@ class FollowPayload:
     message: str | None = strawberry.field(
         default=None, description="Detailed logging message or success"
     )
+    stats: ProfileStatsType | None = strawberry.field(
+        default=None, description="Updated profile stats"
+    )
+    error: ErrorType | None = strawberry.field(default=None, description="Explicit error object")
     error_code: str | None = strawberry.field(
         default=None, description="Detailed failure string identifier"
     )
@@ -63,7 +69,7 @@ class SuggestedCreatorType:
     username: str
     avatar_url: str | None = None
     bio: str | None = None
-    followers_count: int = 0
+    stats: ProfileStatsType | None = None
 
 
 @strawberry.type
@@ -99,9 +105,22 @@ class FollowMutations:
 
         try:
             result = FollowService.follow_user(current_user_id, user_id)
-            return FollowPayload(success=True, following=result.following)
+            from core.profiles.services import ProfileService
+
+            profile = ProfileService.get_user_profile(user_id, current_user_id)
+            stats = ProfileStatsType(
+                followers_count=profile.stats.followers_count,
+                following_count=profile.stats.following_count,
+                posts_count=profile.stats.posts_count,
+            )
+            return FollowPayload(success=True, following=result.following, stats=stats)
         except FollowError as e:
-            return FollowPayload(success=False, message=e.message, error_code=e.code)
+            return FollowPayload(
+                success=False,
+                message=e.message,
+                error_code=e.code,
+                error=ErrorType(code=e.code, message=e.message),
+            )
 
     @strawberry.mutation(
         description="Delete an existing following Edge relation targeting a User account."
@@ -129,7 +148,15 @@ class FollowMutations:
             )
 
         result = FollowService.unfollow_user(current_user_id, user_id)
-        return FollowPayload(success=True, following=result.following)
+        from core.profiles.services import ProfileService
+
+        profile = ProfileService.get_user_profile(user_id, current_user_id)
+        stats = ProfileStatsType(
+            followers_count=profile.stats.followers_count,
+            following_count=profile.stats.following_count,
+            posts_count=profile.stats.posts_count,
+        )
+        return FollowPayload(success=True, following=result.following, stats=stats)
 
 
 @strawberry.type
@@ -264,7 +291,7 @@ class FollowQueries:
                 username=s["user"].username,
                 avatar_url=s["user"].avatar_url,
                 bio=s.get("bio"),
-                followers_count=s.get("followers_count", 0),
+                stats=ProfileStatsType(followers_count=s.get("followers_count", 0)),
             )
             for s in suggestions
         ]

@@ -38,7 +38,7 @@ class ScriptureReference:
     chapter: int | None = None
     verse_start: int | None = strawberry.field(name="verseStart", default=None)
     verse_end: int | None = strawberry.field(name="verseEnd", default=None)
-    version: str = "KJV"
+    translation: str = strawberry.field(name="translation", default="KJV")
     text: str = ""
 
 
@@ -99,7 +99,7 @@ class AnchorType:
             chapter=self._dto.scripture_chapter,
             verse_start=self._dto.scripture_verse_start,
             verse_end=self._dto.scripture_verse_end,
-            version=self._dto.scripture_version,
+            translation=self._dto.scripture_version,
             text=self._dto.scripture_text,
         )
 
@@ -493,7 +493,7 @@ class CircleMutations:
         scripture_chapter: int | None = None,
         scripture_verse_start: int | None = None,
         scripture_verse_end: int | None = None,
-        scripture_version: str = "KJV",
+        scripture_translation: str = strawberry.field(name="scriptureTranslation", default="KJV"),
         scripture_text: str = "",
         media_url: str = "",
     ) -> CreateAnchorPayload:
@@ -526,7 +526,7 @@ class CircleMutations:
                 scripture_chapter=scripture_chapter,
                 scripture_verse_start=scripture_verse_start,
                 scripture_verse_end=scripture_verse_end,
-                scripture_version=scripture_version,
+                scripture_version=scripture_translation,
                 scripture_text=scripture_text,
                 media_url=media_url,
             )

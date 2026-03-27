@@ -109,11 +109,11 @@ class TestSchemaAlignment:
     def test_scripture_query_alignment(self, auth_client):
         """Verify scripture query returns structured verses array (PART 5)."""
         query = """
-        query GetScripture($book: String!, $chapter: Int!, $version: String!) {
-          scripture(book: $book, chapter: $chapter, version: $version) {
+        query GetScripture($book: String!, $chapter: Int!, $translation: String!) {
+          scripture(book: $book, chapter: $chapter, translation: $translation) {
             book
             chapter
-            version
+            translation
             verses {
               number
               text
@@ -121,7 +121,7 @@ class TestSchemaAlignment:
           }
         }
         """
-        variables = {"book": "John", "chapter": 3, "version": "kjv"}
+        variables = {"book": "John", "chapter": 3, "translation": "kjv"}
         from django.core.cache import cache
 
         cache.clear()
@@ -143,19 +143,19 @@ class TestSchemaAlignment:
         assert len(data["verses"]) > 0
         assert data["book"] == "John"
         assert data["chapter"] == 3
-        assert data["version"] == "kjv"
+        assert data["translation"] == "kjv"
 
     def test_scripture_range_query_alignment(self, auth_client):
         """Verify scriptureRange query returns concatenated string."""
         query = """
-        query GetScriptureRange($book: String!, $chapter: Int!, $version: String!, $verseStart: Int!, $verseEnd: Int!) {
-          scriptureRange(book: $book, chapter: $chapter, version: $version, verseStart: $verseStart, verseEnd: $verseEnd)
+        query GetScriptureRange($book: String!, $chapter: Int!, $translation: String!, $verseStart: Int!, $verseEnd: Int!) {
+          scriptureRange(book: $book, chapter: $chapter, translation: $translation, verseStart: $verseStart, verseEnd: $verseEnd)
         }
         """
         variables = {
             "book": "John",
             "chapter": 3,
-            "version": "kjv",
+            "translation": "kjv",
             "verseStart": 16,
             "verseEnd": 17,
         }
