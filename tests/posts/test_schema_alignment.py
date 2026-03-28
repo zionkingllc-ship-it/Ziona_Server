@@ -86,7 +86,7 @@ class TestSchemaAlignment:
               caption
               image { items { url } }
               video { url }
-              text { message }
+              text
             }
             hasMore
           }
@@ -244,7 +244,8 @@ class TestSchemaAlignment:
             posts {
               type
               category { id label slug icon bgColor bdColor order }
-              text { message scripture { reference } }
+              text
+              scripture { reference }
               image { items { url } }
               video { url }
             }
@@ -273,7 +274,7 @@ class TestSchemaAlignment:
             if not p:
                 continue
             text_data = p.get("text")
-            if text_data and text_data.get("message") == "Test union post":
+            if text_data == "Test union post":
                 text_post = p
                 break
 

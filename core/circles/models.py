@@ -140,7 +140,7 @@ class Anchor(models.Model):
     scripture_chapter = models.IntegerField(null=True, blank=True)
     scripture_verse_start = models.IntegerField(null=True, blank=True)
     scripture_verse_end = models.IntegerField(null=True, blank=True)
-    scripture_version = models.CharField(max_length=20, blank=True, default="KJV")
+    scripture_translation = models.CharField(max_length=20, blank=True, default="KJV")
     scripture_text = models.TextField(blank=True)
 
     # Media fields (for image/video type)

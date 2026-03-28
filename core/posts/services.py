@@ -164,7 +164,7 @@ class PostService:
                     "scripture_chapter": verse_data["chapter"],
                     "scripture_verse_start": verse_data["verse_start"],
                     "scripture_verse_end": verse_data["verse_end"],
-                    "scripture_version": verse_data["version"],
+                    "scripture_translation": verse_data["version"],
                 }
             except ScriptureError as e:
                 raise PostError(message=e.message, code=ErrorCode.VALIDATION_ERROR) from e
@@ -467,7 +467,7 @@ class PostService:
                     chapter=post.scripture_chapter,
                     verse_start=post.scripture_verse_start,
                     verse_end=post.scripture_verse_end,
-                    version=post.scripture_version or "KJV",
+                    version=post.scripture_translation or "KJV",
                 )
                 scripture = ScriptureDTO(
                     reference=result["reference"],
@@ -488,7 +488,7 @@ class PostService:
                 scripture = ScriptureDTO(
                     reference=reference,
                     text="",
-                    version=post.scripture_version or "KJV",
+                    version=post.scripture_translation or "KJV",
                     book=post.scripture_book,
                     chapter=post.scripture_chapter,
                     verse_start=post.scripture_verse_start,

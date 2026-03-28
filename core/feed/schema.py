@@ -91,12 +91,6 @@ class VideoData:
 
 
 @strawberry.type
-class TextData:
-    message: str | None = None
-    scripture: FeedPostScripture | None = None
-
-
-@strawberry.type
 class FeedPost:
     """
     A post in the feed efficiently packed with discovery metadata.
@@ -113,7 +107,7 @@ class FeedPost:
     viewer_state: FeedViewerState | None = None
     share_url: str
     created_at: str
-    _scripture: strawberry.Private[FeedPostScripture | None] = None
+    scripture: FeedPostScripture | None = None
 
     _media_list: strawberry.Private[list[MediaFileType]] = dataclasses.field(default_factory=list)
 
@@ -140,11 +134,9 @@ class FeedPost:
             )
         return None
 
-    @strawberry.field(description="Text/Bible content cleanly segregated")
-    def text(self) -> TextData | None:
-        if self.post_type in (PostType.TEXT, PostType.BIBLE):
-            return TextData(message=self.caption, scripture=self._scripture)
-        return None
+    @strawberry.field(description="Post caption/text — mobile expects 'text' field")
+    def text(self) -> str | None:
+        return self.caption
 
     @strawberry.field(description="Full category object natively")
     def category(self) -> CategoryType | None:
@@ -270,7 +262,7 @@ def _dto_to_feed_post(dto) -> FeedPost:
         ),
         share_url=dto.share_url,
         created_at=dto.created_at,
-        _scripture=(
+        scripture=(
             FeedPostScripture(
                 reference=dto.scripture.reference,
                 text=dto.scripture.text,

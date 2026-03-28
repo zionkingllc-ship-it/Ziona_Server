@@ -119,7 +119,7 @@ def create_anchor(
     scripture_chapter: int | None = None,
     scripture_verse_start: int | None = None,
     scripture_verse_end: int | None = None,
-    scripture_version: str = "KJV",
+    scripture_translation: str = "KJV",
     scripture_text: str = "",
     # Media fields
     media_url: str = "",
@@ -207,7 +207,7 @@ def create_anchor(
         scripture_chapter=scripture_chapter,
         scripture_verse_start=scripture_verse_start,
         scripture_verse_end=scripture_verse_end,
-        scripture_version=scripture_version,
+        scripture_translation=scripture_translation,
         scripture_text=scripture_text,
         media_url=media_url,
         published_at=published_at,

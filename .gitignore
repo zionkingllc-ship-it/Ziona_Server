@@ -86,3 +86,6 @@ schema.graphql
 output.json
 *.bak
 
+
+test_queries.http
+core/posts/management/commands/clean_posts.py

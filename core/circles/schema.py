@@ -99,7 +99,7 @@ class AnchorType:
             chapter=self._dto.scripture_chapter,
             verse_start=self._dto.scripture_verse_start,
             verse_end=self._dto.scripture_verse_end,
-            translation=self._dto.scripture_version,
+            translation=self._dto.scripture_translation,
             text=self._dto.scripture_text,
         )
 
@@ -526,7 +526,7 @@ class CircleMutations:
                 scripture_chapter=scripture_chapter,
                 scripture_verse_start=scripture_verse_start,
                 scripture_verse_end=scripture_verse_end,
-                scripture_version=scripture_translation,
+                scripture_translation=scripture_translation,
                 scripture_text=scripture_text,
                 media_url=media_url,
             )

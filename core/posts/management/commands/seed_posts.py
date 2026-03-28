@@ -112,7 +112,7 @@ class Command(BaseCommand):
             scripture_chapter=1,
             scripture_verse_start=1,
             scripture_verse_end=3,
-            scripture_version="KJV",
+            scripture_translation="KJV",
             media_count=0,
         )
 

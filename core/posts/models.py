@@ -76,7 +76,7 @@ class Post(SoftDeleteModel):
     scripture_chapter = models.IntegerField(blank=True, null=True)
     scripture_verse_start = models.IntegerField(blank=True, null=True)
     scripture_verse_end = models.IntegerField(blank=True, null=True)
-    scripture_version = models.CharField(max_length=10, default="KJV")
+    scripture_translation = models.CharField(max_length=10, default="KJV")
 
     class Meta:
         db_table = "posts"

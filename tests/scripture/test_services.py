@@ -178,6 +178,7 @@ class TestScriptureService:
                 "book": "John",
                 "chapter": 3,
                 "verse_start": 16,
+                "translation": "KJV",
             },
         )
 
@@ -203,6 +204,7 @@ class TestScriptureService:
                     "book": "John",
                     "chapter": 3,
                     "verse_start": 16,
+                    "translation": "KJV",
                 },
             )
 
