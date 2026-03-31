@@ -8,6 +8,7 @@ class Category(models.Model):
     icon = models.URLField(max_length=500)
     bg_color = models.CharField(max_length=7)
     bd_color = models.CharField(max_length=7)
+    text_post_bg = models.CharField(max_length=7, null=True, blank=True)
     order = models.IntegerField()
 
     class Meta:

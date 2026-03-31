@@ -1,4 +1,5 @@
 import json
+from unittest.mock import patch
 
 import pytest
 from django.test import Client
@@ -108,77 +109,95 @@ class TestSchemaAlignment:
 
     def test_scripture_query_alignment(self, auth_client):
         """Verify scripture query returns structured verses array (PART 5)."""
-        query = """
-        query GetScripture($book: String!, $chapter: Int!, $translation: String!) {
-          scripture(book: $book, chapter: $chapter, translation: $translation) {
-            book
-            chapter
-            translation
-            verses {
-              number
-              text
+        mock_verses = [{"number": i, "text": f"Verse {i} text."} for i in range(1, 37)]
+
+        with patch(
+            "core.scripture.services.ScriptureService.fetch_chapter",
+            return_value=mock_verses,
+        ):
+            query = """
+            query GetScripture($book: String!, $chapter: Int!, $translation: String!) {
+              scripture(book: $book, chapter: $chapter, translation: $translation) {
+                book
+                chapter
+                translation
+                verses {
+                  number
+                  text
+                }
+              }
             }
-          }
-        }
-        """
-        variables = {"book": "John", "chapter": 3, "translation": "kjv"}
-        from django.core.cache import cache
+            """
+            variables = {"book": "John", "chapter": 3, "translation": "kjv"}
 
-        cache.clear()
+            response = auth_client.post(
+                "/graphql/",
+                data=json.dumps({"query": query, "variables": variables}),
+                content_type="application/json",
+            )
+            content = json.loads(response.content)
 
-        response = auth_client.post(
-            "/graphql/",
-            data=json.dumps({"query": query, "variables": variables}),
-            content_type="application/json",
-        )
-        content = json.loads(response.content)
+            assert (
+                response.status_code == 200
+            ), f"Expected 200 but got {response.status_code}: {content}"
+            if "errors" in content:
+                pytest.fail(f"GraphQL errors: {content['errors']}")
 
-        assert (
-            response.status_code == 200
-        ), f"Expected 200 but got {response.status_code}: {content}"
-        if "errors" in content:
-            pytest.fail(f"GraphQL errors: {content['errors']}")
-
-        data = content["data"]["scripture"]
-        assert len(data["verses"]) > 0
-        assert data["book"] == "John"
-        assert data["chapter"] == 3
-        assert data["translation"] == "kjv"
+            data = content["data"]["scripture"]
+            assert len(data["verses"]) > 0
+            assert data["book"] == "John"
+            assert data["chapter"] == 3
+            assert data["translation"] == "KJV"
 
     def test_scripture_range_query_alignment(self, auth_client):
         """Verify scriptureRange query returns concatenated string."""
-        query = """
-        query GetScriptureRange($book: String!, $chapter: Int!, $translation: String!, $verseStart: Int!, $verseEnd: Int!) {
-          scriptureRange(book: $book, chapter: $chapter, translation: $translation, verseStart: $verseStart, verseEnd: $verseEnd)
-        }
-        """
-        variables = {
+        mock_result = {
+            "text": "For God so loved the world. For God sent not his Son.",
+            "verses": [
+                {"number": 16, "text": "For God so loved the world."},
+                {"number": 17, "text": "For God sent not his Son."},
+            ],
+            "reference": "John 3:16-17",
+            "version": "KJV",
             "book": "John",
             "chapter": 3,
-            "translation": "kjv",
-            "verseStart": 16,
-            "verseEnd": 17,
+            "verse_start": 16,
+            "verse_end": 17,
         }
-        from django.core.cache import cache
 
-        cache.clear()
+        with patch(
+            "core.scripture.services.ScriptureService.fetch_verse",
+            return_value=mock_result,
+        ):
+            query = """
+            query GetScriptureRange($book: String!, $chapter: Int!, $translation: String!, $verseStart: Int!, $verseEnd: Int!) {
+              scriptureRange(book: $book, chapter: $chapter, translation: $translation, verseStart: $verseStart, verseEnd: $verseEnd)
+            }
+            """
+            variables = {
+                "book": "John",
+                "chapter": 3,
+                "translation": "kjv",
+                "verseStart": 16,
+                "verseEnd": 17,
+            }
 
-        response = auth_client.post(
-            "/graphql/",
-            data=json.dumps({"query": query, "variables": variables}),
-            content_type="application/json",
-        )
-        content = json.loads(response.content)
+            response = auth_client.post(
+                "/graphql/",
+                data=json.dumps({"query": query, "variables": variables}),
+                content_type="application/json",
+            )
+            content = json.loads(response.content)
 
-        assert (
-            response.status_code == 200
-        ), f"Expected 200 but got {response.status_code}: {content}"
-        if "errors" in content:
-            pytest.fail(f"GraphQL errors: {content['errors']}")
+            assert (
+                response.status_code == 200
+            ), f"Expected 200 but got {response.status_code}: {content}"
+            if "errors" in content:
+                pytest.fail(f"GraphQL errors: {content['errors']}")
 
-        data = content["data"]["scriptureRange"]
-        assert isinstance(data, str)
-        assert len(data) > 0
+            data = content["data"]["scriptureRange"]
+            assert isinstance(data, str)
+            assert len(data) > 0
 
     def test_create_post_media_urls_only(self, auth_client, user):
         """Verify createPost accepts mediaUrls seamlessly"""
@@ -289,8 +308,6 @@ class TestSchemaAlignment:
 
     def test_create_scripture_fields(self, auth_client):
         """Verify createPost parses root scripture scalars properly"""
-        from unittest.mock import patch
-
         with patch("core.scripture.services.ScriptureService.fetch_verse") as mock_fetch:
             mock_fetch.return_value = {
                 "reference": "John 11:35",
@@ -303,20 +320,20 @@ class TestSchemaAlignment:
                 "verses": [],
             }
             mutation = """
-        mutation CreateBible($postType: PostType!, $book: String!, $chap: Int!, $vs: Int!) {
-          createPost(postType: $postType, scriptureBook: $book, scriptureChapter: $chap, scriptureVerseStart: $vs) {
-            success
-            post { scripture { book chapter verseStart } }
-          }
-        }
-        """
-        variables = {"postType": "BIBLE", "book": "John", "chap": 11, "vs": 35}
-        response = auth_client.post(
-            "/graphql/",
-            data=json.dumps({"query": mutation, "variables": variables}),
-            content_type="application/json",
-        )
-        data = json.loads(response.content)["data"]["createPost"]
+            mutation CreateBible($postType: PostType!, $book: String!, $chap: Int!, $vs: Int!) {
+              createPost(postType: $postType, scriptureBook: $book, scriptureChapter: $chap, scriptureVerseStart: $vs) {
+                success
+                post { scripture { book chapter verseStart } }
+              }
+            }
+            """
+            variables = {"postType": "BIBLE", "book": "John", "chap": 11, "vs": 35}
+            response = auth_client.post(
+                "/graphql/",
+                data=json.dumps({"query": mutation, "variables": variables}),
+                content_type="application/json",
+            )
+            data = json.loads(response.content)["data"]["createPost"]
 
-        assert data["success"] is True
-        assert data["post"]["scripture"]["book"] == "John"
+            assert data["success"] is True
+            assert data["post"]["scripture"]["book"] == "John"

@@ -1,7 +1,7 @@
 import strawberry
 from graphql import GraphQLError
 
-from core.scripture.constants import FREE_BIBLE_VERSIONS
+from core.scripture.constants import FREE_BIBLE_VERSIONS, normalize_translation
 from core.scripture.exceptions import ScriptureError, VersionNotAvailableError
 from core.scripture.services import ScriptureService
 from core.shared.types import ScriptureVerse
@@ -39,6 +39,8 @@ class ScriptureResponse:
     book: str = strawberry.field(description="Book name ('John')")
     chapter: int = strawberry.field(description="Chapter number")
     translation: str = strawberry.field(description="Translation version ('kjv')")
+    verse_start: int | None = strawberry.field(default=None, description="Starting verse boundary")
+    verse_end: int | None = strawberry.field(default=None, description="Ending verse boundary")
     verses: list[ScriptureVerse] = strawberry.field(description="All verses in the chapter")
 
 
@@ -105,7 +107,7 @@ class ScriptureQueries:
         self,
         book: str,
         chapter: int,
-        translation: str = "kjv",
+        translation: str = "KJV",
     ) -> ScriptureResponse:
         """
         Fetch all verses in a specific chapter.
@@ -127,7 +129,9 @@ class ScriptureQueries:
             return ScriptureResponse(
                 book=book,
                 chapter=chapter,
-                translation=translation.lower().strip(),
+                translation=normalize_translation(translation),
+                verse_start=1,
+                verse_end=None,
                 verses=[ScriptureVerse(number=v["number"], text=v["text"]) for v in verses],
             )
         except VersionNotAvailableError as e:
@@ -152,7 +156,7 @@ class ScriptureQueries:
         self,
         book: str,
         chapter: int,
-        translation: str = "kjv",
+        translation: str = "KJV",
         verseStart: int = 1,
         verseEnd: int | None = None,
     ) -> str:

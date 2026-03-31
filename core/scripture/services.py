@@ -6,7 +6,7 @@ Dynamically routes to JSDelivr CDN for 200+ free Bible translations.
 import logging
 import re
 
-from core.scripture.constants import FREE_BIBLE_VERSIONS
+from core.scripture.constants import FREE_BIBLE_VERSIONS, get_translation_id
 from core.scripture.exceptions import ScriptureError, VersionNotAvailableError
 from core.scripture.providers.jsdelivr import JSDelivrScriptureService
 
@@ -150,7 +150,7 @@ class ScriptureService:
 
         Only supports versions defined in FREE_BIBLE_VERSIONS.
         """
-        version_lower = version.lower().strip()
+        version_lower = get_translation_id(version)
 
         # Normalize short codes if needed (e.g. 'kjv' to 'en-kjv')
         # We'll check both original and resolved ID against FREE_BIBLE_VERSIONS
@@ -190,7 +190,7 @@ class ScriptureService:
 
         Raises VersionNotAvailableError if not in free tier.
         """
-        version_lower = version.lower().strip()
+        version_lower = get_translation_id(version)
         version_id = JSDelivrScriptureService._resolve_version_id(version_lower)
         allowed_codes = FREE_BIBLE_VERSIONS
         if version_lower not in allowed_codes and version_id.split("-")[-1] not in allowed_codes:

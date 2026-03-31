@@ -73,6 +73,7 @@ class JSDelivrScriptureService:
         "kjv": "en-kjv",
         "asv": "en-asv",
         "web": "en-web",
+        "rv": "en-rv",
     }
 
     FALLBACK_VERSIONS = [
@@ -380,7 +381,7 @@ class JSDelivrScriptureService:
 
         verses: list[dict] = []
 
-        with ThreadPoolExecutor(max_workers=max_verses) as executor:
+        with ThreadPoolExecutor(max_workers=min(20, max_verses)) as executor:
             futures = {
                 executor.submit(
                     JSDelivrScriptureService._try_fetch_verse,

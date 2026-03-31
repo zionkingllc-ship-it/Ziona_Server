@@ -5,6 +5,7 @@ import strawberry
 
 from core.feed.schema import CategoryType
 from core.media.schema import MediaFileType
+from core.scripture.constants import normalize_translation
 from core.shared.types import ErrorType, MediaType, PostType, ScriptureVerse
 from core.users.schema import _get_authenticated_user_id
 
@@ -17,7 +18,7 @@ class ScriptureInput:
     chapter: int
     verse_start: int
     verse_end: int | None = None
-    translation: str | None = "kjv"
+    translation: str | None = "KJV"
 
 
 @strawberry.type
@@ -66,7 +67,7 @@ class PostMutations:
         scripture_chapter: int | None = None,
         scripture_verse_start: int | None = None,
         scripture_verse_end: int | None = None,
-        scripture_translation: str | None = None,
+        scripture_translation: str | None = "KJV",
     ) -> CreatePostPayload:
         """
         Create a new post.
@@ -133,7 +134,7 @@ class PostMutations:
                     "chapter": scripture_chapter,
                     "verse_start": scripture_verse_start,
                     "verse_end": scripture_verse_end,
-                    "version": scripture_translation or "kjv",
+                    "version": scripture_translation or "KJV",
                 }
 
             post_dto = PostService.create_post(
@@ -389,7 +390,7 @@ class Post:
         return PostScripture(
             reference=self._dto.scripture.reference,
             text=self._dto.scripture.text,
-            translation=self._dto.scripture.version,
+            translation=normalize_translation(self._dto.scripture.version),
             book=self._dto.scripture.book,
             chapter=self._dto.scripture.chapter,
             verse_start=self._dto.scripture.verse_start,
@@ -417,6 +418,7 @@ class Post:
                     icon=cat.icon,
                     bg_color=cat.bg_color,
                     bd_color=cat.bd_color,
+                    text_post_bg=cat.text_post_bg,
                     order=cat.order,
                 )
         return None

@@ -7,6 +7,7 @@ import logging
 import strawberry
 
 from core.media.schema import MediaFileType
+from core.scripture.constants import normalize_translation
 from core.shared.types import MediaType as MediaTypeEnum
 from core.shared.types import PostType, ScriptureVerse
 from core.users.schema import _get_authenticated_user_id
@@ -30,6 +31,7 @@ class CategoryType:
     icon: str
     bg_color: str
     bd_color: str
+    text_post_bg: str | None = None
     order: int | None = None
 
 
@@ -154,6 +156,7 @@ class FeedPost:
                     icon=cat.icon,
                     bg_color=cat.bg_color,
                     bd_color=cat.bd_color,
+                    text_post_bg=cat.text_post_bg,
                     order=cat.order,
                 )
         logger.warning("Category not found category_id=%s", self._category_id)
@@ -266,7 +269,7 @@ def _dto_to_feed_post(dto) -> FeedPost:
             FeedPostScripture(
                 reference=dto.scripture.reference,
                 text=dto.scripture.text,
-                translation=dto.scripture.version,
+                translation=normalize_translation(dto.scripture.version),
                 book=dto.scripture.book,
                 chapter=dto.scripture.chapter,
                 verse_start=dto.scripture.verse_start,
@@ -312,6 +315,7 @@ class FeedQueries:
                 icon=cat.icon,
                 bg_color=cat.bg_color,
                 bd_color=cat.bd_color,
+                text_post_bg=cat.text_post_bg,
                 order=cat.order,
             )
             for cat in categories
@@ -486,8 +490,6 @@ class FeedQueries:
         from core.feed.services import FeedService
 
         user_id = _get_authenticated_user_id(info)
-        if not user_id:
-            return FeedResponse(posts=[], has_more=False)
 
         result = FeedService.get_discover_feed(
             user_id=user_id, category=category, cursor=cursor, limit=limit

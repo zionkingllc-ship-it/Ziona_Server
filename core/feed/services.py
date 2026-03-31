@@ -11,7 +11,7 @@ from django.db.models import Count, F, Q
 from django.utils import timezone
 
 from core.follows.selectors import FollowSelector
-from core.posts.models import Post, PostCategory
+from core.posts.models import Post
 from core.shared.dtos import (
     EmptyStateDTO,
     FeedResponseDTO,
@@ -162,7 +162,7 @@ class FeedService:
 
     @staticmethod
     def get_discover_feed(
-        user_id: str,
+        user_id: str | None = None,
         category: str | None = None,
         cursor: str | None = None,
         limit: int = DEFAULT_FEED_LIMIT,
@@ -198,9 +198,7 @@ class FeedService:
         )
 
         if category:
-            valid_categories = [c.value for c in PostCategory]
-            if category in valid_categories:
-                qs = qs.filter(category=category)
+            qs = qs.filter(category__slug=category)
 
         qs = qs.order_by("-created_at")
 
@@ -212,7 +210,7 @@ class FeedService:
         posts = posts[:limit]
 
         if not posts:
-            suggestions = FeedService._get_empty_state_suggestions(user_id)
+            suggestions = FeedService._get_empty_state_suggestions(user_id) if user_id else []
             return FeedResponseDTO(
                 posts=[],
                 has_more=False,
