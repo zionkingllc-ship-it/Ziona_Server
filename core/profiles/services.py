@@ -186,3 +186,125 @@ class ProfileService:
             )
 
         return ProfileService.get_user_profile(user_id, viewer_id=user_id)
+
+    @staticmethod
+    def get_user_posts(
+        user_id: str,
+        limit: int = 20,
+        cursor: str | None = None,
+        viewer_id: str | None = None,
+    ) -> dict:
+        """Get a paginated list of posts authored by the user.
+
+        Args:
+            user_id: UUID of the post author.
+            limit: Page size limit.
+            cursor: Pagination string.
+            viewer_id: UUID of the requesting user.
+
+        Returns:
+            Dict containing 'posts', 'next_cursor', 'has_more'.
+        """
+        from core.feed.services import FeedService
+        from core.posts.models import Post
+
+        limit = min(limit, 50)
+
+        qs = (
+            Post.objects.select_related("user")
+            .prefetch_related("media_files", "post_media")
+            .filter(user_id=user_id, deleted_at__isnull=True)
+            .annotate(
+                likes_count=Count("likes", distinct=True),
+                comments_count=Count(
+                    "comments",
+                    filter=Q(comments__deleted_at__isnull=True),
+                    distinct=True,
+                ),
+                shares_count=Count("shares", distinct=True),
+                saves_count=Count("saves", distinct=True),
+            )
+            .order_by("-created_at")
+        )
+
+        if cursor:
+            qs = FeedService._apply_cursor(qs, cursor)
+
+        posts = list(qs[: limit + 1])
+        has_more = len(posts) > limit
+        posts = posts[:limit]
+
+        post_dtos = FeedService._bulk_build_post_dtos(posts, viewer_id=viewer_id)
+
+        return {
+            "posts": post_dtos,
+            "next_cursor": str(posts[-1].id) if has_more and posts else None,
+            "has_more": has_more,
+        }
+
+    @staticmethod
+    def get_user_liked_posts(
+        user_id: str,
+        limit: int = 20,
+        cursor: str | None = None,
+        viewer_id: str | None = None,
+    ) -> dict:
+        """Get a paginated list of posts the user has liked.
+
+        Args:
+            user_id: UUID of the user who liked the posts.
+            limit: Page size limit.
+            cursor: Pagination string.
+            viewer_id: UUID of the requesting user.
+
+        Returns:
+            Dict containing 'posts', 'next_cursor', 'has_more'.
+        """
+        from core.engagement.models import Like
+        from core.feed.services import FeedService
+        from core.posts.models import Post
+
+        limit = min(limit, 50)
+
+        liked_post_ids = list(
+            Like.objects.filter(user_id=user_id).values_list("post_id", flat=True)
+        )
+
+        if not liked_post_ids:
+            return {
+                "posts": [],
+                "next_cursor": None,
+                "has_more": False,
+            }
+
+        qs = (
+            Post.objects.select_related("user")
+            .prefetch_related("media_files", "post_media")
+            .filter(id__in=liked_post_ids, deleted_at__isnull=True)
+            .annotate(
+                likes_count=Count("likes", distinct=True),
+                comments_count=Count(
+                    "comments",
+                    filter=Q(comments__deleted_at__isnull=True),
+                    distinct=True,
+                ),
+                shares_count=Count("shares", distinct=True),
+                saves_count=Count("saves", distinct=True),
+            )
+            .order_by("-created_at")
+        )
+
+        if cursor:
+            qs = FeedService._apply_cursor(qs, cursor)
+
+        posts = list(qs[: limit + 1])
+        has_more = len(posts) > limit
+        posts = posts[:limit]
+
+        post_dtos = FeedService._bulk_build_post_dtos(posts, viewer_id=viewer_id)
+
+        return {
+            "posts": post_dtos,
+            "next_cursor": str(posts[-1].id) if has_more and posts else None,
+            "has_more": has_more,
+        }

@@ -134,6 +134,44 @@ class ProfileQueries:
         except ProfileError:
             return None
 
+    @strawberry.field(description="Get paginated list of posts authored by the targeted user.")
+    def user_posts(
+        self,
+        info: strawberry.types.Info,
+        user_id: str,
+        limit: int = 20,
+        cursor: str | None = None,
+    ) -> ProfilePostResponseListDTO:
+        """
+        Get chronological cursor paginated feed of posts authored by a user.
+
+        **Authentication:** Optional
+        **Parameters:**
+        - user_id (String, required) - Target user UUID
+        - limit (Int, optional) - Pagination chunk size target
+        - cursor (String, optional) - Pass nextCursor backwards
+        **Returns:** ProfilePostResponseListDTO with exact posts array
+        **Errors:** Returns empty array safely globally natively.
+        """
+        from core.profiles.services import ProfileService
+
+        viewer_id = _get_authenticated_user_id(info)
+
+        result = ProfileService.get_user_posts(
+            user_id=user_id,
+            limit=limit,
+            cursor=cursor,
+            viewer_id=viewer_id,
+        )
+
+        posts = [_dto_to_feed_post(p) for p in result["posts"]]
+
+        return ProfilePostResponseListDTO(
+            posts=posts,
+            nextCursor=result["next_cursor"],
+            hasMore=result["has_more"],
+        )
+
     @strawberry.field(description="Get paginated list of posts the targeted user has liked.")
     def liked_posts(
         self,
