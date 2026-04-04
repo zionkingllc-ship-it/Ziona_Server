@@ -146,7 +146,7 @@ class TestScriptureService:
         """6. test_invalid_book_raises_error"""
         with pytest.raises(ScriptureError) as exc_info:
             ScriptureService.fetch_verse("NotABook", 1, 1)
-        assert exc_info.value.code == "SCRIPTURE_FETCH_FAILED"
+        assert exc_info.value.code == "INVALID_BOOK"
 
     @patch("core.scripture.providers.jsdelivr.requests.get")
     def test_verse_caching_works(self, mock_get):
@@ -275,17 +275,15 @@ class TestScriptureService:
 
     # ── New tests for scripture query refactor ────────────────────────
 
-    @patch("core.scripture.providers.jsdelivr.JSDelivrScriptureService._try_fetch_verse")
-    def test_scripture_full_chapter(self, mock_try):
+    @patch("core.scripture.providers.jsdelivr.JSDelivrScriptureService.fetch_chapter_simple")
+    def test_scripture_full_chapter(self, mock_fetch):
         """17. fetch_chapter returns all verses for a chapter."""
 
-        # Simulate a chapter with 3 verses (verse 4 onwards returns None)
-        def side_effect(book_slug, chapter, verse, version_id):
-            if verse <= 3:
-                return {"number": verse, "text": f"Verse {verse} text."}
-            return None
-
-        mock_try.side_effect = side_effect
+        mock_fetch.return_value = [
+            {"number": 1, "text": "Verse 1 text."},
+            {"number": 2, "text": "Verse 2 text."},
+            {"number": 3, "text": "Verse 3."},
+        ]
 
         verses = ScriptureService.fetch_chapter("Ruth", 1, version="kjv")
 
@@ -325,10 +323,10 @@ class TestScriptureService:
         assert exc_info.value.code == "INVALID_CHAPTER"
         assert "4 chapters" in str(exc_info.value)
 
-    @patch("core.scripture.providers.jsdelivr.JSDelivrScriptureService._try_fetch_verse")
-    def test_scripture_chapter_not_found(self, mock_try):
+    @patch("core.scripture.providers.jsdelivr.JSDelivrScriptureService.fetch_chapter_simple")
+    def test_scripture_chapter_not_found(self, mock_fetch):
         """21. CDN returns no verses raises CHAPTER_NOT_FOUND."""
-        mock_try.return_value = None  # All verses 404
+        mock_fetch.return_value = []  # All verses 404
 
         with pytest.raises(ScriptureError) as exc_info:
             ScriptureService.fetch_chapter("John", 1, version="kjv")
@@ -347,18 +345,12 @@ class TestScriptureService:
             ScriptureService.fetch_chapter("John", 3, version="niv")
         assert exc_info.value.code == "SCRIPTURE_VERSION_NOT_AVAILABLE"
 
-    @patch("core.scripture.providers.jsdelivr.JSDelivrScriptureService._try_fetch_verse")
-    def test_fetch_chapter_performance(self, mock_try):
+    @patch("core.scripture.providers.jsdelivr.JSDelivrScriptureService.fetch_chapter_simple")
+    def test_fetch_chapter_performance(self, mock_fetch):
         """24. Parallel fetch_chapter completes quickly even for large chapters."""
         import time
 
-        # Simulate 176 verses (Psalms 119 — the longest chapter) with slight delay
-        def side_effect(book_slug, chapter, verse, version_id):
-            if verse <= 176:
-                return {"number": verse, "text": f"Verse {verse}."}
-            return None
-
-        mock_try.side_effect = side_effect
+        mock_fetch.return_value = [{"number": v, "text": f"Verse {v}."} for v in range(1, 177)]
 
         start = time.monotonic()
         verses = ScriptureService.fetch_chapter("Psalms", 119, version="kjv")

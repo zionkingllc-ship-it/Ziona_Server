@@ -23,12 +23,12 @@ OLD_TESTAMENT_BOOKS = {
     "joshua",
     "judges",
     "ruth",
-    "1-samuel",
-    "2-samuel",
-    "1-kings",
-    "2-kings",
-    "1-chronicles",
-    "2-chronicles",
+    "1samuel",
+    "2samuel",
+    "1kings",
+    "2kings",
+    "1chronicles",
+    "2chronicles",
     "ezra",
     "nehemiah",
     "esther",
@@ -36,7 +36,7 @@ OLD_TESTAMENT_BOOKS = {
     "psalms",
     "proverbs",
     "ecclesiastes",
-    "song-of-solomon",
+    "songofsolomon",
     "isaiah",
     "jeremiah",
     "lamentations",
@@ -109,12 +109,12 @@ class JSDelivrScriptureService:
         "Joshua": "joshua",
         "Judges": "judges",
         "Ruth": "ruth",
-        "1 Samuel": "1-samuel",
-        "2 Samuel": "2-samuel",
-        "1 Kings": "1-kings",
-        "2 Kings": "2-kings",
-        "1 Chronicles": "1-chronicles",
-        "2 Chronicles": "2-chronicles",
+        "1 Samuel": "1samuel",
+        "2 Samuel": "2samuel",
+        "1 Kings": "1kings",
+        "2 Kings": "2kings",
+        "1 Chronicles": "1chronicles",
+        "2 Chronicles": "2chronicles",
         "Ezra": "ezra",
         "Nehemiah": "nehemiah",
         "Esther": "esther",
@@ -123,8 +123,8 @@ class JSDelivrScriptureService:
         "Psalm": "psalms",
         "Proverbs": "proverbs",
         "Ecclesiastes": "ecclesiastes",
-        "Song of Solomon": "song-of-solomon",
-        "Song of Songs": "song-of-solomon",
+        "Song of Solomon": "songofsolomon",
+        "Song of Songs": "songofsolomon",
         "Isaiah": "isaiah",
         "Jeremiah": "jeremiah",
         "Lamentations": "lamentations",
@@ -148,25 +148,25 @@ class JSDelivrScriptureService:
         "John": "john",
         "Acts": "acts",
         "Romans": "romans",
-        "1 Corinthians": "1-corinthians",
-        "2 Corinthians": "2-corinthians",
+        "1 Corinthians": "1corinthians",
+        "2 Corinthians": "2corinthians",
         "Galatians": "galatians",
         "Ephesians": "ephesians",
         "Philippians": "philippians",
         "Colossians": "colossians",
-        "1 Thessalonians": "1-thessalonians",
-        "2 Thessalonians": "2-thessalonians",
-        "1 Timothy": "1-timothy",
-        "2 Timothy": "2-timothy",
+        "1 Thessalonians": "1thessalonians",
+        "2 Thessalonians": "2thessalonians",
+        "1 Timothy": "1timothy",
+        "2 Timothy": "2timothy",
         "Titus": "titus",
         "Philemon": "philemon",
         "Hebrews": "hebrews",
         "James": "james",
-        "1 Peter": "1-peter",
-        "2 Peter": "2-peter",
-        "1 John": "1-john",
-        "2 John": "2-john",
-        "3 John": "3-john",
+        "1 Peter": "1peter",
+        "2 Peter": "2peter",
+        "1 John": "1john",
+        "2 John": "2john",
+        "3 John": "3john",
         "Jude": "jude",
         "Revelation": "revelation",
     }
@@ -405,3 +405,30 @@ class JSDelivrScriptureService:
             cache.set(cache_key, verses, 86400)
 
         return verses
+
+    @staticmethod
+    def fetch_chapter_simple(book_slug: str, chapter: int, version_id: str) -> list[dict]:
+        """Fetch ALL verses in a chapter via a single JSON request.
+
+        Uses bibles/{version}/books/{book}/chapters/{chapter}.json.
+        Timeout: 10s with 3 retries and exponential backoff.
+        """
+        import time
+
+        url = f"{JSDelivrScriptureService.BASE_URL}/{version_id}/books/{book_slug}/chapters/{chapter}.json"
+
+        for attempt in range(3):
+            try:
+                response = requests.get(url, timeout=10)
+                response.raise_for_status()
+                data = response.json().get("data", [])
+                return [{"number": int(v["verse"]), "text": v["text"]} for v in data]
+            except (requests.Timeout, requests.ConnectionError) as e:
+                if attempt == 2:
+                    logger.error(f"CDN fetch failed after 3 attempts: {e}")
+                    return []
+                time.sleep(2**attempt)
+            except Exception as e:
+                logger.error(f"CDN fetch error: {e}")
+                return []
+        return []

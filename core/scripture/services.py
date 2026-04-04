@@ -139,6 +139,23 @@ class ScriptureService:
         }
 
     @staticmethod
+    def _validate_chapter(book_name: str, chapter: int) -> None:
+        """Validate if a chapter exists for a given book using canonical metadata."""
+        books = ScriptureService.get_books_list()
+        book_info = next((b for b in books if b["name"].lower() == book_name.lower()), None)
+
+        if not book_info:
+            return
+
+        max_chapters = book_info["chapters"]
+        if chapter < 1 or chapter > max_chapters:
+            raise ScriptureError(
+                f"Chapter {chapter} is out of range for the Book of {book_info['name']}. "
+                f"Valid range is 1-{max_chapters}.",
+                code="INVALID_CHAPTER",
+            )
+
+    @staticmethod
     def fetch_verse(
         book: str,
         chapter: int,
@@ -146,41 +163,179 @@ class ScriptureService:
         verse_end: int | None = None,
         version: str = "kjv",
     ) -> dict:
-        """Fetch Bible verse from the free provider (JSDelivr CDN).
+        """Fetch Bible verse from database with fallback to JSDelivr CDN.
 
         Only supports versions defined in FREE_BIBLE_VERSIONS.
         """
-        version_lower = get_translation_id(version)
+        import time
 
-        # Normalize short codes if needed (e.g. 'kjv' to 'en-kjv')
-        # We'll check both original and resolved ID against FREE_BIBLE_VERSIONS
-        version_id = JSDelivrScriptureService._resolve_version_id(version_lower)
+        from django.core.cache import cache
 
-        # Check if version is allowed in free tier
-        # We check both the input version and the resolved ID
-        allowed_codes = FREE_BIBLE_VERSIONS
-        if version_lower not in allowed_codes and version_id.split("-")[-1] not in allowed_codes:
-            # ALWAYS raise error (not just in debug)
-            raise VersionNotAvailableError(version, allowed_codes)
+        from core.scripture.models import BibleTranslation, BibleVerse
 
-        # Validate verse range
-        if verse_end is not None and verse_end < verse_start:
-            raise ScriptureError(
-                f"verseEnd ({verse_end}) must be >= verseStart ({verse_start})",
-                code="VERSE_RANGE_INVALID",
-            )
+        start_time = time.time()
 
         try:
-            return JSDelivrScriptureService.fetch_verse(
-                book, chapter, verse_start, verse_end, version_id
+            # 1. Canonical Validation (Fail Fast)
+            ScriptureService._validate_chapter(book, chapter)
+
+            version_lower = get_translation_id(version)
+            version_id = JSDelivrScriptureService._resolve_version_id(version_lower)
+
+            allowed_codes = FREE_BIBLE_VERSIONS
+            if (
+                version_lower not in allowed_codes
+                and version_id.split("-")[-1] not in allowed_codes
+            ):
+                raise VersionNotAvailableError(version, allowed_codes)
+
+            if verse_end is not None and verse_end < verse_start:
+                raise ScriptureError(
+                    f"verseEnd ({verse_end}) must be >= verseStart ({verse_start})",
+                    code="VERSE_RANGE_INVALID",
+                )
+
+            # 1. Hybrid DB Strategy
+            try:
+                qs = BibleVerse.objects.filter(
+                    translation=version_lower,
+                    book_name__iexact=book,
+                    chapter=chapter,
+                    verse__gte=verse_start,
+                )
+                qs = qs.filter(verse__lte=verse_end) if verse_end else qs.filter(verse=verse_start)
+
+                db_verses = list(qs.order_by("verse"))
+
+                if db_verses:
+                    text = " ".join(v.text for v in db_verses)
+                    ref_end = f"-{verse_end}" if verse_end and verse_end > verse_start else ""
+                    book_display = db_verses[0].book_name if db_verses else book
+
+                    try:
+                        trans_obj = BibleTranslation.objects.filter(code=version_lower).first()
+                        version_display = trans_obj.name if trans_obj else version_lower.upper()
+                    except Exception:
+                        version_display = version_lower.upper()
+
+                    result = {
+                        "text": text,
+                        "verses": [{"number": v.verse, "text": v.text} for v in db_verses],
+                        "reference": f"{book_display} {chapter}:{verse_start}{ref_end}",
+                        "version": version_display,
+                        "book": book_display,
+                        "chapter": chapter,
+                        "verse_start": verse_start,
+                        "verse_end": verse_end,
+                    }
+                    elapsed_ms = int((time.time() - start_time) * 1000)
+                    logger.info(
+                        "scripture_fetch",
+                        extra={
+                            "source": "db",
+                            "book": book,
+                            "chapter": chapter,
+                            "translation": version_lower,
+                            "latency_ms": elapsed_ms,
+                            "verse_count": len(db_verses),
+                        },
+                    )
+                    return result
+            except Exception as e:
+                logger.error(f"Database error fetching verse: {e}", exc_info=True)
+
+            # 2. Hard fail guards with Redis Cache locks to prevent dogpiling CDN
+            book_slug = ScriptureService._validate_book(book)
+            cdn_cache_key = f"scripture:{version_id}:{book_slug}:{chapter}:{verse_start}"
+            if verse_end:
+                cdn_cache_key += f"-{verse_end}"
+
+            cached_verse = cache.get(cdn_cache_key)
+            if cached_verse is not None:
+                elapsed_ms = int((time.time() - start_time) * 1000)
+                logger.info(
+                    "scripture_fetch",
+                    extra={
+                        "source": "cache",
+                        "book": book,
+                        "chapter": chapter,
+                        "translation": version_lower,
+                        "latency_ms": elapsed_ms,
+                        "verse_count": len(cached_verse.get("verses", [])),
+                    },
+                )
+                return cached_verse
+
+            lock_key = f"lock:cdn_verse:{version_id}:{book_slug}:{chapter}:{verse_start}"
+            if verse_end:
+                lock_key += f"-{verse_end}"
+
+            acquired = cache.add(lock_key, "1", 10)
+            if not acquired:
+                for _ in range(30):
+                    time.sleep(0.1)
+                    cached = cache.get(cdn_cache_key)
+                    if cached is not None:
+                        elapsed_ms = int((time.time() - start_time) * 1000)
+                        logger.info(
+                            "scripture_fetch",
+                            extra={
+                                "source": "cache",
+                                "book": book,
+                                "chapter": chapter,
+                                "translation": version_lower,
+                                "latency_ms": elapsed_ms,
+                                "verse_count": len(cached.get("verses", [])),
+                            },
+                        )
+                        return cached
+
+            logger.warning(
+                "scripture_fallback_triggered",
+                extra={"book": book, "chapter": chapter, "version": version_id},
             )
-        except ValueError as e:
-            raise ScriptureError(str(e), code="SCRIPTURE_FETCH_FAILED") from e
-        except Exception as e:
-            raise ScriptureError(
-                f"Failed to fetch scripture: {e!s}",
-                code="SCRIPTURE_FETCH_FAILED",
-            ) from e
+            try:
+                verses_result = JSDelivrScriptureService.fetch_verse(
+                    book, chapter, verse_start, verse_end, version_id
+                )
+            except ValueError as e:
+                raise ScriptureError(str(e), code="SCRIPTURE_FETCH_FAILED") from e
+            except Exception as e:
+                # 🛡️ Senior Guard: Hide internal CDN details from end-users
+                err_msg = str(e)
+                if "403" in err_msg or "404" in err_msg:
+                    raise ScriptureError(
+                        f"The requested scripture ({book} {chapter}) is not available in the {version_id.upper()} translation. Please try another.",
+                        code="SCRIPTURE_NOT_FOUND",
+                    ) from e
+
+                raise ScriptureError(
+                    "The scripture service is temporarily unavailable. Please try again later.",
+                    code="SERVICE_UNAVAILABLE",
+                ) from e
+            finally:
+                if acquired:
+                    cache.delete(lock_key)
+
+            elapsed_ms = int((time.time() - start_time) * 1000)
+            logger.info(
+                "scripture_fetch",
+                extra={
+                    "source": "cdn",
+                    "book": book,
+                    "chapter": chapter,
+                    "translation": version_lower,
+                    "latency_ms": elapsed_ms,
+                    "verse_count": len(verses_result.get("verses", [])),
+                },
+            )
+            return verses_result
+
+        except (ScriptureError, VersionNotAvailableError):
+            raise
+        except Exception:
+            logger.exception("ScriptureService.fetch_verse failed catastrophically")
+            return {}
 
     # ── Validation helpers ───────────────────────────────────────────
 
@@ -243,36 +398,153 @@ class ScriptureService:
         chapter: int,
         version: str = "kjv",
     ) -> list[dict]:
-        """Fetch ALL verses in a chapter.
+        """Fetch ALL verses in a chapter using Hybrid Strategy.
 
         Returns a list of {"number": int, "text": str} dicts sorted by verse
         number. Validates version, book, and chapter before fetching.
-
-        Raises:
-            VersionNotAvailableError — version not in free tier
-            ScriptureError(INVALID_BOOK) — book not found
-            ScriptureError(INVALID_CHAPTER) — chapter out of range
-            ScriptureError(CHAPTER_NOT_FOUND) — CDN returned no verses
         """
-        version_id = ScriptureService._validate_version(version)
-        book_slug = ScriptureService._validate_book(book)
-        ScriptureService._validate_chapter(book, chapter)
+        import time
+
+        from django.core.cache import cache
+
+        from core.scripture.models import BibleVerse
+
+        start_time = time.time()
 
         try:
-            verses = JSDelivrScriptureService.fetch_chapter(book_slug, chapter, version_id)
-        except Exception as e:
-            raise ScriptureError(
-                f"Failed to fetch chapter: {e!s}",
-                code="SCRIPTURE_FETCH_FAILED",
-            ) from e
+            version_id = ScriptureService._validate_version(version)
+            book_slug = ScriptureService._validate_book(book)
+            ScriptureService._validate_chapter(book, chapter)
 
-        if not verses:
-            raise ScriptureError(
-                f"No verses found for {book} chapter {chapter}.",
-                code="CHAPTER_NOT_FOUND",
+            version_lower = get_translation_id(version)
+
+            # 1. Hybrid DB Strategy
+            try:
+                verses_qs = BibleVerse.objects.filter(
+                    translation=version_lower, book_name__iexact=book, chapter=chapter
+                ).order_by("verse")
+
+                db_verses = list(verses_qs)
+                if db_verses:
+                    result = [{"number": v.verse, "text": v.text} for v in db_verses]
+                    elapsed_ms = int((time.time() - start_time) * 1000)
+                    logger.info(
+                        "scripture_fetch",
+                        extra={
+                            "source": "db",
+                            "book": book,
+                            "chapter": chapter,
+                            "translation": version_lower,
+                            "latency_ms": elapsed_ms,
+                            "verse_count": len(result),
+                        },
+                    )
+                    return result
+            except Exception as e:
+                logger.error(f"Database error fetching chapter: {e}")
+
+            # 2. Hard fail guards with Redis cache lock
+            cdn_cache_key = f"scripture:chapter:{version_id}:{book_slug}:{chapter}"
+            cached_chapter = cache.get(cdn_cache_key)
+            if cached_chapter is not None:
+                elapsed_ms = int((time.time() - start_time) * 1000)
+                logger.info(
+                    "scripture_fetch",
+                    extra={
+                        "source": "cache",
+                        "book": book,
+                        "chapter": chapter,
+                        "translation": version_lower,
+                        "latency_ms": elapsed_ms,
+                        "verse_count": len(cached_chapter),
+                    },
+                )
+                return cached_chapter
+
+            lock_key = f"lock:cdn_chapter:{version_id}:{book_slug}:{chapter}"
+            acquired = cache.add(lock_key, "1", 30)
+
+            if not acquired:
+                logger.debug(f"Waiting for lock {lock_key} to avoid dogpiling")
+                for _ in range(50):
+                    time.sleep(0.1)
+                    cached = cache.get(cdn_cache_key)
+                    if cached is not None:
+                        elapsed_ms = int((time.time() - start_time) * 1000)
+                        logger.info(
+                            "scripture_fetch",
+                            extra={
+                                "source": "cache",
+                                "book": book,
+                                "chapter": chapter,
+                                "translation": version_lower,
+                                "latency_ms": elapsed_ms,
+                                "verse_count": len(cached),
+                            },
+                        )
+                        return cached
+
+            logger.warning(
+                "scripture_fallback_triggered",
+                extra={"book": book, "chapter": chapter, "version": version_id},
             )
+            try:
+                # Use simple fetch to ensure single 12k request instead of threadpool
+                verses = JSDelivrScriptureService.fetch_chapter_simple(
+                    book_slug, chapter, version_id
+                )
+            except Exception as e:
+                raise ScriptureError(
+                    f"Failed to fetch chapter: {e!s}",
+                    code="SCRIPTURE_FETCH_FAILED",
+                ) from e
+            finally:
+                if acquired:
+                    cache.delete(lock_key)
 
-        return verses
+            if not verses:
+                raise ScriptureError(
+                    f"No verses found for {book} chapter {chapter}.",
+                    code="CHAPTER_NOT_FOUND",
+                )
+
+            # Store in cache
+            cache.set(cdn_cache_key, verses, 86400)
+            elapsed_ms = int((time.time() - start_time) * 1000)
+            logger.info(
+                "scripture_fetch",
+                extra={
+                    "source": "cdn",
+                    "book": book,
+                    "chapter": chapter,
+                    "translation": version_lower,
+                    "latency_ms": elapsed_ms,
+                    "verse_count": len(verses),
+                },
+            )
+            return verses
+
+        except (ScriptureError, VersionNotAvailableError):
+            raise
+        except Exception:
+            logger.exception("ScriptureService.fetch_chapter failed catastrophically")
+            return []
+
+    @staticmethod
+    def warm_cache() -> None:
+        """Pre-warm popular chapters at startup."""
+        from core.scripture.models import BibleVerse
+
+        try:
+            # Check if verses exist
+            if not BibleVerse.objects.exists():
+                return
+
+            # Just warming John 3 KJV as a simple pre-warm
+            # Using the fetch_chapter method to utilize its caching mechanism
+            ScriptureService.fetch_chapter("John", 3, "kjv")
+        except Exception as e:
+            logger.error(f"Failed to pre-warm scripture cache: {e}")
 
     @staticmethod
     def get_available_versions() -> list[dict]:
@@ -317,12 +589,12 @@ class ScriptureService:
             {"name": "Joshua", "slug": "joshua", "chapters": 24},
             {"name": "Judges", "slug": "judges", "chapters": 21},
             {"name": "Ruth", "slug": "ruth", "chapters": 4},
-            {"name": "1 Samuel", "slug": "1-samuel", "chapters": 31},
-            {"name": "2 Samuel", "slug": "2-samuel", "chapters": 24},
-            {"name": "1 Kings", "slug": "1-kings", "chapters": 22},
-            {"name": "2 Kings", "slug": "2-kings", "chapters": 25},
-            {"name": "1 Chronicles", "slug": "1-chronicles", "chapters": 29},
-            {"name": "2 Chronicles", "slug": "2-chronicles", "chapters": 36},
+            {"name": "1 Samuel", "slug": "1samuel", "chapters": 31},
+            {"name": "2 Samuel", "slug": "2samuel", "chapters": 24},
+            {"name": "1 Kings", "slug": "1kings", "chapters": 22},
+            {"name": "2 Kings", "slug": "2kings", "chapters": 25},
+            {"name": "1 Chronicles", "slug": "1chronicles", "chapters": 29},
+            {"name": "2 Chronicles", "slug": "2chronicles", "chapters": 36},
             {"name": "Ezra", "slug": "ezra", "chapters": 10},
             {"name": "Nehemiah", "slug": "nehemiah", "chapters": 13},
             {"name": "Esther", "slug": "esther", "chapters": 10},
@@ -330,7 +602,7 @@ class ScriptureService:
             {"name": "Psalms", "slug": "psalms", "chapters": 150},
             {"name": "Proverbs", "slug": "proverbs", "chapters": 31},
             {"name": "Ecclesiastes", "slug": "ecclesiastes", "chapters": 12},
-            {"name": "Song of Solomon", "slug": "song-of-solomon", "chapters": 8},
+            {"name": "Song of Solomon", "slug": "songofsolomon", "chapters": 8},
             {"name": "Isaiah", "slug": "isaiah", "chapters": 66},
             {"name": "Jeremiah", "slug": "jeremiah", "chapters": 52},
             {"name": "Lamentations", "slug": "lamentations", "chapters": 5},
@@ -357,25 +629,25 @@ class ScriptureService:
             {"name": "John", "slug": "john", "chapters": 21},
             {"name": "Acts", "slug": "acts", "chapters": 28},
             {"name": "Romans", "slug": "romans", "chapters": 16},
-            {"name": "1 Corinthians", "slug": "1-corinthians", "chapters": 16},
-            {"name": "2 Corinthians", "slug": "2-corinthians", "chapters": 13},
+            {"name": "1 Corinthians", "slug": "1corinthians", "chapters": 16},
+            {"name": "2 Corinthians", "slug": "2corinthians", "chapters": 13},
             {"name": "Galatians", "slug": "galatians", "chapters": 6},
             {"name": "Ephesians", "slug": "ephesians", "chapters": 6},
             {"name": "Philippians", "slug": "philippians", "chapters": 4},
             {"name": "Colossians", "slug": "colossians", "chapters": 4},
-            {"name": "1 Thessalonians", "slug": "1-thessalonians", "chapters": 5},
-            {"name": "2 Thessalonians", "slug": "2-thessalonians", "chapters": 3},
-            {"name": "1 Timothy", "slug": "1-timothy", "chapters": 6},
-            {"name": "2 Timothy", "slug": "2-timothy", "chapters": 4},
+            {"name": "1 Thessalonians", "slug": "1thessalonians", "chapters": 5},
+            {"name": "2 Thessalonians", "slug": "2thessalonians", "chapters": 3},
+            {"name": "1 Timothy", "slug": "1timothy", "chapters": 6},
+            {"name": "2 Timothy", "slug": "2timothy", "chapters": 4},
             {"name": "Titus", "slug": "titus", "chapters": 3},
             {"name": "Philemon", "slug": "philemon", "chapters": 1},
             {"name": "Hebrews", "slug": "hebrews", "chapters": 13},
             {"name": "James", "slug": "james", "chapters": 5},
-            {"name": "1 Peter", "slug": "1-peter", "chapters": 5},
-            {"name": "2 Peter", "slug": "2-peter", "chapters": 3},
-            {"name": "1 John", "slug": "1-john", "chapters": 5},
-            {"name": "2 John", "slug": "2-john", "chapters": 1},
-            {"name": "3 John", "slug": "3-john", "chapters": 1},
+            {"name": "1 Peter", "slug": "1peter", "chapters": 5},
+            {"name": "2 Peter", "slug": "2peter", "chapters": 3},
+            {"name": "1 John", "slug": "1john", "chapters": 5},
+            {"name": "2 John", "slug": "2john", "chapters": 1},
+            {"name": "3 John", "slug": "3john", "chapters": 1},
             {"name": "Jude", "slug": "jude", "chapters": 1},
             {"name": "Revelation", "slug": "revelation", "chapters": 22},
         ]

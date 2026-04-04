@@ -56,6 +56,7 @@ LOCAL_APPS = [
     "core.notifications",
     "core.categories",
     "core.circles",
+    "core.scripture",
 ]
 
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
@@ -277,3 +278,4 @@ LOGGING = {
 # Bible API Configuration
 API_BIBLE_KEY = env("API_BIBLE_KEY", default=None)
 ENABLE_PREMIUM_BIBLE_VERSIONS = env.bool("ENABLE_PREMIUM_BIBLE_VERSIONS", default=False)
+DISABLE_SCRIPTURE_IMPORT = env.bool("DISABLE_SCRIPTURE_IMPORT", default=False)

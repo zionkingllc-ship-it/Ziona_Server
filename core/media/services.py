@@ -12,6 +12,7 @@ from typing import Any
 from django.conf import settings
 
 from core.media.models import MediaFile, MediaStatus, MediaType
+from core.shared.utils import normalize_url
 
 logger = logging.getLogger("core.media")
 
@@ -134,7 +135,7 @@ class MediaService:
             )
         except Exception as e:
             logger.error(f"Failed to generate signed URL: {e}")
-            upload_url = (
+            upload_url = normalize_url(
                 f"https://storage.googleapis.com/{settings.GCP_STORAGE_BUCKET}/{storage_path}"
             )
 
@@ -293,7 +294,9 @@ class MediaService:
             )
         except Exception as e:
             logger.error(f"Failed to generate download URL: {e}")
-            return f"https://storage.googleapis.com/{settings.GCP_STORAGE_BUCKET}/{media_file.storage_path}"
+            return normalize_url(
+                f"https://storage.googleapis.com/{settings.GCP_STORAGE_BUCKET}/{media_file.storage_path}"
+            )
 
 
 def _generate_gcp_signed_url(

@@ -9,6 +9,7 @@ from django.conf import settings
 from django.db import models
 
 from core.shared.models import TimestampedModel
+from core.shared.utils import normalize_url
 
 
 class MediaStatus(models.TextChoices):
@@ -83,7 +84,9 @@ class MediaFile(TimestampedModel):
         if not self.storage_path:
             return ""
 
-        return f"https://storage.googleapis.com/{settings.GCP_STORAGE_BUCKET}/{self.storage_path}"
+        return normalize_url(
+            f"https://storage.googleapis.com/{settings.GCP_STORAGE_BUCKET}/{self.storage_path}"
+        )
 
     def __str__(self) -> str:
         """Return string representation."""
