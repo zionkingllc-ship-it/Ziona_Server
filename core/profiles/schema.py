@@ -10,11 +10,29 @@ from core.users.schema import _get_authenticated_user_id
 
 @strawberry.type
 class ProfileStatsType:
-    """Profile statistics."""
+    """Profile statistics with formatted counts."""
 
-    followers_count: int = 0
-    following_count: int = 0
-    posts_count: int = 0
+    _followers: strawberry.Private[int] = 0
+    _following: strawberry.Private[int] = 0
+    _posts: strawberry.Private[int] = 0
+
+    @strawberry.field
+    def followers_count(self) -> str:
+        from core.shared.utils import format_count
+
+        return format_count(self._followers)
+
+    @strawberry.field
+    def following_count(self) -> str:
+        from core.shared.utils import format_count
+
+        return format_count(self._following)
+
+    @strawberry.field
+    def posts_count(self) -> str:
+        from core.shared.utils import format_count
+
+        return format_count(self._posts)
 
 
 @strawberry.type
@@ -83,9 +101,9 @@ def _dto_to_profile(dto) -> UserProfileType:
         avatar_url=dto.avatar_url,
         location=dto.location,
         stats=ProfileStatsType(
-            followers_count=dto.stats.followers_count,
-            following_count=dto.stats.following_count,
-            posts_count=dto.stats.posts_count,
+            _followers=dto.stats.followers_count,
+            _following=dto.stats.following_count,
+            _posts=dto.stats.posts_count,
         ),
         viewer_state=ProfileViewerState(
             following_author=dto.is_following,

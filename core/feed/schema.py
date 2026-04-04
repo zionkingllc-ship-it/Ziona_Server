@@ -46,12 +46,37 @@ class FeedPostAuthor:
 
 @strawberry.type
 class FeedPostStats:
-    """Engagement stats for a feed post."""
+    """Engagement stats with formatted display counts."""
 
-    likes_count: int = 0
-    comments_count: int = 0
-    shares_count: int = 0
-    saves_count: int = 0
+    _likes: strawberry.Private[int] = 0
+    _comments: strawberry.Private[int] = 0
+    _shares: strawberry.Private[int] = 0
+    _saves: strawberry.Private[int] = 0
+
+    @strawberry.field
+    def likes_count(self) -> str:
+        """Formatted likes count (e.g., "1.2k")."""
+        from core.shared.utils import format_count
+
+        return format_count(self._likes)
+
+    @strawberry.field
+    def comments_count(self) -> str:
+        from core.shared.utils import format_count
+
+        return format_count(self._comments)
+
+    @strawberry.field
+    def shares_count(self) -> str:
+        from core.shared.utils import format_count
+
+        return format_count(self._shares)
+
+    @strawberry.field
+    def saves_count(self) -> str:
+        from core.shared.utils import format_count
+
+        return format_count(self._saves)
 
 
 @strawberry.type
@@ -201,7 +226,7 @@ def _dto_to_feed_post(dto) -> FeedPost:
     """Convert a PostResponseDTO seamlessly to a FeedPost GraphQL type validating arrays."""
 
     media_list = []
-    if dto.media:
+    if dto.media and dto.type in ("image", "video"):
         if dto.type == "video":
             media_list.append(
                 MediaFileType(
@@ -248,10 +273,10 @@ def _dto_to_feed_post(dto) -> FeedPost:
             avatar_url=dto.author.avatar_url,
         ),
         stats=FeedPostStats(
-            likes_count=dto.stats.likes_count,
-            comments_count=dto.stats.comments_count,
-            shares_count=dto.stats.shares_count,
-            saves_count=dto.stats.saves_count,
+            _likes=dto.stats.likes_count,
+            _comments=dto.stats.comments_count,
+            _shares=dto.stats.shares_count,
+            _saves=dto.stats.saves_count,
         ),
         viewer_state=(
             FeedViewerState(
