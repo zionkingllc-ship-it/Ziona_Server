@@ -96,6 +96,14 @@ class PostService:
                     extensions={"field": "caption", "maxLength": max_len},
                 )
 
+        # 0.5. Media Required Validation (Prevention)
+        # Ensure that if the post is MEDIA, it actually has media provided.
+        if post_type.upper() in ("MEDIA", "IMAGE", "VIDEO") and not media_ids and not media_urls:
+            raise PostError(
+                message="Media files (IDs or URLs) are required for media posts.",
+                code="MEDIA_REQUIRED",
+            )
+
         import re
 
         from core.categories.models import Category
@@ -374,7 +382,7 @@ class PostService:
             avatar_url=post.user.avatar_url or None,
         )
 
-        if post.post_type in [PostType.IMAGE, "image", "image_post"]:
+        if (post.post_type in [PostType.IMAGE, "image", "image_post"]) and media_items:
             media_items_dto = []
             # Sort if they have order attr, otherwise use as is
             sorted_items = sorted(media_items or [], key=lambda x: getattr(x, "order", 0))
@@ -393,6 +401,7 @@ class PostService:
                     )
                 )
             media = ImageMediaDTO(items=media_items_dto)
+            actual_type = "image"
         elif (post.post_type in [PostType.VIDEO, "video"]) and media_items:
             v = media_items[0]
             v_url = getattr(v, "url", getattr(v, "media_url", ""))
@@ -405,8 +414,26 @@ class PostService:
                 width=getattr(v, "width", 0),
                 height=getattr(v, "height", 0),
             )
+            actual_type = "video"
         else:
             media = TextMediaDTO()
+            actual_type = "text"
+
+            # Senior-level Logging for Data Corruption
+            # If the database thinks it's a media post, but we have no media records.
+            if post.post_type in [PostType.VIDEO, "video", PostType.IMAGE, "image"]:
+                logger.error(
+                    "DATA_CORRUPTION: Post marked as media but has no attached files",
+                    extra={
+                        "post_id": str(post.id),
+                        "post_type": post.post_type,
+                        "author_id": str(post.user_id),
+                    },
+                )
+
+            # Special case for Bible posts
+            if post.scripture_book and post.scripture_chapter:
+                actual_type = "bible"
 
         def _get_count(post, attr, fallback_qs=None):
             val = getattr(post, attr, None)
@@ -498,7 +525,7 @@ class PostService:
 
         return PostResponseDTO(
             id=str(post.id),
-            type=str(post.post_type),
+            type=actual_type,
             created_at=post.created_at.isoformat(),
             caption=post.caption or None,
             category_id=str(post.category_id) if post.category_id else None,

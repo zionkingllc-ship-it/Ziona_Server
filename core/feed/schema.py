@@ -225,9 +225,11 @@ class FeedResponse:
 def _dto_to_feed_post(dto) -> FeedPost:
     """Convert a PostResponseDTO seamlessly to a FeedPost GraphQL type validating arrays."""
 
+    from core.shared.dtos import ImageMediaDTO, VideoMediaDTO
+
     media_list = []
     if dto.media and dto.type in ("image", "video"):
-        if dto.type == "video":
+        if dto.type == "video" and isinstance(dto.media, VideoMediaDTO):
             media_list.append(
                 MediaFileType(
                     id=dto.id,
@@ -239,7 +241,7 @@ def _dto_to_feed_post(dto) -> FeedPost:
                     duration=getattr(dto.media, "duration", None),
                 )
             )
-        elif dto.type == "image":
+        elif dto.type == "image" and isinstance(dto.media, ImageMediaDTO):
             for img in dto.media.items:
                 media_list.append(
                     MediaFileType(
