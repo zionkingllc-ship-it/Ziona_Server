@@ -1,6 +1,7 @@
 import strawberry
 from strawberry.schema import Schema
 
+from core.admin_dashboard.schema import AdminDashboardMutations, AdminDashboardQueries
 from core.authentication.schema import AuthMutations, AuthQueries
 from core.circles.schema import CircleMutations, CircleQueries
 from core.engagement.schema import EngagementMutations, EngagementQueries
@@ -28,6 +29,7 @@ class Query(
     ScriptureQueries,
     UserQueries,
     CircleQueries,
+    AdminDashboardQueries,
 ):
     """Root query type — extends all domain queries."""
 
@@ -46,6 +48,7 @@ class Mutation(
     ModerationMutations,
     NotificationMutations,
     CircleMutations,
+    AdminDashboardMutations,
 ):
     """Root mutation type — extends all domain mutations."""
 

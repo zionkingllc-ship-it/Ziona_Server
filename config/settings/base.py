@@ -57,6 +57,7 @@ LOCAL_APPS = [
     "core.categories",
     "core.circles",
     "core.scripture",
+    "core.admin_dashboard",
 ]
 
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
@@ -156,7 +157,11 @@ MEDIA_ROOT = BASE_DIR / "mediafiles"
 
 CORS_ALLOWED_ORIGINS = env.list(
     "CORS_ALLOWED_ORIGINS",
-    default=["http://localhost:3000", "http://localhost:19006"],
+    default=[
+        "http://localhost:3000",
+        "http://localhost:19006",
+        "https://studio.apollographql.com",
+    ],
 )
 CORS_ALLOW_CREDENTIALS = True
 CORS_ALLOW_HEADERS = [
@@ -196,6 +201,18 @@ CELERY_BEAT_SCHEDULE = {
     "cleanup-old-notifications": {
         "task": "core.notifications.tasks.cleanup_old_notifications",
         "schedule": crontab(day_of_week=0, hour=2, minute=0),
+    },
+    "calculate-daily-analytics": {
+        "task": "core.admin_dashboard.tasks.calculate_daily_analytics",
+        "schedule": crontab(hour=0, minute=5),
+    },
+    "refresh-dashboard-cache": {
+        "task": "core.admin_dashboard.tasks.refresh_dashboard_cache",
+        "schedule": 300,  # every 5 minutes
+    },
+    "check-scheduled-anchors": {
+        "task": "core.admin_dashboard.tasks.check_scheduled_anchors",
+        "schedule": 60,  # every minute
     },
 }
 

@@ -30,27 +30,55 @@ class ReportStatus(models.TextChoices):
     DISMISSED = "dismissed", "Dismissed"
 
 
-class Report(TimestampedModel):
-    """A user-submitted report against a post or comment.
+class ModerationActionChoice(models.TextChoices):
+    """Admin actions that can be taken on a report."""
 
-    At least one of post or comment must be set (enforced by CHECK constraint).
+    DISMISS = "dismiss", "Dismiss"
+    HIDE_CONTENT = "hide_content", "Hide Content"
+    WARN_USER = "warn_user", "Warn User"
+    DELETE_CONTENT = "delete_content", "Delete Content"
+    DELETE_AND_WARN = "delete_and_warn", "Delete and Warn"
+
+
+class Report(TimestampedModel):
+    """A user-submitted report against a post, comment, or profile.
+
+    Uses a generic target_type + target_id approach for flexibility,
+    while keeping FK relations to Post/Comment for query convenience.
 
     Attributes:
         reporter: The user who filed the report.
-        post: The reported post (if reporting a post).
-        comment: The reported comment (if reporting a comment).
+        target_type: Type of reported content (post, comment, profile).
+        target_id: UUID of the reported entity.
+        post: FK to reported post (for query joins, nullable).
+        comment: FK to reported comment (for query joins, nullable).
         reason: Categorized reason for the report.
         description: Optional free-text description (required for "other").
         status: Current review status.
         reviewed_by: Admin who reviewed the report.
         reviewed_at: Timestamp of review.
+        action: Admin moderation action taken.
+        internal_notes: Admin-only notes (never visible to users).
     """
+
+    TARGET_TYPE_CHOICES = (
+        ("post", "Post"),
+        ("comment", "Comment"),
+        ("profile", "Profile"),
+    )
 
     reporter = models.ForeignKey(
         "users.User",
         on_delete=models.CASCADE,
         related_name="reports_made",
     )
+    target_type = models.CharField(
+        max_length=20,
+        choices=TARGET_TYPE_CHOICES,
+        default="post",
+        db_index=True,
+    )
+    target_id = models.UUIDField(null=True, blank=True, db_index=True)
     post = models.ForeignKey(
         "posts.Post",
         null=True,
@@ -84,24 +112,29 @@ class Report(TimestampedModel):
         related_name="reports_reviewed",
     )
     reviewed_at = models.DateTimeField(null=True, blank=True)
+    action = models.CharField(
+        max_length=50,
+        choices=ModerationActionChoice.choices,
+        null=True,
+        blank=True,
+    )
+    internal_notes = models.TextField(
+        blank=True,
+        default="",
+        help_text="Admin-only notes. Never visible to end users.",
+    )
 
     class Meta:
         db_table = "reports"
         ordering = ["-created_at"]
-        constraints = [
-            models.CheckConstraint(
-                check=(models.Q(post__isnull=False) | models.Q(comment__isnull=False)),
-                name="ck_report_has_target",
-            ),
-        ]
         indexes = [
             models.Index(fields=["status"], name="idx_report_status"),
             models.Index(fields=["reporter"], name="idx_report_reporter"),
             models.Index(fields=["post"], name="idx_report_post"),
             models.Index(fields=["comment"], name="idx_report_comment"),
+            models.Index(fields=["target_type", "target_id"], name="idx_report_target"),
         ]
 
     def __str__(self) -> str:
         """Return string representation."""
-        target = f"post={self.post_id}" if self.post_id else f"comment={self.comment_id}"
-        return f"Report({self.reason}) {target} by {self.reporter_id}"
+        return f"Report({self.reason}) {self.target_type}:{self.target_id} by {self.reporter_id}"

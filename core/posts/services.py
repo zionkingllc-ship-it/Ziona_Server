@@ -106,12 +106,19 @@ class PostService:
 
         import re
 
+        from django.db.models import Q
+
         from core.categories.models import Category
         from core.media.models import MediaFile
         from core.users.models import User
 
-        if category_id and not Category.objects.filter(id=category_id).exists():
-            raise PostError(message="Invalid category ID", code="INVALID_CATEGORY")
+        category_obj = None
+        if category_id:
+            category_obj = Category.objects.filter(Q(id=category_id) | Q(slug=category_id)).first()
+            if not category_obj:
+                raise PostError(
+                    message=f"Category '{category_id}' not found", code="INVALID_CATEGORY"
+                )
 
         # 1. Resolve Media IDs or URLs
         resolved_media_files = []
@@ -204,7 +211,7 @@ class PostService:
             user=user,
             post_type=internal_post_type,
             caption=caption or "",
-            category_id=category_id,
+            category=category_obj,
             media_count=len(resolved_media_files),
             **scripture_fields,
         )

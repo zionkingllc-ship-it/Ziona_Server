@@ -13,10 +13,18 @@ class Circle(models.Model):
     name = models.CharField(max_length=255, validators=[MinLengthValidator(3)])
     description = models.TextField()
     cover_image = models.URLField(max_length=500)
+    profile_image_url = models.URLField(max_length=500, blank=True, default="")
     created_by = models.ForeignKey(
         User, on_delete=models.SET_NULL, null=True, related_name="created_circles"
     )
     is_active = models.BooleanField(default=True)
+    status = models.CharField(
+        max_length=20,
+        choices=(("active", "Active"), ("inactive", "Inactive")),
+        default="active",
+        db_index=True,
+    )
+    last_edited_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     deleted_at = models.DateTimeField(null=True, blank=True)
@@ -146,6 +154,25 @@ class Anchor(models.Model):
     # Media fields (for image/video type)
     media_url = models.URLField(max_length=500, blank=True)
 
+    # Admin scheduling & lifecycle
+    anchor_status = models.CharField(
+        max_length=20,
+        choices=(
+            ("draft", "Draft"),
+            ("scheduled", "Scheduled"),
+            ("posted", "Posted"),
+            ("expired", "Expired"),
+            ("cancelled", "Cancelled"),
+        ),
+        default="posted",
+        db_index=True,
+    )
+    scheduled_for = models.DateTimeField(null=True, blank=True)
+    posted_at = models.DateTimeField(null=True, blank=True)
+    preview_url = models.URLField(max_length=500, blank=True, default="")
+    style_data = models.JSONField(default=dict, blank=True)
+    celery_task_id = models.CharField(max_length=255, blank=True, default="")
+
     # Lifecycle
     published_at = models.DateTimeField()
     expires_at = models.DateTimeField()
@@ -164,6 +191,11 @@ class Anchor(models.Model):
                 fields=["circle", "expires_at"],
                 condition=Q(deleted_at__isnull=True),
                 name="idx_anchors_active",
+            ),
+            models.Index(
+                fields=["scheduled_for"],
+                condition=Q(anchor_status="scheduled"),
+                name="idx_anchors_scheduled",
             ),
         ]
 

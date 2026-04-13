@@ -15,6 +15,14 @@ class UserRole(models.TextChoices):
     ADMIN = "admin", "Admin"
 
 
+class UserStatus(models.TextChoices):
+    """Admin-managed moderation status for user accounts."""
+
+    ACTIVE = "active", "Active"
+    WARNED = "warned", "Warned"
+    SUSPENDED = "suspended", "Suspended"
+
+
 class User(AbstractBaseUser, PermissionsMixin):
     """Custom User model with email-based authentication.
 
@@ -76,6 +84,17 @@ class User(AbstractBaseUser, PermissionsMixin):
     encrypted_dob = models.BinaryField(null=True, blank=True)
 
     location = models.CharField(max_length=100, blank=True)
+
+    status = models.CharField(
+        max_length=20,
+        choices=UserStatus.choices,
+        default=UserStatus.ACTIVE,
+        db_index=True,
+        help_text="Admin-managed moderation status. Separate from Django is_active.",
+    )
+    warned_at = models.DateTimeField(null=True, blank=True)
+    suspended_at = models.DateTimeField(null=True, blank=True)
+    suspension_reason = models.TextField(blank=True, default="")
 
     is_active = models.BooleanField(default=True)
     is_staff = models.BooleanField(default=False)
