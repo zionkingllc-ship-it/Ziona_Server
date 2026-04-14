@@ -122,12 +122,17 @@ class FeedPost:
     """
     A post in the feed efficiently packed with discovery metadata.
 
-    Includes mobile Field aliases enabling direct ingestion without serialization logic.
+    Content field contract:
+    - ``textMessage`` — populated for TEXT and BIBLE posts only.
+    - ``caption``     — populated for MEDIA posts only.
+    - ``text``        — raw backward-compat alias; always returns the stored value.
     """
 
     id: str
     post_type: PostType = strawberry.field(name="type")
-    caption: str | None = None
+    # Internal backing field — holds the DB caption value for all post types.
+    # Not exposed directly; use the computed fields below instead.
+    _caption: strawberry.Private[str | None] = None
     _category_id: strawberry.Private[str | None] = None
     author: FeedPostAuthor
     stats: FeedPostStats
@@ -137,6 +142,33 @@ class FeedPost:
     scripture: FeedPostScripture | None = None
 
     _media_list: strawberry.Private[list[MediaFileType]] = dataclasses.field(default_factory=list)
+
+    @strawberry.field(description="Caption for MEDIA posts. Null for TEXT and BIBLE posts.")
+    def caption(self) -> str | None:
+        """Returns the caption only when this is a MEDIA post."""
+        if self.post_type == PostType.MEDIA:
+            return self._caption
+        return None
+
+    @strawberry.field(
+        name="textMessage",
+        description="Content body for TEXT posts only. Null for MEDIA and BIBLE posts.",
+    )
+    def text_message(self) -> str | None:
+        """Returns the text content only for TEXT posts."""
+        if self.post_type == PostType.TEXT:
+            return self._caption
+        return None
+
+    @strawberry.field(
+        name="bibleMessage",
+        description="Caption/note attached to a BIBLE post. Null for TEXT and MEDIA posts.",
+    )
+    def bible_message(self) -> str | None:
+        """Returns the caption content only for BIBLE posts."""
+        if self.post_type == PostType.BIBLE:
+            return self._caption
+        return None
 
     @strawberry.field(description="Image data array mapping")
     def image(self) -> ImageData | None:
@@ -161,15 +193,10 @@ class FeedPost:
             )
         return None
 
-    @strawberry.field(description="Post caption/text — mobile expects 'text' field")
-    def text(self) -> str | None:
-        return self.caption
-
     @strawberry.field(description="Full category object natively")
     def category(self) -> CategoryType | None:
         if not self._category_id:
             return None
-        # discover_categories is defined lower, just call it directly
         queries = FeedQueries()
         categories = queries.discover_categories()
         for cat in categories:
@@ -267,7 +294,7 @@ def _dto_to_feed_post(dto) -> FeedPost:
     return FeedPost(
         id=dto.id,
         post_type=mapped_type,
-        caption=dto.caption,
+        _caption=dto.caption,
         _category_id=dto.category_id,
         author=FeedPostAuthor(
             id=dto.author.id,

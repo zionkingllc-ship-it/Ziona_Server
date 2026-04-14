@@ -40,10 +40,6 @@ MENTION_REGEX = re.compile(r"@(\w{3,30})")
 
 DEFAULT_BOOKMARK_FOLDERS = [
     "All",
-    "Churches",
-    "Prayer References",
-    "Bible Study",
-    "Events/Concerts",
 ]
 
 
@@ -164,7 +160,7 @@ class EngagementService:
                     code=ErrorCode.COMMENT_NOT_FOUND,
                 )
 
-            if str(parent_comment.post_id) != str(post_id):
+            if str(parent_comment.post_id).lower() != str(post_id).lower():
                 raise EngagementError(
                     message="Parent comment does not belong to this post.",
                     code=ErrorCode.COMMENT_POST_MISMATCH,
@@ -346,6 +342,70 @@ class EngagementService:
         )
 
     @staticmethod
+    def get_comment_replies(
+        comment_id: str,
+        viewer_id: str | None = None,
+        cursor: str | None = None,
+        limit: int = 20,
+    ) -> CommentsResponseDTO:
+        """Get paginated replies for a specific comment.
+
+        Args:
+            comment_id: UUID of the parent comment.
+            viewer_id: Optional viewer for personalised viewer_state.
+            cursor: Comment ID for cursor pagination.
+            limit: Page size (max 50).
+
+        Returns:
+            CommentsResponseDTO with paginated reply comments, oldest-first.
+        """
+        limit = min(limit, 50)
+
+        qs = (
+            Comment.objects.select_related("user")
+            .filter(
+                parent_comment_id=comment_id,
+                deleted_at__isnull=True,
+            )
+            .annotate(
+                likes_count=Count("comment_likes", distinct=True),
+                replies_count=Count(
+                    "replies",
+                    filter=Q(replies__deleted_at__isnull=True),
+                    distinct=True,
+                ),
+            )
+            .order_by("created_at")  # Oldest-first — chronological thread order
+        )
+
+        if cursor:
+            try:
+                cursor_comment = Comment.objects.filter(id=cursor).values("created_at").first()
+                if cursor_comment:
+                    qs = qs.filter(created_at__gt=cursor_comment["created_at"])
+            except Exception:  # noqa: S110
+                pass
+
+        total_count = qs.count()
+        replies = list(qs[: limit + 1])
+        has_more = len(replies) > limit
+        replies = replies[:limit]
+
+        reply_dtos = [
+            EngagementService._build_comment_dto(r, viewer_id=viewer_id, include_replies=False)
+            for r in replies
+        ]
+
+        next_cursor = str(replies[-1].id) if has_more and replies else None
+
+        return CommentsResponseDTO(
+            comments=reply_dtos,
+            next_cursor=next_cursor,
+            has_more=has_more,
+            total_count=total_count,
+        )
+
+    @staticmethod
     @rate_limit(max_requests=30, window_seconds=60)
     def save_post(
         user_id: str,
@@ -465,8 +525,17 @@ class EngagementService:
     def _build_comment_dto(
         comment: Comment,
         viewer_id: str | None = None,
+        include_replies: bool = True,
     ) -> CommentResponseDTO:
-        """Build a CommentResponseDTO from a Comment instance."""
+        """Build a CommentResponseDTO from a Comment instance.
+
+        Args:
+            comment: The Comment model instance.
+            viewer_id: Optional viewer for personalised viewer_state.
+            include_replies: If True, attaches first 3 replies as a preview.
+                             Must be False when recursively building reply DTOs
+                             to prevent infinite nesting.
+        """
         likes_count = getattr(comment, "likes_count", None)
         if likes_count is None:
             likes_count = comment.comment_likes.count()
@@ -488,6 +557,28 @@ class EngagementService:
                 is_owner=str(comment.user_id) == str(viewer_id),
             )
 
+        # Attach a small inline preview of the first 3 replies.
+        # Replies are built with include_replies=False to stop recursion at one level.
+        reply_previews = []
+        if include_replies and replies_count > 0:
+            preview_qs = (
+                Comment.objects.select_related("user")
+                .filter(parent_comment_id=comment.id, deleted_at__isnull=True)
+                .annotate(
+                    likes_count=Count("comment_likes", distinct=True),
+                    replies_count=Count(
+                        "replies",
+                        filter=Q(replies__deleted_at__isnull=True),
+                        distinct=True,
+                    ),
+                )
+                .order_by("created_at")[:3]
+            )
+            reply_previews = [
+                EngagementService._build_comment_dto(r, viewer_id=viewer_id, include_replies=False)
+                for r in preview_qs
+            ]
+
         return CommentResponseDTO(
             id=str(comment.id),
             post_id=str(comment.post_id),
@@ -503,4 +594,5 @@ class EngagementService:
             stats=stats,
             viewer_state=viewer_state,
             created_at=comment.created_at.isoformat(),
+            replies=reply_previews,
         )

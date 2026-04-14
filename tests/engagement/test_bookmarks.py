@@ -47,7 +47,7 @@ class TestBookmarkFolders:
     def test_default_folders_created(self, user_a):
         folders = BookmarkService.get_folders(str(user_a.id))
         folder_names = {f.name for f in folders}
-        expected = {"All", "Churches", "Prayer References", "Bible Study", "Events/Concerts"}
+        expected = {"All"}
         assert folder_names == expected
 
     def test_create_custom_folder(self, user_a):

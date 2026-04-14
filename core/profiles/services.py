@@ -6,6 +6,7 @@ and profile updates with validation.
 """
 
 import logging
+import re
 
 from django.db.models import Count, Q
 
@@ -21,10 +22,51 @@ logger = logging.getLogger("core.profiles")
 
 BIO_MAX_LENGTH = 150
 DISPLAY_NAME_MAX_LENGTH = 150
+AVATAR_URL_MAX_LENGTH = 500
+
+# Only allow public http/https URLs — rejects local device paths (file://, content://)
+_AVATAR_URL_PATTERN = re.compile(
+    r"^https?://"
+    r"(?:(?:[A-Z0-9](?:[A-Z0-9-]{0,61}[A-Z0-9])?\.)+[A-Z]{2,6}\.?|"  # domain
+    r"localhost|"  # localhost
+    r"\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})"  # IPv4
+    r"(?::\d+)?(?:/?|[/?]\S+)$",
+    re.IGNORECASE,
+)
 
 
 class ProfileService:
     """Service handling user profile operations."""
+
+    @staticmethod
+    def _validate_avatar_url(url: str) -> None:
+        """Validate that an avatar URL is a publicly accessible http/https URL.
+
+        Rejects local device paths (file://, content://) that a mobile client
+        might accidentally pass before completing the GCP upload step.
+
+        Args:
+            url: The avatar URL string to validate.
+
+        Raises:
+            ProfileError: If the URL is invalid or not a public http/https URL.
+        """
+        if len(url) > AVATAR_URL_MAX_LENGTH:
+            raise ProfileError(
+                message=f"Avatar URL must be {AVATAR_URL_MAX_LENGTH} characters or fewer.",
+                code=ErrorCode.VALIDATION_ERROR,
+            )
+
+        if not _AVATAR_URL_PATTERN.match(url):
+            # Give a developer-friendly message that explains the required flow
+            raise ProfileError(
+                message=(
+                    "Invalid avatar URL. A public https:// URL is required. "
+                    "Upload the image to cloud storage first (via uploadMedia), "
+                    "then pass the returned URL here."
+                ),
+                code=ErrorCode.VALIDATION_ERROR,
+            )
 
     @staticmethod
     def get_user_profile(
@@ -105,6 +147,7 @@ class ProfileService:
             bio=user.bio or "",
             avatar_url=user.avatar_url or None,
             location=user.location or "",
+            hide_like_count=getattr(user, "hide_like_count", False),
             stats=stats,
             is_following=is_following,
             is_own_profile=is_own_profile,
@@ -119,6 +162,7 @@ class ProfileService:
         full_name: str | None = None,
         avatar_url: str | None = None,
         location: str | None = None,
+        hide_like_count: bool | None = None,
     ) -> UserProfileDTO:
         """Update a user's profile.
 
@@ -156,22 +200,46 @@ class ProfileService:
             user.bio = bio
             update_fields.append("bio")
 
-        if full_name is not None:
+        if full_name is not None and full_name != user.full_name:
             if len(full_name) > DISPLAY_NAME_MAX_LENGTH:
                 raise ProfileError(
                     message=f"Display name must be {DISPLAY_NAME_MAX_LENGTH} characters or fewer.",
                     code=ErrorCode.VALIDATION_ERROR,
                 )
+
+            # 14-day limit check
+            if user.last_name_change:
+                from datetime import timedelta
+
+                from django.utils import timezone
+
+                days_since_change = (timezone.now() - user.last_name_change).days
+                if days_since_change < 14:
+                    next_change = user.last_name_change + timedelta(days=14)
+                    raise ProfileError(
+                        message=f"You're allowed one name change every 14 days. Next change on {next_change.strftime('%B %d, %Y')}.",
+                        code=ErrorCode.VALIDATION_ERROR,
+                    )
+
+            from django.utils import timezone
+
             user.full_name = full_name
+            user.last_name_change = timezone.now()
             update_fields.append("full_name")
+            update_fields.append("last_name_change")
 
         if avatar_url is not None:
+            ProfileService._validate_avatar_url(avatar_url)
             user.avatar_url = avatar_url
             update_fields.append("avatar_url")
 
         if location is not None:
             user.location = location
             update_fields.append("location")
+
+        if hide_like_count is not None:
+            user.hide_like_count = hide_like_count
+            update_fields.append("hide_like_count")
 
         if len(update_fields) > 1:
             user.save(update_fields=update_fields)

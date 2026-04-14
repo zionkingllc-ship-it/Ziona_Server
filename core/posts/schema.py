@@ -305,7 +305,9 @@ class PostScripture:
 @strawberry.type
 class Post:
     id: str
-    caption: str | None
+    # Internal backing field - not exposed directly.
+    # Use the computed caption / textMessage / text fields below.
+    _caption: strawberry.Private[str | None] = None
     post_type: PostType = strawberry.field(name="type")
     created_at: str
     share_url: str
@@ -314,9 +316,29 @@ class Post:
     _dto: strawberry.Private[object] = None
     _raw_type: strawberry.Private[str | None] = None  # Original DTO type for media rendering
 
-    @strawberry.field(description="Post caption/text — mobile expects 'text' field")
-    def text(self) -> str | None:
-        return self.caption
+    @strawberry.field(description="Caption for MEDIA posts. Null for TEXT and BIBLE posts.")
+    def caption(self) -> str | None:
+        if self.post_type == PostType.MEDIA:
+            return self._caption
+        return None
+
+    @strawberry.field(
+        name="textMessage",
+        description="Content body for TEXT posts only. Null for MEDIA and BIBLE posts.",
+    )
+    def text_message(self) -> str | None:
+        if self.post_type == PostType.TEXT:
+            return self._caption
+        return None
+
+    @strawberry.field(
+        name="bibleMessage",
+        description="Caption/note attached to a BIBLE post. Null for TEXT and MEDIA posts.",
+    )
+    def bible_message(self) -> str | None:
+        if self.post_type == PostType.BIBLE:
+            return self._caption
+        return None
 
     @strawberry.field(description="Post author info")
     def author(self) -> PostAuthor | None:
@@ -438,7 +460,7 @@ def _dto_to_post(dto) -> Post:
 
     return Post(
         id=dto.id,
-        caption=dto.caption,
+        _caption=dto.caption,
         post_type=mapped_type,
         created_at=dto.created_at,
         share_url=dto.share_url,

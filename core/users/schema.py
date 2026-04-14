@@ -55,6 +55,8 @@ class CurrentUserResponse:
     profile: Annotated["UserProfileType", strawberry.lazy("core.profiles.schema")]  # noqa: F821
     stats: Annotated["ProfileStatsType", strawberry.lazy("core.profiles.schema")]  # noqa: F821
 
+    lastNameChange: str | None = None
+    lastUsernameChange: str | None = None
     createdAt: str
 
 
@@ -73,6 +75,17 @@ class SetInterestsPayload:
 
     success: bool
     interests: list[str] = strawberry.field(default_factory=list)
+    message: str | None = None
+    error_code: str | None = None
+    error: ErrorType | None = strawberry.field(default=None)
+
+
+@strawberry.type
+class UpdateUsernamePayload:
+    """Response returned when a user updates their username."""
+
+    success: bool
+    username: str | None = None
     message: str | None = None
     error_code: str | None = None
     error: ErrorType | None = strawberry.field(default=None)
@@ -143,6 +156,8 @@ class UserQueries:
                 following_count=data["stats"]["followingCount"],
                 posts_count=data["stats"]["postsCount"],
             ),
+            lastNameChange=data.get("lastNameChange"),
+            lastUsernameChange=data.get("lastUsernameChange"),
             createdAt=data["createdAt"],
         )
 
@@ -150,6 +165,38 @@ class UserQueries:
 @strawberry.type
 class UserMutations:
     """User domain GraphQL mutations."""
+
+    @strawberry.mutation(
+        description="Update the authenticated user's username (rate-limited to once every 30 days)."
+    )
+    def update_username(
+        self,
+        info: strawberry.types.Info,
+        username: str,
+    ) -> UpdateUsernamePayload:
+        """Update a user's permanent username."""
+        from core.users.services import UserService, UserServiceError
+
+        user_id = _get_authenticated_user_id(info)
+        if not user_id:
+            return UpdateUsernamePayload(
+                success=False,
+                message="Authentication required",
+                error_code="UNAUTHORIZED",
+            )
+
+        try:
+            user = UserService.set_username(user_id=user_id, username=username)
+            return UpdateUsernamePayload(
+                success=True, username=user.username, message="Username updated successfully."
+            )
+        except UserServiceError as e:
+            return UpdateUsernamePayload(
+                success=False,
+                message=e.message,
+                error_code=e.code,
+                error=ErrorType(code=e.code, message=e.message),
+            )
 
     @strawberry.mutation(description="Check if a username is available")
     def check_username_availability(

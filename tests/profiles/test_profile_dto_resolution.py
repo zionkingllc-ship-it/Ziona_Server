@@ -67,4 +67,4 @@ def test_dto_to_profile_text_post_fix():
     assert len(gql.recent_posts) == 1
     assert gql.recent_posts[0].id == "post-456"
     assert gql.recent_posts[0].post_type.value == "TEXT"
-    assert gql.recent_posts[0].text() == "Sample text"
+    assert gql.recent_posts[0].text_message() == "Sample text"

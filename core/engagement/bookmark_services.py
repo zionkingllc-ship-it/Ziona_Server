@@ -16,10 +16,6 @@ VALID_MEDIA_TYPES = {"all", "image", "video", "text"}
 
 DEFAULT_BOOKMARK_FOLDERS = [
     "All",
-    "Churches",
-    "Prayer References",
-    "Bible Study",
-    "Events/Concerts",
 ]
 
 

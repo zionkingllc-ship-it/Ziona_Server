@@ -11,6 +11,7 @@ from core.engagement.models import Like, Save
 from core.follows.models import Follow
 from core.posts.models import Post, PostType
 from core.posts.selectors import PostSelector
+from core.scripture.constants import normalize_translation
 from core.shared.dtos import (
     AuthorDTO,
     ImageMediaDTO,
@@ -179,7 +180,10 @@ class PostService:
                     "scripture_chapter": verse_data["chapter"],
                     "scripture_verse_start": verse_data["verse_start"],
                     "scripture_verse_end": verse_data["verse_end"],
-                    "scripture_translation": verse_data["version"],
+                    # normalize_translation converts verbose CDN display names
+                    # (e.g. "King James Version") to the short code stored in
+                    # the DB column (VARCHAR 10), e.g. "KJV".
+                    "scripture_translation": normalize_translation(verse_data["version"]),
                 }
             except ScriptureError as e:
                 raise PostError(message=e.message, code=ErrorCode.VALIDATION_ERROR) from e
@@ -448,8 +452,10 @@ class PostService:
                 return val
             return fallback_qs.count() if fallback_qs is not None else 0
 
+        hide_likes = getattr(post.user, "hide_like_count", False)
+
         stats = StatsDTO(
-            likes_count=_get_count(post, "likes_count", post.likes),
+            likes_count=0 if hide_likes else _get_count(post, "likes_count", post.likes),
             comments_count=_get_count(
                 post, "comments_count", post.comments.filter(deleted_at__isnull=True)
             ),

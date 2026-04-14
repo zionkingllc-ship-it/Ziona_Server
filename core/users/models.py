@@ -80,6 +80,7 @@ class User(AbstractBaseUser, PermissionsMixin):
 
     is_email_verified = models.BooleanField(default=False)
     needs_username_selection = models.BooleanField(default=False)
+    hide_like_count = models.BooleanField(default=False)
 
     encrypted_dob = models.BinaryField(null=True, blank=True)
 

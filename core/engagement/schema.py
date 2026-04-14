@@ -1,12 +1,16 @@
 """GraphQL types, queries, and mutations for the engagement domain."""
 
 
+import logging
+
 import strawberry
 
 from core.feed.schema import FeedPost, _dto_to_feed_post
 from core.posts.schema import PostStats
 from core.shared.types import ErrorType
 from core.users.schema import _get_authenticated_user_id
+
+logger = logging.getLogger("core.engagement")
 
 
 @strawberry.type
@@ -60,7 +64,7 @@ class CommentViewerState:
 
 @strawberry.type
 class CommentType:
-    """A comment on a post."""
+    """A comment on a post, with an inline preview of the first 3 replies."""
 
     id: str
     post_id: str
@@ -70,6 +74,9 @@ class CommentType:
     stats: CommentStats
     viewer_state: CommentViewerState | None = None
     created_at: str
+    # Inline reply preview: first 3 replies.
+    # Use commentReplies(commentId: ...) query to load more.
+    replies: list["CommentType"] = strawberry.field(default_factory=list)
 
 
 @strawberry.type
@@ -192,6 +199,8 @@ def _dto_to_comment(dto) -> CommentType:
             else None
         ),
         created_at=dto.created_at,
+        # Recursively convert inline reply previews (at most 1 level deep)
+        replies=[_dto_to_comment(r) for r in getattr(dto, "replies", [])],
     )
 
 
@@ -305,8 +314,9 @@ class EngagementMutations:
         if not user_id:
             return CommentPayload(
                 success=False,
-                message="Authentication required",
+                message="Authentication required.",
                 error_code="UNAUTHORIZED",
+                error=ErrorType(code="UNAUTHORIZED", message="Authentication required."),
             )
 
         try:
@@ -318,7 +328,20 @@ class EngagementMutations:
             )
             return CommentPayload(success=True, comment=_dto_to_comment(result))
         except EngagementError as e:
-            return CommentPayload(success=False, message=e.message, error_code=e.code)
+            return CommentPayload(
+                success=False,
+                message=e.message,
+                error_code=e.code,
+                error=ErrorType(code=e.code, message=e.message),
+            )
+        except Exception as e:
+            logger.exception("Unexpected error creating comment")
+            return CommentPayload(
+                success=False,
+                message=str(e),
+                error_code="INTERNAL_ERROR",
+                error=ErrorType(code="INTERNAL_ERROR", message=str(e)),
+            )
 
     @strawberry.mutation(description="Delete a comment")
     def delete_comment(self, info: strawberry.types.Info, comment_id: str) -> CommentPayload:
@@ -617,18 +640,18 @@ class EngagementQueries:
         limit: int = 20,
     ) -> CommentsResponse:
         """
-        Get chronologically paginated tree of comments mapping to a distinct post natively.
+        Get paginated top-level comments for a post, each with an inline
+        preview of the first 3 replies.
 
-        Evaluates dynamic `viewer_state` specifically checking owner overrides and like
-        statuses natively per comment.
+        Use ``commentReplies(commentId: ...)`` to load additional replies
+        beyond the preview.
 
-        **Authentication:** Optional (will yield empty viewer_state recursively if unauthed)
+        **Authentication:** Optional
         **Parameters:**
-        - post_id (String, required) - Extracted Token
-        - cursor (String, optional) - Continuation flag
-        - limit (Int, optional) - Chunk bounds
-        **Returns:** CommentsResponse directly mapped
-        **Errors:** Returns empty lists natively gracefully.
+        - post_id (String, required) - Post UUID
+        - cursor (String, optional) - Continuation token
+        - limit (Int, optional) - Page size (default 20, max 50)
+        **Returns:** CommentsResponse with paginated top-level comments
         """
         from core.engagement.services import EngagementService
 
@@ -636,6 +659,47 @@ class EngagementQueries:
 
         result = EngagementService.get_post_comments(
             post_id=post_id,
+            viewer_id=user_id,
+            cursor=cursor,
+            limit=limit,
+        )
+
+        return CommentsResponse(
+            comments=[_dto_to_comment(c) for c in result.comments],
+            next_cursor=result.next_cursor,
+            has_more=result.has_more,
+            total_count=result.total_count,
+        )
+
+    @strawberry.field(
+        description="Get paginated replies for a specific comment (beyond the inline 3-reply preview)."
+    )
+    def comment_replies(
+        self,
+        info: strawberry.types.Info,
+        comment_id: str,
+        cursor: str | None = None,
+        limit: int = 20,
+    ) -> CommentsResponse:
+        """
+        Fetch the full paginated reply thread for a parent comment.
+
+        The ``postComments`` query already returns the first 3 replies inline.
+        Call this query when the user taps "View N more replies".
+
+        **Authentication:** Optional
+        **Parameters:**
+        - comment_id (String, required) - Parent comment UUID
+        - cursor (String, optional) - Reply ID continuation token
+        - limit (Int, optional) - Page size (default 20, max 50)
+        **Returns:** CommentsResponse with reply comments (oldest-first)
+        """
+        from core.engagement.services import EngagementService
+
+        user_id = _get_authenticated_user_id(info)
+
+        result = EngagementService.get_comment_replies(
+            comment_id=comment_id,
             viewer_id=user_id,
             cursor=cursor,
             limit=limit,

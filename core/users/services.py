@@ -61,8 +61,23 @@ class UserService:
             user = User.objects.get(id=user_id)
         except User.DoesNotExist:
             raise UserServiceError("User not found", code="USER_NOT_FOUND") from None
+
         if user.username == username:
             return user
+
+        # 30-day limit check
+        if user.last_username_change:
+            from datetime import timedelta
+
+            from django.utils import timezone
+
+            days_since_change = (timezone.now() - user.last_username_change).days
+            if days_since_change < 30:
+                next_change = user.last_username_change + timedelta(days=30)
+                raise UserServiceError(
+                    f"You're allowed one username change every 30 days. Next change on {next_change.strftime('%B %d, %Y')}.",
+                    code="RATE_LIMIT_EXCEEDED",
+                )
 
         existing = User.all_objects.filter(username=username).exclude(id=user_id)
         if existing.exists():
@@ -71,8 +86,11 @@ class UserService:
                 code="USERNAME_TAKEN",
             )
 
+        from django.utils import timezone
+
         user.username = username
-        user.save(update_fields=["username", "updated_at"])
+        user.last_username_change = timezone.now()
+        user.save(update_fields=["username", "last_username_change", "updated_at"])
 
         log_security_event(
             "user.username.set",

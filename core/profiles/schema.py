@@ -53,6 +53,7 @@ class UserProfileType:
     bio: str
     avatar_url: str | None = None
     location: str
+    hide_like_count: bool = False
     stats: ProfileStatsType
     viewer_state: ProfileViewerState | None = None
     recent_posts: list[FeedPost]
@@ -100,6 +101,7 @@ def _dto_to_profile(dto) -> UserProfileType:
         bio=dto.bio,
         avatar_url=dto.avatar_url,
         location=dto.location,
+        hide_like_count=getattr(dto, "hide_like_count", False),
         stats=ProfileStatsType(
             _followers=dto.stats.followers_count,
             _following=dto.stats.following_count,
@@ -244,6 +246,7 @@ class ProfileMutations:
         full_name: str | None = None,
         avatar_url: str | None = None,
         location: str | None = None,
+        hide_like_count: bool | None = None,
     ) -> ProfilePayload:
         """
         Modify existing user's profile content fields selectively natively.
@@ -278,6 +281,7 @@ class ProfileMutations:
                 full_name=full_name,
                 avatar_url=avatar_url,
                 location=location,
+                hide_like_count=hide_like_count,
             )
             return ProfilePayload(
                 success=True,

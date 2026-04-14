@@ -179,6 +179,13 @@ class CommentResponseDTO(CamelCaseModel):
     stats: CommentStatsDTO
     viewer_state: CommentViewerStateDTO | None = None
     created_at: str
+    # Inline reply preview (first 3 replies only).
+    # Use the `commentReplies` query for full paginated replies.
+    replies: list[CommentResponseDTO] = []
+
+
+# Required to resolve the self-referential `replies` annotation.
+CommentResponseDTO.model_rebuild()
 
 
 class CommentsResponseDTO(CamelCaseModel):
@@ -313,6 +320,7 @@ class UserProfileDTO(CamelCaseModel):
     bio: str = ""
     avatar_url: str | None = None
     location: str = ""
+    hide_like_count: bool = False
     stats: UserProfileStatsDTO
     is_following: bool = False
     is_own_profile: bool = False

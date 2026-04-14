@@ -93,6 +93,10 @@ class AuthService:
                 "followersCount": profile_dto.stats.followers_count,
                 "followingCount": profile_dto.stats.following_count,
             },
+            "lastNameChange": user.last_name_change.isoformat() if user.last_name_change else None,
+            "lastUsernameChange": user.last_username_change.isoformat()
+            if user.last_username_change
+            else None,
             "createdAt": user.created_at.isoformat(),
         }
 
