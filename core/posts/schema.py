@@ -1,5 +1,5 @@
 import logging
-from typing import Optional
+from typing import Annotated, Optional
 
 import strawberry
 
@@ -54,7 +54,33 @@ class PostMutations:
         self,
         info: strawberry.types.Info,
         post_type: PostType,
-        caption: str | None = None,
+        # -----------------------------------------------------------------
+        # Content parameters — use the field that matches your post type:
+        #   TEXT  posts → textMessage  (required)
+        #   MEDIA posts → caption      (optional description under the media)
+        #   BIBLE posts → bibleMessage (optional personal note on the verse)
+        # Sending the wrong field for a post type will raise a validation error.
+        # -----------------------------------------------------------------
+        text_message: Annotated[
+            str | None,
+            strawberry.argument(
+                name="textMessage",
+                description="Content body for TEXT posts. Required when postType is TEXT.",
+            ),
+        ] = None,
+        caption: Annotated[
+            str | None,
+            strawberry.argument(
+                description="Optional description for MEDIA posts. Ignored for TEXT and BIBLE posts.",
+            ),
+        ] = None,
+        bible_message: Annotated[
+            str | None,
+            strawberry.argument(
+                name="bibleMessage",
+                description="Optional personal note on a BIBLE post. Ignored for TEXT and MEDIA posts.",
+            ),
+        ] = None,
         category: str | None = None,
         media_ids: list[str] | None = None,
         media_urls: list[str] | None = None,
@@ -72,13 +98,18 @@ class PostMutations:
         """
         Create a new post.
 
-        **Steps:**
+        **Content Field Contract:**
+        - TEXT  posts: send `textMessage` (required — at least 1 char)
+        - MEDIA posts: send `caption`     (optional description)
+        - BIBLE posts: send `bibleMessage`(optional personal note)
+
+        **Steps (MEDIA posts):**
         1. Upload media first using uploadMedia mutation
         2. Get mediaId from upload response
         3. Call createPost with mediaIds
 
         **Validation:**
-        - TEXT posts: Only caption or scripture required
+        - TEXT  posts: textMessage required
         - MEDIA posts: mediaIds and mediaType required
         - BIBLE posts: scriptureReference required
         """
@@ -92,6 +123,75 @@ class PostMutations:
                 success=False,
                 error=ErrorType(code="UNAUTHORIZED", message="Authentication required"),
             )
+
+        # ── Route content to the correct internal field based on post type ──
+        if post_type == PostType.TEXT:
+            # textMessage is required for TEXT posts
+            if not text_message or not text_message.strip():
+                return CreatePostPayload(
+                    success=False,
+                    error=ErrorType(
+                        code="TEXT_MESSAGE_REQUIRED",
+                        message="textMessage is required for TEXT posts and cannot be empty.",
+                        field="textMessage",
+                    ),
+                )
+            if caption is not None:
+                return CreatePostPayload(
+                    success=False,
+                    error=ErrorType(
+                        code="CAPTION_FIELD_WRONG_TYPE",
+                        message="Use textMessage (not caption) for TEXT posts.",
+                        field="caption",
+                    ),
+                )
+            resolved_caption = text_message
+
+        elif post_type == PostType.MEDIA:
+            # caption is optional for MEDIA posts; textMessage/bibleMessage are not applicable
+            if text_message is not None:
+                return CreatePostPayload(
+                    success=False,
+                    error=ErrorType(
+                        code="CAPTION_FIELD_WRONG_TYPE",
+                        message="Use caption (not textMessage) for MEDIA posts.",
+                        field="textMessage",
+                    ),
+                )
+            if bible_message is not None:
+                return CreatePostPayload(
+                    success=False,
+                    error=ErrorType(
+                        code="CAPTION_FIELD_WRONG_TYPE",
+                        message="Use caption (not bibleMessage) for MEDIA posts.",
+                        field="bibleMessage",
+                    ),
+                )
+            resolved_caption = caption  # optional
+
+        elif post_type == PostType.BIBLE:
+            # bibleMessage is the optional personal note; caption/textMessage are not applicable
+            if caption is not None:
+                return CreatePostPayload(
+                    success=False,
+                    error=ErrorType(
+                        code="CAPTION_FIELD_WRONG_TYPE",
+                        message="Use bibleMessage (not caption) for BIBLE posts.",
+                        field="caption",
+                    ),
+                )
+            if text_message is not None:
+                return CreatePostPayload(
+                    success=False,
+                    error=ErrorType(
+                        code="CAPTION_FIELD_WRONG_TYPE",
+                        message="Use bibleMessage (not textMessage) for BIBLE posts.",
+                        field="textMessage",
+                    ),
+                )
+            resolved_caption = bible_message  # optional
+        else:
+            resolved_caption = caption
 
         # Validate post type specific requirements
         if post_type == PostType.TEXT and media_ids:
@@ -140,7 +240,7 @@ class PostMutations:
             post_dto = PostService.create_post(
                 user_id=user_id,
                 post_type=post_type.value,
-                caption=caption,
+                caption=resolved_caption,
                 category_id=category,
                 media_ids=media_ids,
                 media_urls=media_urls,

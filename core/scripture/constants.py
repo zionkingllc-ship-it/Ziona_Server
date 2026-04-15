@@ -21,10 +21,13 @@ PREMIUM_BIBLE_VERSIONS = [
 
 # JSDelivr API returns long names, map to abbreviations for mobile dropdowns
 TRANSLATION_MAPPING = {
-    # King James versions
+    # King James versions — CDN may return any of these variants
     "King James Version [eng] without Strong's numbers, 1769 standardized text": "KJV",
     "King James Version": "KJV",
-    "Thai KJV": "Thai KJV",
+    "KJV Translation": "KJV",  # CDN display name observed in production
+    "KJV translation": "KJV",
+    "kjv translation": "KJV",
+    "Thai KJV": "KJV",
     # Revised versions
     "Revised Version 1885": "RV1885",
     "Revised Version": "RV1885",
@@ -49,21 +52,40 @@ def normalize_translation(raw_translation: str) -> str:
     """
     Convert JSDelivr's verbose translation names to mobile-friendly abbreviations.
 
+    The stored DB column (scripture_translation) is max_length=10, so every
+    translation name MUST be normalised to a short code before saving.
+
     Args:
         raw_translation: Long translation name from JSDelivr API
 
     Returns:
-        Abbreviated translation name (e.g., "KJV")
+        Abbreviated translation name (e.g., "KJV"), guaranteed <= 10 chars.
     """
     if not raw_translation:
         return "KJV"
 
-    # Return mapped abbreviation, or original if not in mapping
-    # Also handle already short codes like 'kjv' -> 'KJV'
-    if raw_translation.upper() in ["KJV", "ASV", "RV", "WEB", "RV1885", "NIV", "ESV"]:
-        return raw_translation.upper()
+    # Handle already-short canonical codes (case-insensitive)
+    upper = raw_translation.strip().upper()
+    if upper in ["KJV", "ASV", "RV", "WEB", "RV1885", "NIV", "ESV", "NLT", "NASB"]:
+        return upper
 
-    return TRANSLATION_MAPPING.get(raw_translation, raw_translation)
+    # Check the explicit mapping table first (exact match)
+    mapped = TRANSLATION_MAPPING.get(raw_translation)
+    if mapped:
+        return mapped
+
+    # Broad KJV catch-all: any string containing 'KJV' that slipped through
+    # (e.g. "KJV Translation", "KJV 1769") — never store these raw.
+    if "KJV" in upper:
+        return "KJV"
+
+    # Last resort: truncate to 10 chars to avoid DB overflow, but log it
+    import logging as _logging
+
+    _logging.getLogger("core.scripture").warning(
+        "normalize_translation: unknown version %r — storing truncated", raw_translation
+    )
+    return raw_translation[:10]
 
 
 def get_translation_id(abbreviation: str) -> str:
