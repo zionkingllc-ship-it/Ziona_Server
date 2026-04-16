@@ -38,18 +38,27 @@ class BookmarkService:
 
         folders = BookmarkFolder.objects.filter(user_id=user_id).order_by("created_at")
 
-        folder_dtos = []
-        for folder in folders:
-            saved_count = Save.objects.filter(user_id=user_id, folder=folder).count()
-            folder_dtos.append(
-                BookmarkFolderDTO(
-                    id=str(folder.id),
-                    name=folder.name,
-                    saved_count=saved_count,
-                )
-            )
+        from django.db.models import Count
 
-        return folder_dtos
+        # Single aggregated query: folder_id → count mapping.
+        # Replaces the previous N+1 pattern (one Save.count() query per folder).
+        saves_by_folder: dict = dict(
+            Save.objects.filter(user_id=user_id)
+            .values("folder_id")
+            .annotate(count=Count("id"))
+            .values_list("folder_id", "count")
+        )
+
+        return [
+            BookmarkFolderDTO(
+                id=str(folder.id),
+                name=folder.name,
+                saved_count=saves_by_folder.get(folder.id, 0),
+                # Populate the timestamp that was previously always left as "".
+                created_at=folder.created_at.isoformat(),
+            )
+            for folder in folders
+        ]
 
     @staticmethod
     def create_folder(
@@ -94,6 +103,7 @@ class BookmarkService:
             id=str(folder.id),
             name=folder.name,
             saved_count=0,
+            created_at=folder.created_at.isoformat(),
         )
 
     @staticmethod
@@ -181,9 +191,13 @@ class BookmarkService:
 
         qs = (
             Save.objects.select_related("post", "post__user")
-            .prefetch_related("post__post_media")
+            # Use media_files (M2M) — the relation that create_post writes to.
+            # post_media (FK reverse) is the legacy relation and is not populated
+            # by the current post creation flow.
+            .prefetch_related("post__media_files")
             .filter(user_id=user_id, post__deleted_at__isnull=True)
-            .order_by("-created_at")
+            # -id tiebreaker on the Save record for deterministic pagination.
+            .order_by("-created_at", "-id")
         )
 
         if folder_id:
@@ -200,9 +214,19 @@ class BookmarkService:
 
         if cursor:
             try:
-                cursor_save = Save.objects.filter(id=cursor).values("created_at").first()
+                # Compound (created_at, id) keyset cursor — same pattern as
+                # FeedService._apply_cursor but operating on the Save model.
+                from django.db.models import Q
+
+                cursor_save = Save.objects.filter(id=cursor).values("created_at", "id").first()
                 if cursor_save:
-                    qs = qs.filter(created_at__lt=cursor_save["created_at"])
+                    qs = qs.filter(
+                        Q(created_at__lt=cursor_save["created_at"])
+                        | Q(
+                            created_at=cursor_save["created_at"],
+                            id__lt=cursor_save["id"],
+                        )
+                    )
             except Exception:
                 logger.debug("Invalid pagination cursor: %s", cursor)
 
@@ -213,7 +237,8 @@ class BookmarkService:
         post_dtos = [
             PostService._build_post_dto(
                 post=s.post,
-                media_items=list(s.post.post_media.all()),
+                # Pass media_files (M2M), not the legacy post_media relation.
+                media_items=list(s.post.media_files.all()),
                 viewer_id=user_id,
             )
             for s in saves

@@ -224,7 +224,15 @@ class PostService:
         if resolved_media_files:
             post.media_files.set(resolved_media_files)
 
-        # 5. Invalidate Cache
+        # 5. Invalidate user stats cache so `me.stats.postsCount` reflects immediately.
+        try:
+            from django.core.cache import cache
+
+            cache.delete(f"user_me_data_{user_id}")
+        except Exception:
+            logger.warning("Failed to clear user_me_data cache after create_post")
+
+        # 6. Invalidate followers' feed caches asynchronously.
         try:
             from core.feed.tasks import invalidate_followers_feed_cache
 
@@ -318,6 +326,15 @@ class PostService:
 
         post.save(update_fields=["caption", "updated_at"])
 
+        # Invalidate me-data cache so recent_posts caption is always fresh.
+        # Matches the same pattern already used in create_post() and delete_post().
+        try:
+            from django.core.cache import cache
+
+            cache.delete(f"user_me_data_{user_id}")
+        except Exception:
+            logger.warning("Failed to clear user_me_data cache after update_post")
+
         logger.info(
             "post_updated",
             extra={"post_id": str(post.id), "user_id": user_id},
@@ -359,6 +376,14 @@ class PostService:
 
         post.soft_delete()
 
+        # Invalidate user stats cache so `me.stats.postsCount` reflects immediately.
+        try:
+            from django.core.cache import cache
+
+            cache.delete(f"user_me_data_{user_id}")
+        except Exception:
+            logger.warning("Failed to clear user_me_data cache after delete_post")
+
         logger.info(
             "post_deleted",
             extra={"post_id": str(post.id), "user_id": user_id},
@@ -375,6 +400,7 @@ class PostService:
         liked_post_ids: set | None = None,
         saved_post_ids: set | None = None,
         following_user_ids: set | None = None,
+        followed_by_user_ids: set | None = None,
     ) -> PostResponseDTO:
         """Build a PostResponseDTO from a Post model instance.
 
@@ -395,8 +421,14 @@ class PostService:
 
         if (post.post_type in [PostType.IMAGE, "image", "image_post"]) and media_items:
             media_items_dto = []
-            # Sort if they have order attr, otherwise use as is
-            sorted_items = sorted(media_items or [], key=lambda x: getattr(x, "order", 0))
+            # Sort if they have order attr (legacy), otherwise by created_at for deterministic upload order
+            sorted_items = sorted(
+                media_items or [],
+                key=lambda x: (
+                    getattr(x, "order", 999),
+                    getattr(x, "created_at", getattr(x, "id", "")),
+                ),
+            )
             for m in sorted_items:
                 m_id = str(getattr(m, "id", ""))
                 m_url = getattr(m, "url", getattr(m, "media_url", ""))
@@ -490,10 +522,22 @@ class PostService:
                     else False
                 )
 
+            if followed_by_user_ids is not None:
+                is_followed_by = (
+                    user_id_str in followed_by_user_ids if user_id_str != viewer_id else False
+                )
+            else:
+                is_followed_by = (
+                    Follow.objects.filter(follower_id=post.user_id, following_id=viewer_id).exists()
+                    if user_id_str != viewer_id
+                    else False
+                )
+
             viewer_state = ViewerStateDTO(
                 liked=is_liked,
                 saved=is_saved,
                 following_author=is_following,
+                followed_by_author=is_followed_by,
                 is_owner=is_owner if is_owner is not None else (user_id_str == viewer_id),
             )
 

@@ -11,10 +11,12 @@ import re
 from django.db import IntegrityError
 from django.db.models import Count, Q
 
+from core.engagement.cache import EngagementCache
 from core.engagement.models import (
     BookmarkFolder,
     Comment,
     CommentLike,
+    HiddenPost,
     Like,
     Save,
 )
@@ -312,18 +314,31 @@ class EngagementService:
                     distinct=True,
                 ),
             )
-            .order_by("-created_at")
+            # -id tiebreaker ensures deterministic keyset pagination when two
+            # comments share an identical created_at timestamp.
+            .order_by("-created_at", "-id")
         )
+
+        # Compute total_count BEFORE applying the cursor filter so we always
+        # return the true post comment count, not just the remaining page count.
+        total_count = qs.count()
 
         if cursor:
             try:
-                cursor_comment = Comment.objects.filter(id=cursor).values("created_at").first()
+                cursor_comment = (
+                    Comment.objects.filter(id=cursor).values("created_at", "id").first()
+                )
                 if cursor_comment:
-                    qs = qs.filter(created_at__lt=cursor_comment["created_at"])
+                    qs = qs.filter(
+                        Q(created_at__lt=cursor_comment["created_at"])
+                        | Q(
+                            created_at=cursor_comment["created_at"],
+                            id__lt=cursor_comment["id"],
+                        )
+                    )
             except Exception:  # noqa: S110
                 pass
 
-        total_count = qs.count()
         comments = list(qs[: limit + 1])
         has_more = len(comments) > limit
         comments = comments[:limit]
@@ -375,18 +390,28 @@ class EngagementService:
                     distinct=True,
                 ),
             )
-            .order_by("created_at")  # Oldest-first — chronological thread order
+            # Oldest-first chronological order with id tiebreaker for
+            # deterministic ascending keyset pagination.
+            .order_by("created_at", "id")
         )
+
+        total_count = qs.count()
 
         if cursor:
             try:
-                cursor_comment = Comment.objects.filter(id=cursor).values("created_at").first()
+                cursor_comment = (
+                    Comment.objects.filter(id=cursor).values("created_at", "id").first()
+                )
                 if cursor_comment:
-                    qs = qs.filter(created_at__gt=cursor_comment["created_at"])
+                    qs = qs.filter(
+                        Q(created_at__gt=cursor_comment["created_at"])
+                        | Q(
+                            created_at=cursor_comment["created_at"],
+                            id__gt=cursor_comment["id"],
+                        )
+                    )
             except Exception:  # noqa: S110
                 pass
-
-        total_count = qs.count()
         replies = list(qs[: limit + 1])
         has_more = len(replies) > limit
         replies = replies[:limit]
@@ -596,3 +621,86 @@ class EngagementService:
             created_at=comment.created_at.isoformat(),
             replies=reply_previews,
         )
+
+    @staticmethod
+    def hide_post(user_id: str, post_id: str) -> bool:
+        """Hide a post from the current user's feed.
+
+        Enforces a 1,000 post limit per user, using a sliding window
+        to automatically delete the oldest constraint.
+        """
+        post = Post.objects.filter(id=post_id, deleted_at__isnull=True).first()
+        if not post:
+            raise EngagementError("Post not found.", ErrorCode.POST_NOT_FOUND)
+
+        count = HiddenPost.objects.filter(user_id=user_id).count()
+        if count >= 1000:
+            oldest = HiddenPost.objects.filter(user_id=user_id).order_by("created_at").first()
+            if oldest:
+                EngagementCache.unmark_post_hidden(user_id, str(oldest.post_id))
+                oldest.delete()
+
+        try:
+            HiddenPost.objects.create(user_id=user_id, post_id=post_id)
+            EngagementCache.mark_post_hidden(user_id, post_id)
+            return True
+        except IntegrityError:
+            # Already hidden
+            return True
+
+    @staticmethod
+    def unhide_post(user_id: str, post_id: str) -> bool:
+        """Unhide a previously hidden post."""
+        deleted, _ = HiddenPost.objects.filter(user_id=user_id, post_id=post_id).delete()
+        if deleted > 0:
+            EngagementCache.unmark_post_hidden(user_id, post_id)
+            return True
+        return False
+
+    @staticmethod
+    def get_hidden_posts(
+        user_id: str, cursor: str | None = None, limit: int = 20
+    ) -> tuple[list[Post], str | None, bool]:
+        """Get paginated list of hidden posts for a user.
+
+        Returns:
+            Tuple of (posts, next_cursor, has_more)
+        """
+        from django.db.models import Q
+
+        limit = min(limit, 50)
+
+        # Order by HiddenPost.created_at (when it was hidden) instead of Post.created_at
+        qs = (
+            HiddenPost.objects.filter(user_id=user_id, post__deleted_at__isnull=True)
+            .select_related("post")
+            .order_by("-created_at", "-id")
+        )
+
+        if cursor:
+            try:
+                # The cursor value passed from the frontend is the Post ID
+                cursor_hide = (
+                    HiddenPost.objects.filter(user_id=user_id, post_id=cursor)
+                    .values("created_at", "id")
+                    .first()
+                )
+                if cursor_hide:
+                    qs = qs.filter(
+                        Q(created_at__lt=cursor_hide["created_at"])
+                        | Q(
+                            created_at=cursor_hide["created_at"],
+                            id__lt=cursor_hide["id"],
+                        )
+                    )
+            except Exception:  # noqa: BLE001
+                logger.debug("Failed to apply hidden post cursor: invalid cursor_id")
+
+        hides = list(qs[: limit + 1])
+        has_more = len(hides) > limit
+        hides = hides[:limit]
+
+        posts = [h.post for h in hides]
+        next_cursor = str(hides[-1].post_id) if has_more and hides else None
+
+        return posts, next_cursor, has_more

@@ -525,25 +525,12 @@ class Post:
 
     @strawberry.field(description="Full category object")
     def category(self) -> CategoryType | None:
-        from core.feed.schema import FeedQueries
+        from core.feed.schema import _get_category_by_id
 
         if not self._category_id:
             return None
 
-        categories = FeedQueries().discover_categories()
-        for cat in categories:
-            if cat.id == self._category_id:
-                return CategoryType(
-                    id=cat.id,
-                    label=cat.label,
-                    slug=cat.slug,
-                    icon=cat.icon,
-                    bg_color=cat.bg_color,
-                    bd_color=cat.bd_color,
-                    text_post_bg=cat.text_post_bg,
-                    order=cat.order,
-                )
-        return None
+        return _get_category_by_id(self._category_id)
 
 
 def _dto_to_post(dto) -> Post:

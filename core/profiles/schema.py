@@ -39,7 +39,8 @@ class ProfileStatsType:
 class ProfileViewerState:
     """Viewer's relationship to a profile."""
 
-    following_author: bool = False
+    is_following: bool = False
+    is_followed_by: bool = False
     is_owner: bool = False
 
 
@@ -108,7 +109,8 @@ def _dto_to_profile(dto) -> UserProfileType:
             _posts=dto.stats.posts_count,
         ),
         viewer_state=ProfileViewerState(
-            following_author=dto.is_following,
+            is_following=dto.is_following,
+            is_followed_by=getattr(dto, "is_followed_by", False),
             is_owner=dto.is_own_profile,
         ),
         recent_posts=[_dto_to_feed_post(p) for p in dto.recent_posts],

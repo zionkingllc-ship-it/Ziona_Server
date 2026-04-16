@@ -92,6 +92,15 @@ class UserService:
         user.last_username_change = timezone.now()
         user.save(update_fields=["username", "last_username_change", "updated_at"])
 
+        # Invalidate me-data cache so the new username is immediately visible
+        # in the authenticated user's me query instead of being stale for 5 min.
+        try:
+            from django.core.cache import cache
+
+            cache.delete(f"user_me_data_{user_id}")
+        except Exception:
+            logger.warning("Failed to clear user_me_data cache after set_username")
+
         log_security_event(
             "user.username.set",
             user_id=str(user.id),

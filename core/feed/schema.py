@@ -15,6 +15,35 @@ from core.users.schema import _get_authenticated_user_id
 logger = logging.getLogger("core.feed")
 
 
+def _get_category_by_id(category_id: str) -> "CategoryType | None":
+    """Fetch a single category from the shared cache (max 1 DB call per process per 5 min)."""
+    from django.core.cache import cache
+
+    from core.categories.models import Category
+
+    cache_key = "all_categories_v1"
+    categories_map: dict | None = cache.get(cache_key)
+
+    if categories_map is None:
+        qs = Category.objects.all().order_by("order")
+        categories_map = {cat.id: cat for cat in qs}
+        cache.set(cache_key, categories_map, 300)
+
+    cat = categories_map.get(category_id)
+    if not cat:
+        return None
+    return CategoryType(
+        id=cat.id,
+        label=cat.label,
+        slug=cat.slug,
+        icon=cat.icon,
+        bg_color=cat.bg_color,
+        bd_color=cat.bd_color,
+        text_post_bg=cat.text_post_bg,
+        order=cat.order,
+    )
+
+
 @strawberry.type
 class CategoryType:
     """
@@ -86,6 +115,7 @@ class FeedViewerState:
     liked: bool = False
     saved: bool = False
     following_author: bool = False
+    followed_by_author: bool = False
     is_owner: bool = False
 
 
@@ -197,22 +227,7 @@ class FeedPost:
     def category(self) -> CategoryType | None:
         if not self._category_id:
             return None
-        queries = FeedQueries()
-        categories = queries.discover_categories()
-        for cat in categories:
-            if cat.id == self._category_id:
-                return CategoryType(
-                    id=cat.id,
-                    label=cat.label,
-                    slug=cat.slug,
-                    icon=cat.icon,
-                    bg_color=cat.bg_color,
-                    bd_color=cat.bd_color,
-                    text_post_bg=cat.text_post_bg,
-                    order=cat.order,
-                )
-        logger.warning("Category not found category_id=%s", self._category_id)
-        return None
+        return _get_category_by_id(self._category_id)
 
 
 @strawberry.type
@@ -312,6 +327,7 @@ def _dto_to_feed_post(dto) -> FeedPost:
                 liked=dto.viewer_state.liked,
                 saved=dto.viewer_state.saved,
                 following_author=dto.viewer_state.following_author,
+                followed_by_author=getattr(dto.viewer_state, "followed_by_author", False),
                 is_owner=dto.viewer_state.is_owner,
             )
             if dto.viewer_state

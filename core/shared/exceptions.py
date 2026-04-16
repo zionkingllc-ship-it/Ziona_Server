@@ -115,6 +115,23 @@ class ZionaError(Exception):
         super().__init__(message)
 
 
+class AuthenticationError(ZionaError):
+    """Raised when authentication operations fail."""
+
+    def __init__(
+        self,
+        message: str,
+        code: str = "AUTH_ERROR",
+        details: dict | None = None,
+    ):
+        super().__init__(message, code, extensions=details)
+
+    @property
+    def details(self) -> dict:
+        """Alias for extensions to support legacy auth code."""
+        return self.extensions
+
+
 class PostError(ZionaError):
     """Raised when post operations fail."""
 

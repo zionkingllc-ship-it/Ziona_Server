@@ -88,6 +88,19 @@ class MediaFile(TimestampedModel):
             f"https://storage.googleapis.com/{settings.GCP_STORAGE_BUCKET}/{self.storage_path}"
         )
 
+    @property
+    def thumbnail_url(self) -> str | None:
+        """Return public GCS URL for the thumbnail, or None if not set."""
+        if not self.thumbnail_path:
+            return None
+        # Direct URL stored (e.g. from media_urls upload path)
+        if self.thumbnail_path.startswith("http"):
+            return normalize_url(self.thumbnail_path)
+        # Relative GCS storage path
+        return normalize_url(
+            f"https://storage.googleapis.com/{settings.GCP_STORAGE_BUCKET}/{self.thumbnail_path}"
+        )
+
     def __str__(self) -> str:
         """Return string representation."""
         return f"{self.file_name} ({self.status})"

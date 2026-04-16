@@ -124,14 +124,23 @@ class FollowService:
         qs = (
             Follow.objects.select_related("follower")
             .filter(following_id=user_id)
-            .order_by("-created_at")
+            # -id tiebreaker for deterministic compound keyset pagination.
+            .order_by("-created_at", "-id")
         )
 
         if cursor:
             try:
-                cursor_follow = Follow.objects.filter(id=cursor).values("created_at").first()
+                cursor_follow = Follow.objects.filter(id=cursor).values("created_at", "id").first()
                 if cursor_follow:
-                    qs = qs.filter(created_at__lt=cursor_follow["created_at"])
+                    from django.db.models import Q
+
+                    qs = qs.filter(
+                        Q(created_at__lt=cursor_follow["created_at"])
+                        | Q(
+                            created_at=cursor_follow["created_at"],
+                            id__lt=cursor_follow["id"],
+                        )
+                    )
             except Exception:  # noqa: S110
                 pass
 
@@ -139,15 +148,18 @@ class FollowService:
         has_more = len(follows) > limit
         follows = follows[:limit]
 
-        mutual_ids = set()
+        # Normalise to set[str] — UUID objects vs strings compare correctly
+        # in Python today, but str() makes this future-proof and explicit.
+        mutual_ids: set[str] = set()
         if viewer_id:
             follower_ids = [str(f.follower_id) for f in follows]
-            mutual_ids = set(
-                Follow.objects.filter(
+            mutual_ids = {
+                str(uid)
+                for uid in Follow.objects.filter(
                     follower_id=viewer_id,
                     following_id__in=follower_ids,
                 ).values_list("following_id", flat=True)
-            )
+            }
 
         users = []
         for f in follows:
@@ -159,7 +171,8 @@ class FollowService:
                         username=user.username or "",
                         avatar_url=user.avatar_url or None,
                     ),
-                    "is_following": user.id in mutual_ids,
+                    # Use str-normalised set for type-safe membership test.
+                    "is_following": str(user.id) in mutual_ids,
                 }
             )
 
@@ -192,14 +205,23 @@ class FollowService:
         qs = (
             Follow.objects.select_related("following")
             .filter(follower_id=user_id)
-            .order_by("-created_at")
+            # -id tiebreaker for deterministic compound keyset pagination.
+            .order_by("-created_at", "-id")
         )
 
         if cursor:
             try:
-                cursor_follow = Follow.objects.filter(id=cursor).values("created_at").first()
+                cursor_follow = Follow.objects.filter(id=cursor).values("created_at", "id").first()
                 if cursor_follow:
-                    qs = qs.filter(created_at__lt=cursor_follow["created_at"])
+                    from django.db.models import Q
+
+                    qs = qs.filter(
+                        Q(created_at__lt=cursor_follow["created_at"])
+                        | Q(
+                            created_at=cursor_follow["created_at"],
+                            id__lt=cursor_follow["id"],
+                        )
+                    )
             except Exception:  # noqa: S110
                 pass
 
@@ -207,15 +229,20 @@ class FollowService:
         has_more = len(follows) > limit
         follows = follows[:limit]
 
-        mutual_ids = set()
-        if viewer_id and str(viewer_id) != str(user_id):
+        # Build the mutual-follow set regardless of whether viewer == user.
+        # This gives the true live is_following state for every entry, including
+        # the user's own following list (previously hardcoded to True, which was wrong
+        # after an unfollow action during the same session).
+        mutual_ids: set[str] = set()
+        if viewer_id:
             following_ids = [str(f.following_id) for f in follows]
-            mutual_ids = set(
-                Follow.objects.filter(
+            mutual_ids = {
+                str(uid)
+                for uid in Follow.objects.filter(
                     follower_id=viewer_id,
                     following_id__in=following_ids,
                 ).values_list("following_id", flat=True)
-            )
+            }
 
         users = []
         for f in follows:
@@ -227,9 +254,8 @@ class FollowService:
                         username=user.username or "",
                         avatar_url=user.avatar_url or None,
                     ),
-                    "is_following": (
-                        True if str(viewer_id) == str(user_id) else user.id in mutual_ids
-                    ),
+                    # Always reflect true live state — never hardcode True.
+                    "is_following": str(user.id) in mutual_ids,
                 }
             )
 
@@ -305,7 +331,13 @@ class FollowService:
 
     @staticmethod
     def _invalidate_follow_cache(follower_id: str, following_id: str) -> None:
-        """Invalidate cached follow data."""
+        """Invalidate cached follow data.
+
+        Clears both the social-graph caches (follower/following ID lists, is_following
+        flag) AND the `me` profile cache for both parties so that `followersCount` and
+        `followingCount` reflect the new state immediately instead of being stale for
+        up to 5 minutes.
+        """
         try:
             from django.core.cache import cache
 
@@ -314,6 +346,10 @@ class FollowService:
                     f"followers:{following_id}",
                     f"following:{follower_id}",
                     f"is_following:{follower_id}:{following_id}",
+                    # Invalidate both users' `me` responses so follower/following
+                    # counts are fresh on the next authenticated query.
+                    f"user_me_data_{follower_id}",
+                    f"user_me_data_{following_id}",
                 ]
             )
         except Exception:

@@ -11,22 +11,9 @@ from datetime import date, datetime, timezone
 from cryptography.fernet import Fernet
 from django.conf import settings
 
+from core.shared.exceptions import AuthenticationError
+
 logger = logging.getLogger("core.authentication")
-
-
-class AuthenticationError(Exception):
-    """Raised when authentication operations fail."""
-
-    def __init__(
-        self,
-        message: str,
-        code: str = "AUTH_ERROR",
-        details: dict | None = None,
-    ):
-        self.message = message
-        self.code = code
-        self.details = details or {}
-        super().__init__(message)
 
 
 def validate_password(password: str) -> None:

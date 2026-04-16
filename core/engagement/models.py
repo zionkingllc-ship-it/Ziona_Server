@@ -262,3 +262,38 @@ class Share(TimestampedModel):
     def __str__(self) -> str:
         """Return string representation."""
         return f"Share({self.share_type}) by {self.user_id} of {self.post_id}"
+
+
+class HiddenPost(TimestampedModel):
+    """A record of a post hidden by a user.
+
+    Used to implement the hide post feature with a sliding window limit.
+    """
+
+    user = models.ForeignKey(
+        "users.User",
+        on_delete=models.CASCADE,
+        related_name="hidden_posts",
+    )
+    post = models.ForeignKey(
+        "posts.Post",
+        on_delete=models.CASCADE,
+        related_name="hidden_by_users",
+    )
+
+    class Meta:
+        db_table = "hidden_posts"
+        ordering = ["-created_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["user", "post"],
+                name="uq_hidden_user_post",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["user", "created_at"], name="idx_hidden_user_time"),
+        ]
+
+    def __str__(self) -> str:
+        """Return string representation."""
+        return f"Post {self.post_id} hidden by User {self.user_id}"

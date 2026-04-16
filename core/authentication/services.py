@@ -83,6 +83,9 @@ class AuthService:
             "displayName": user.full_name or "",
             "isEmailVerified": user.is_email_verified,
             "hasPassword": user.has_usable_password(),
+            # Expose the privacy setting so the mobile app can hide like counts
+            # on the current user's own posts without a separate API call.
+            "hideLikeCount": user.hide_like_count,
             "profile": {
                 "bio": profile_dto.bio,
                 "avatarUrl": profile_dto.avatar_url,

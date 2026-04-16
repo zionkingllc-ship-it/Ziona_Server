@@ -106,15 +106,20 @@ class ProfileService:
         )
 
         is_following = False
+        is_followed_by = False
         is_own_profile = False
         if viewer_id:
             is_own_profile = str(viewer_id) == str(target_user_id)
             if not is_own_profile:
                 is_following = FollowSelector.is_following(viewer_id, target_user_id)
+                is_followed_by = FollowSelector.is_following(target_user_id, viewer_id)
 
         recent_posts = (
             Post.objects.select_related("user")
-            .prefetch_related("post_media")
+            # Use media_files (M2M) — the relation that create_post writes to.
+            # The legacy post_media (FK reverse) is never populated by the current
+            # post creation flow and must NOT be used here.
+            .prefetch_related("media_files")
             .filter(user_id=target_user_id, deleted_at__isnull=True)
             .annotate(
                 likes_count=Count("likes", distinct=True),
@@ -126,19 +131,14 @@ class ProfileService:
                 shares_count=Count("shares", distinct=True),
                 saves_count=Count("saves", distinct=True),
             )
-            .order_by("-created_at")[:6]
+            .order_by("-created_at", "-id")[:6]
         )
 
-        from core.posts.services import PostService
+        from core.feed.services import FeedService
 
-        post_dtos = [
-            PostService._build_post_dto(
-                post=p,
-                media_items=list(p.post_media.all()),
-                viewer_id=viewer_id,
-            )
-            for p in recent_posts
-        ]
+        # Use bulk viewer state fetching (3 total DB queries) instead of
+        # the individual loop (3 queries × 6 posts = 18 queries).
+        post_dtos = FeedService._bulk_build_post_dtos(list(recent_posts), viewer_id=viewer_id)
 
         return UserProfileDTO(
             id=str(user.id),
@@ -150,6 +150,7 @@ class ProfileService:
             hide_like_count=getattr(user, "hide_like_count", False),
             stats=stats,
             is_following=is_following,
+            is_followed_by=is_followed_by,
             is_own_profile=is_own_profile,
             recent_posts=post_dtos,
             created_at=user.created_at.isoformat(),
@@ -292,7 +293,9 @@ class ProfileService:
                 shares_count=Count("shares", distinct=True),
                 saves_count=Count("saves", distinct=True),
             )
-            .order_by("-created_at")
+            # -id tiebreaker ensures deterministic keyset pagination when
+            # two posts share the same created_at timestamp.
+            .order_by("-created_at", "-id")
         )
 
         if cursor:
@@ -359,7 +362,8 @@ class ProfileService:
                 shares_count=Count("shares", distinct=True),
                 saves_count=Count("saves", distinct=True),
             )
-            .order_by("-created_at")
+            # -id tiebreaker ensures deterministic keyset pagination.
+            .order_by("-created_at", "-id")
         )
 
         if cursor:

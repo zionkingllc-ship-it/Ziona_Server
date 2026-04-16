@@ -51,6 +51,9 @@ class CurrentUserResponse:
     displayName: str | None
     isEmailVerified: bool
     hasPassword: bool
+    # Exposed so the mobile app can hide like counts on the current user's
+    # own posts without requiring a separate profile query.
+    hideLikeCount: bool
 
     profile: Annotated["UserProfileType", strawberry.lazy("core.profiles.schema")]  # noqa: F821
     stats: Annotated["ProfileStatsType", strawberry.lazy("core.profiles.schema")]  # noqa: F821
@@ -123,7 +126,7 @@ class UserQueries:
             raise AuthenticationError("Authentication required", "UNAUTHENTICATED")
 
         from core.authentication.services import AuthService
-        from core.profiles.schema import ProfileStatsType, UserProfileType
+        from core.profiles.schema import ProfileStatsType, ProfileViewerState, UserProfileType
 
         data = AuthService.get_me(user_id)
 
@@ -134,6 +137,7 @@ class UserQueries:
             displayName=data["displayName"],
             isEmailVerified=data["isEmailVerified"],
             hasPassword=data["hasPassword"],
+            hideLikeCount=data.get("hideLikeCount", False),
             profile=UserProfileType(
                 id=data["id"],
                 username=data["username"],
@@ -142,19 +146,22 @@ class UserQueries:
                 avatar_url=data["profile"]["avatarUrl"],
                 location=data["profile"]["location"],
                 stats=ProfileStatsType(
-                    followers_count=data["stats"]["followersCount"],
-                    following_count=data["stats"]["followingCount"],
-                    posts_count=data["stats"]["postsCount"],
+                    _followers=data["stats"]["followersCount"],
+                    _following=data["stats"]["followingCount"],
+                    _posts=data["stats"]["postsCount"],
                 ),
-                is_following=False,
-                is_own_profile=True,
+                viewer_state=ProfileViewerState(
+                    is_following=False,
+                    is_followed_by=False,
+                    is_owner=True,
+                ),
                 recent_posts=[],
                 created_at=data["createdAt"],
             ),
             stats=ProfileStatsType(
-                followers_count=data["stats"]["followersCount"],
-                following_count=data["stats"]["followingCount"],
-                posts_count=data["stats"]["postsCount"],
+                _followers=data["stats"]["followersCount"],
+                _following=data["stats"]["followingCount"],
+                _posts=data["stats"]["postsCount"],
             ),
             lastNameChange=data.get("lastNameChange"),
             lastUsernameChange=data.get("lastUsernameChange"),

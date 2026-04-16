@@ -109,9 +109,9 @@ class FollowMutations:
 
             profile = ProfileService.get_user_profile(user_id, current_user_id)
             stats = ProfileStatsType(
-                followers_count=profile.stats.followers_count,
-                following_count=profile.stats.following_count,
-                posts_count=profile.stats.posts_count,
+                _followers=profile.stats.followers_count,
+                _following=profile.stats.following_count,
+                _posts=profile.stats.posts_count,
             )
             return FollowPayload(success=True, following=result.following, stats=stats)
         except FollowError as e:
@@ -152,9 +152,9 @@ class FollowMutations:
 
         profile = ProfileService.get_user_profile(user_id, current_user_id)
         stats = ProfileStatsType(
-            followers_count=profile.stats.followers_count,
-            following_count=profile.stats.following_count,
-            posts_count=profile.stats.posts_count,
+            _followers=profile.stats.followers_count,
+            _following=profile.stats.following_count,
+            _posts=profile.stats.posts_count,
         )
         return FollowPayload(success=True, following=result.following, stats=stats)
 

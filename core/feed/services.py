@@ -7,7 +7,7 @@ and Discover (category-based) feed algorithms.
 
 import logging
 
-from django.db.models import Count, F, Q
+from django.db.models import Count, Exists, F, OuterRef, Q
 from django.utils import timezone
 
 from core.follows.selectors import FollowSelector
@@ -27,6 +27,17 @@ FEED_CACHE_TTL = 300
 
 class FeedService:
     """Service handling feed generation and caching."""
+
+    @staticmethod
+    def _exclude_hidden_posts(qs, user_id: str | None):
+        """Exclude posts hidden by the user using a performant NOT EXISTS subquery."""
+        if not user_id:
+            return qs
+
+        from core.engagement.models import HiddenPost
+
+        hidden_subquery = Exists(HiddenPost.objects.filter(user_id=user_id, post_id=OuterRef("pk")))
+        return qs.annotate(is_hidden=hidden_subquery).filter(is_hidden=False)
 
     @staticmethod
     def get_feed(
@@ -142,8 +153,13 @@ class FeedService:
                 shares_count=Count("shares", distinct=True),
                 saves_count=Count("saves", distinct=True),
             )
-            .order_by("-created_at")
+            # Always include -id as a tiebreaker so the compound keyset cursor
+            # (_apply_cursor) can page deterministically even if two posts share
+            # the exact same created_at timestamp.
+            .order_by("-created_at", "-id")
         )
+
+        qs = FeedService._exclude_hidden_posts(qs, user_id)
 
         if cursor:
             qs = FeedService._apply_cursor(qs, cursor)
@@ -200,7 +216,10 @@ class FeedService:
         if category:
             qs = qs.filter(category__slug=category)
 
-        qs = qs.order_by("-created_at")
+        qs = FeedService._exclude_hidden_posts(qs, user_id)
+
+        # Always include -id as a tiebreaker for deterministic keyset pagination.
+        qs = qs.order_by("-created_at", "-id")
 
         if cursor:
             qs = FeedService._apply_cursor(qs, cursor)
@@ -260,9 +279,15 @@ class FeedService:
         )
 
         if user_interests:
-            qs = qs.filter(Q(category__in=user_interests) | Q(category__isnull=True))
+            # Filter by category slug, not by the Category FK (UUID).
+            # `user_interests` stores slug strings (e.g. "love", "trust"), so
+            # category__in would compare UUIDs against strings and never match.
+            qs = qs.filter(Q(category__slug__in=user_interests) | Q(category__isnull=True))
 
-        qs = qs.order_by("-engagement_score", "-created_at")
+        qs = FeedService._exclude_hidden_posts(qs, user_id)
+
+        # Always include -id as a tiebreaker for deterministic keyset pagination.
+        qs = qs.order_by("-engagement_score", "-created_at", "-id")
 
         if cursor:
             qs = FeedService._apply_cursor(qs, cursor)
@@ -325,11 +350,19 @@ class FeedService:
                     default=Value(0),
                     output_field=IntegerField(),
                 ),
-            ).order_by("-is_following", "-created_at")
+                # Sort followed authors' posts first, then by recency.
+                # Always include -id as a final tiebreaker so the keyset cursor
+                # can page correctly even when two posts share the same timestamp.
+            ).order_by("-is_following", "-created_at", "-id")
         else:
-            qs = qs.order_by("-created_at")
+            # No follows yet — pure reverse-chronological with tiebreaker.
+            qs = qs.order_by("-created_at", "-id")
 
-        if cursor:
+        qs = FeedService._exclude_hidden_posts(qs, user_id)
+
+        if cursor and following_ids:
+            qs = FeedService._apply_following_cursor(qs, cursor, following_ids)
+        elif cursor:
             qs = FeedService._apply_cursor(qs, cursor)
 
         posts = list(qs[: limit + 1])
@@ -376,7 +409,8 @@ class FeedService:
                 saves_count=Count("saves", distinct=True),
                 engagement_score=F("likes_count") + F("comments_count") * 2 + F("shares_count") * 3,
             )
-            .order_by("-engagement_score", "-created_at")
+            # Always include -id as a tiebreaker for deterministic keyset pagination.
+            .order_by("-engagement_score", "-created_at", "-id")
         )
 
         if cursor:
@@ -396,13 +430,73 @@ class FeedService:
 
     @staticmethod
     def _apply_cursor(qs, cursor: str):
-        """Apply cursor-based pagination to a queryset."""
+        """
+        Apply compound (created_at, id) keyset pagination to a queryset.
+
+        Using only `created_at__lt` is unsafe when multiple posts share the same
+        timestamp (common in tests and rapid mobile submissions): those posts get
+        silently skipped on the next page. The compound keyset filter handles
+        ties correctly:
+
+            page N+1 = posts where
+                (created_at < cursor.created_at)
+                OR
+                (created_at == cursor.created_at AND id < cursor.id)
+
+        This requires the queryset to be ordered by `(-created_at, -id)`.
+        The cursor value is still just the post UUID (backward-compatible).
+        """
         try:
-            cursor_post = Post.objects.filter(id=cursor).values("created_at").first()
+            cursor_post = Post.objects.filter(id=cursor).values("created_at", "id").first()
             if cursor_post:
-                qs = qs.filter(created_at__lt=cursor_post["created_at"])
-        except Exception:  # noqa: S110
-            pass
+                qs = qs.filter(
+                    Q(created_at__lt=cursor_post["created_at"])
+                    | Q(
+                        created_at=cursor_post["created_at"],
+                        id__lt=cursor_post["id"],
+                    )
+                )
+        except Exception:  # noqa: BLE001
+            # If the cursor ID is invalid/deleted, ignore it and return the
+            # unfiltered queryset (effectively a first-page fallback).
+            logger.debug("Failed to apply feed cursor: invalid cursor_id")
+        return qs
+
+    @staticmethod
+    def _apply_following_cursor(qs, cursor: str, following_ids: list | set):
+        """
+        Compound (is_following, created_at, id) keyset cursor for _returning_user_feed.
+
+        The regular _apply_cursor only handles (created_at, id) which silently drops
+        discovery posts that are newer than the cursor's followed-author post.
+        This method re-derives the cursor post's is_following tier and filters correctly.
+        """
+        from core.posts.models import Post
+
+        try:
+            cursor_post = (
+                Post.objects.filter(id=cursor).values("created_at", "id", "user_id").first()
+            )
+            if cursor_post:
+                from django.db.models import Q
+
+                cursor_is_following = (
+                    1 if str(cursor_post["user_id"]) in {str(fid) for fid in following_ids} else 0
+                )
+                qs = qs.filter(
+                    Q(is_following__lt=cursor_is_following)
+                    | Q(
+                        is_following=cursor_is_following,
+                        created_at__lt=cursor_post["created_at"],
+                    )
+                    | Q(
+                        is_following=cursor_is_following,
+                        created_at=cursor_post["created_at"],
+                        id__lt=cursor_post["id"],
+                    )
+                )
+        except Exception:  # noqa: BLE001
+            logger.debug("Failed to apply following feed cursor: invalid cursor_id")
         return qs
 
     @staticmethod
@@ -454,6 +548,7 @@ class FeedService:
         liked_post_ids: set = set()
         saved_post_ids: set = set()
         following_user_ids: set = set()
+        followed_by_user_ids: set = set()
 
         if viewer_id:
             from core.engagement.models import Like, Save
@@ -481,6 +576,13 @@ class FeedService:
             )
             following_user_ids = {str(uid) for uid in following_user_ids}
 
+            followed_by_user_ids = set(
+                Follow.objects.filter(
+                    follower_id__in=author_ids, following_id=viewer_id
+                ).values_list("follower_id", flat=True)
+            )
+            followed_by_user_ids = {str(uid) for uid in followed_by_user_ids}
+
         return [
             PostService._build_post_dto(
                 post=p,
@@ -489,6 +591,7 @@ class FeedService:
                 liked_post_ids=liked_post_ids,
                 saved_post_ids=saved_post_ids,
                 following_user_ids=following_user_ids,
+                followed_by_user_ids=followed_by_user_ids,
             )
             for p in posts
         ]

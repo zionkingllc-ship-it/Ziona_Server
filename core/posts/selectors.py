@@ -32,8 +32,20 @@ class PostSelector:
         """
         return (
             Post.objects.select_related("user")
+            # Prefetch both relations: media_files (M2M, used by create_post)
+            # and post_media (legacy FK, kept for backward-compat read paths).
             .prefetch_related("media_files", "post_media")
             .filter(id=post_id, deleted_at__isnull=True)
+            .annotate(
+                likes_count=Count("likes", distinct=True),
+                comments_count=Count(
+                    "comments",
+                    filter=Q(comments__deleted_at__isnull=True),
+                    distinct=True,
+                ),
+                shares_count=Count("shares", distinct=True),
+                saves_count=Count("saves", distinct=True),
+            )
             .first()
         )
 
@@ -52,7 +64,8 @@ class PostSelector:
         """
         return (
             Post.objects.select_related("user")
-            .prefetch_related("post_media")
+            # media_files (M2M) is the active relation; post_media is legacy.
+            .prefetch_related("media_files", "post_media")
             .filter(id__in=post_ids, deleted_at__isnull=True)
             .annotate(
                 likes_count=Count("likes", distinct=True),
@@ -84,7 +97,8 @@ class PostSelector:
         """
         qs = (
             Post.objects.select_related("user")
-            .prefetch_related("post_media")
+            # media_files (M2M) is the active relation; post_media is legacy.
+            .prefetch_related("media_files", "post_media")
             .filter(user_id=user_id, deleted_at__isnull=True)
             .annotate(
                 likes_count=Count("likes", distinct=True),
@@ -96,14 +110,22 @@ class PostSelector:
                 shares_count=Count("shares", distinct=True),
                 saves_count=Count("saves", distinct=True),
             )
-            .order_by("-created_at")
+            # -id tiebreaker ensures deterministic keyset pagination when
+            # multiple posts share the same created_at timestamp.
+            .order_by("-created_at", "-id")
         )
 
         if cursor:
             try:
-                cursor_post = Post.objects.filter(id=cursor).values("created_at").first()
+                cursor_post = Post.objects.filter(id=cursor).values("created_at", "id").first()
                 if cursor_post:
-                    qs = qs.filter(created_at__lt=cursor_post["created_at"])
+                    qs = qs.filter(
+                        Q(created_at__lt=cursor_post["created_at"])
+                        | Q(
+                            created_at=cursor_post["created_at"],
+                            id__lt=cursor_post["id"],
+                        )
+                    )
             except Exception:  # noqa: S110
                 pass
 

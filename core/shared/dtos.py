@@ -86,6 +86,7 @@ class ViewerStateDTO(CamelCaseModel):
     liked: bool = False
     saved: bool = False
     following_author: bool = False
+    followed_by_author: bool = False
     is_owner: bool = False
 
 
@@ -323,6 +324,7 @@ class UserProfileDTO(CamelCaseModel):
     hide_like_count: bool = False
     stats: UserProfileStatsDTO
     is_following: bool = False
+    is_followed_by: bool = False
     is_own_profile: bool = False
     recent_posts: list[PostResponseDTO] = []
     created_at: str

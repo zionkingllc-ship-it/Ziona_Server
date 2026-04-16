@@ -107,6 +107,7 @@ class BookmarkFolderType:
     id: str
     name: str
     saved_count: int = 0
+    created_at: str
 
 
 @strawberry.type
@@ -140,6 +141,25 @@ class BulkRemovePayload:
     error: ErrorType | None = None
     message: str | None = None
     error_code: str | None = None
+
+
+@strawberry.type
+class HidePostPayload:
+    """Response for hiding/unhiding a post."""
+
+    success: bool
+    error: ErrorType | None = None
+    message: str | None = None
+    error_code: str | None = None
+
+
+@strawberry.type
+class HiddenPostsResponse:
+    """Paginated list of hidden posts."""
+
+    posts: list[FeedPost]
+    next_cursor: str | None = None
+    has_more: bool = False
 
 
 @strawberry.type
@@ -490,6 +510,7 @@ class EngagementMutations:
                     id=result.id,
                     name=result.name,
                     saved_count=result.saved_count,
+                    created_at=result.created_at,
                 ),
             )
         except BookmarkError as e:
@@ -624,6 +645,45 @@ class EngagementMutations:
                 error=ErrorType(code=e.code, message=e.message),
             )
 
+    @strawberry.mutation(description="Hide a post from the current user's feed")
+    def hide_post(self, info: strawberry.types.Info, post_id: str) -> HidePostPayload:
+        """Hide a post from the feed."""
+        from core.engagement.services import EngagementService
+        from core.shared.exceptions import EngagementError
+
+        user_id = _get_authenticated_user_id(info)
+        if not user_id:
+            return HidePostPayload(
+                success=False,
+                message="Authentication required",
+                error_code="UNAUTHORIZED",
+            )
+
+        try:
+            success = EngagementService.hide_post(user_id, post_id)
+            return HidePostPayload(success=success)
+        except EngagementError as e:
+            return HidePostPayload(
+                success=False,
+                message=e.message,
+                error_code=e.code,
+                error=ErrorType(code=e.code, message=e.message),
+            )
+
+    @strawberry.mutation(description="Unhide a previously hidden post")
+    def unhide_post(self, info: strawberry.types.Info, post_id: str) -> HidePostPayload:
+        """Unhide a post."""
+        from core.engagement.services import EngagementService
+
+        user_id = _get_authenticated_user_id(info)
+        if not user_id:
+            return HidePostPayload(
+                success=False, message="Authentication required", error_code="UNAUTHORIZED"
+            )
+
+        success = EngagementService.unhide_post(user_id, post_id)
+        return HidePostPayload(success=success)
+
 
 @strawberry.type
 class EngagementQueries:
@@ -727,6 +787,7 @@ class EngagementQueries:
                 id=f.id,
                 name=f.name,
                 saved_count=f.saved_count,
+                created_at=f.created_at,
             )
             for f in folders
         ]
@@ -788,3 +849,27 @@ class EngagementQueries:
             )
         except BookmarkError:
             return SavedPostsResponse(posts=[], has_more=False)
+
+    @strawberry.field(description="Get paginated list of hidden posts")
+    def hidden_posts(
+        self,
+        info: strawberry.types.Info,
+        cursor: str | None = None,
+        limit: int = 20,
+    ) -> HiddenPostsResponse:
+        """Get paginated list of hidden posts for a user."""
+        from core.engagement.services import EngagementService
+        from core.feed.services import FeedService
+
+        user_id = _get_authenticated_user_id(info)
+        if not user_id:
+            return HiddenPostsResponse(posts=[], has_more=False)
+
+        posts, next_cursor, has_more = EngagementService.get_hidden_posts(user_id, cursor, limit)
+        dtos = FeedService._bulk_build_post_dtos(posts, viewer_id=user_id)
+
+        return HiddenPostsResponse(
+            posts=[_dto_to_feed_post(p) for p in dtos],
+            next_cursor=next_cursor,
+            has_more=has_more,
+        )

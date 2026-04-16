@@ -121,7 +121,7 @@ class ReportService:
         limit = min(limit, 50)
 
         qs = Report.objects.select_related("reporter", "post", "comment", "reviewed_by").order_by(
-            "-created_at"
+            "-created_at", "-id"
         )
 
         if status:
@@ -131,9 +131,17 @@ class ReportService:
 
         if cursor:
             try:
-                cursor_report = Report.objects.filter(id=cursor).values("created_at").first()
+                from django.db.models import Q
+
+                cursor_report = Report.objects.filter(id=cursor).values("created_at", "id").first()
                 if cursor_report:
-                    qs = qs.filter(created_at__lt=cursor_report["created_at"])
+                    qs = qs.filter(
+                        Q(created_at__lt=cursor_report["created_at"])
+                        | Q(
+                            created_at=cursor_report["created_at"],
+                            id__lt=cursor_report["id"],
+                        )
+                    )
             except Exception:  # noqa: S110
                 pass
 

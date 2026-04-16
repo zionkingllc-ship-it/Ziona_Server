@@ -3,7 +3,6 @@
 import strawberry
 
 from core.shared.types import ErrorType
-from core.users.models import User
 from core.users.schema import UserType
 
 
@@ -167,38 +166,6 @@ class GoogleOAuthPayload:
 @strawberry.type
 class AuthQueries:
     """Authentication domain queries."""
-
-    @strawberry.field(
-        description="Get complete data for currently authenticated user. Includes profile details, follower/following counts, posts count, email verification status, and password status (for OAuth users). Cached for 5 minutes."
-    )
-    def me(self, info: strawberry.types.Info) -> UserType | None:
-        """
-        Get complete data for currently authenticated user.
-
-        Includes profile details, follower/following counts, posts count, email verification status,
-        and password status (for OAuth users). Results are cached for 5 minutes.
-
-        **Authentication:** Required
-        **Parameters:** None
-        **Returns:** UserType object with full profile details and stats
-        **Errors:** Returns null if unauthenticated or token is invalid
-        """
-        request = info.context["request"]
-        auth_header = request.META.get("HTTP_AUTHORIZATION", "")
-
-        if not auth_header.startswith("Bearer "):
-            return None
-
-        token = auth_header[7:]
-
-        try:
-            from core.authentication.tokens import TokenService
-
-            payload = TokenService.validate_access_token(token)
-            user = User.objects.get(id=payload["user_id"])
-            return UserType.from_model(user)
-        except Exception:
-            return None
 
     @strawberry.field(description="Simple health check for the GraphQL endpoint.")
     def health(self) -> str:

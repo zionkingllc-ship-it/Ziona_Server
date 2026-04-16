@@ -18,19 +18,39 @@ def user_b(create_user):
 
 @pytest.fixture
 def post_image(user_a):
-    from core.posts.models import Post, PostMedia
+    from core.media.models import MediaFile
+    from core.posts.models import Post
 
     p = Post.objects.create(user=user_a, post_type="image", caption="Image post")
-    PostMedia.objects.create(post=p, media_url="https://test.com/img.jpg", media_type="image")
+    m = MediaFile.objects.create(
+        user=user_a,
+        storage_path="https://test.com/img.jpg",
+        file_name="img.jpg",
+        file_type="image/jpeg",
+        file_size=1024,
+        media_type="image",
+        status="ready",
+    )
+    p.media_files.add(m)
     return p
 
 
 @pytest.fixture
 def post_video(user_a):
-    from core.posts.models import Post, PostMedia
+    from core.media.models import MediaFile
+    from core.posts.models import Post
 
     p = Post.objects.create(user=user_a, post_type="video", caption="Video post")
-    PostMedia.objects.create(post=p, media_url="https://test.com/vid.mp4", media_type="video")
+    m = MediaFile.objects.create(
+        user=user_a,
+        storage_path="https://test.com/vid.mp4",
+        file_name="vid.mp4",
+        file_type="video/mp4",
+        file_size=2048,
+        media_type="video",
+        status="ready",
+    )
+    p.media_files.add(m)
     return p
 
 
@@ -129,12 +149,20 @@ class TestBookmarkFiltering:
     def test_filter_custom_folder_by_type(self, user_a):
         """Filtering works inside a custom folder."""
         from core.engagement.services import EngagementService
-        from core.posts.models import Post, PostMedia
+        from core.media.models import MediaFile
+        from core.posts.models import Post
 
         new_image_post = Post.objects.create(user=user_a, post_type="image", caption="Folder pic")
-        PostMedia.objects.create(
-            post=new_image_post, media_url="https://test.com/img2.jpg", media_type="image"
+        m = MediaFile.objects.create(
+            user=user_a,
+            storage_path="https://test.com/img2.jpg",
+            file_name="img2.jpg",
+            file_type="image/jpeg",
+            file_size=1024,
+            media_type="image",
+            status="ready",
         )
+        new_image_post.media_files.add(m)
 
         BookmarkService.get_folders(str(user_a.id))
         folder = BookmarkService.create_folder(str(user_a.id), "Pics Only")
