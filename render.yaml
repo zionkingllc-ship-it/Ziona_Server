@@ -8,6 +8,7 @@ services:
     plan: free
     branch: staging
     buildCommand: >-
+      apt-get update -qq && apt-get install -y -qq ffmpeg &&
       pip install -r requirements.txt && 
       python manage.py migrate --noinput && 
       python manage.py collectstatic --noinput && 
@@ -27,6 +28,12 @@ services:
         sync: false
       
       - key: REDIS_URL
+        sync: false
+
+      - key: CELERY_BROKER_URL
+        sync: false
+
+      - key: CELERY_RESULT_BACKEND
         sync: false
 
       - key: DJANGO_SECRET_KEY
