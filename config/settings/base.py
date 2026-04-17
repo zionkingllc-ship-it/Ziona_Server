@@ -121,8 +121,14 @@ CACHES = {
     }
 }
 
-SESSION_ENGINE = "django.contrib.sessions.backends.cache"
-SESSION_CACHE_ALIAS = "default"
+# Sessions: use the database backend, not the Redis cache.
+# The mobile API is JWT-only — session cookies are never sent by mobile clients.
+# Keeping SESSION_ENGINE as 'cache' was burning 1 Redis command per request
+# for a session read that was never actually used. Django Admin is the only
+# consumer of sessions and it is perfectly happy with DB-backed sessions.
+# IMPORTANT: run `python manage.py migrate` before deploying this change to
+# ensure the django_session table exists.
+SESSION_ENGINE = "django.contrib.sessions.backends.db"
 SESSION_COOKIE_AGE = 604800
 SESSION_COOKIE_HTTPONLY = True
 SESSION_COOKIE_SAMESITE = "Lax"
@@ -178,13 +184,23 @@ CORS_ALLOW_HEADERS = [
 
 
 JWT_SECRET_KEY = env("JWT_SECRET_KEY", default=SECRET_KEY)
-JWT_ACCESS_TOKEN_LIFETIME = timedelta(days=7)
+# 1-hour access tokens eliminate the need for a per-request Redis blacklist
+# check. On logout the refresh token is invalidated immediately (no new tokens
+# can be issued), and the short-lived access token expires naturally within
+# 1 hour — matching the OAuth 2.0 RFC 6749 security model.
+JWT_ACCESS_TOKEN_LIFETIME = timedelta(hours=1)
 JWT_REFRESH_TOKEN_LIFETIME = timedelta(days=30)
 JWT_ALGORITHM = "HS256"
 
 
-CELERY_BROKER_URL = REDIS_URL
-CELERY_RESULT_BACKEND = REDIS_URL
+# Celery broker and result backend are intentionally separated from REDIS_URL.
+# IMPORTANT: Upstash does NOT support Redis DB index selection (SELECT command).
+# Do NOT use `redis://...:.../1` DB-index URLs — they are silently ignored on
+# Upstash. Instead, create a second Upstash database and point CELERY_BROKER_URL
+# to its unique connection URL. This isolates Celery's continuous heartbeats,
+# task polling, and beat-scheduler commands from the app's 500k daily budget.
+CELERY_BROKER_URL = env("CELERY_BROKER_URL", default=REDIS_URL)
+CELERY_RESULT_BACKEND = env("CELERY_RESULT_BACKEND", default=REDIS_URL)
 CELERY_ACCEPT_CONTENT = ["json"]
 CELERY_TASK_SERIALIZER = "json"
 CELERY_RESULT_SERIALIZER = "json"

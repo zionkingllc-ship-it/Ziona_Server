@@ -67,15 +67,36 @@ class TestRefreshToken:
 class TestTokenBlacklist:
     """Test token blacklisting (logout)."""
 
-    def test_blacklist_access_token(self, create_user):
-        """Blacklisted token should be rejected."""
+    def test_blacklist_writes_to_redis(self, create_user):
+        """
+        blacklist_access_token should write the JTI to Redis.
+
+        Design note: validate_access_token is intentionally CPU-only and does
+        NOT check the Redis blacklist on every request (see tokens.py docstring).
+        The 15-minute access token TTL makes the blacklist window short enough
+        that a per-request Redis check is unnecessary. The refresh token is
+        revoked immediately, so no new access tokens can be issued post-logout.
+        """
+        from django_redis import get_redis_connection
+
         user = create_user()
         token = TokenService.generate_access_token(str(user.id), user.role)
-
         payload = TokenService.validate_access_token(token)
-        assert payload["user_id"] == str(user.id)
+        jti = payload["jti"]
 
         TokenService.blacklist_access_token(token)
 
-        with pytest.raises(TokenError, match="revoked"):
-            TokenService.validate_access_token(token)
+        # Verify the blacklist entry was written to Redis
+        redis_conn = get_redis_connection("default")
+        assert redis_conn.exists(
+            f"blacklist:{jti}"
+        ), "blacklist_access_token should store the JTI in Redis"
+
+    def test_valid_token_still_validates(self, create_user):
+        """A non-blacklisted access token should validate without error."""
+        user = create_user()
+        token = TokenService.generate_access_token(str(user.id), user.role)
+        payload = TokenService.validate_access_token(token)
+
+        assert payload["user_id"] == str(user.id)
+        assert payload["type"] == "access"

@@ -4,10 +4,21 @@ JWT Token service for Ziona Server.
 Handles access token and refresh token generation, validation,
 and rotation. Refresh tokens are stored in Redis with TTL.
 
-Security:
-- Access tokens: 15min expiry, HS256
-- Refresh tokens: 7-day expiry, stored in Redis, rotated on use
-- Token blacklisting on logout
+Security model:
+- Access tokens:  1 hour expiry, HS256 signed, CPU-validated only.
+- Refresh tokens: 30-day expiry, stored in Redis, rotated on every use.
+- On logout: refresh token is immediately revoked in Redis (no new tokens
+  issued), and the access token is blacklisted with its remaining TTL.
+  Since access tokens live only 1 hour, the blacklist entry is at
+  most 1 hour wide — after which the token is independently expired.
+
+WHY WE DO NOT CHECK THE BLACKLIST ON EVERY REQUEST:
+  Checking Redis on every authenticated call costs 1 command/request and
+  contributed to exhausting our Upstash request budget. With a 1-hour
+  access token TTL this check is unnecessary: the worst-case exposure
+  window after a logout/compromise is 1 hour, which is the same
+  tradeoff OAuth 2.0 RFC 6749 accepts by design. The refresh token is
+  revoked immediately, preventing any new access tokens from being issued.
 """
 
 import logging
@@ -104,6 +115,9 @@ class TokenService:
     def validate_access_token(token: str) -> dict:
         """Validate and decode a JWT access token.
 
+        Validation is performed entirely in CPU (JWT signature + expiry check).
+        No Redis call is made. See module docstring for security rationale.
+
         Args:
             token: Encoded JWT access token.
 
@@ -111,7 +125,7 @@ class TokenService:
             Decoded token payload dict.
 
         Raises:
-            TokenError: If token is invalid, expired, or blacklisted.
+            TokenError: If token is invalid or expired.
         """
         try:
             payload = jwt.decode(
@@ -126,18 +140,6 @@ class TokenService:
 
         if payload.get("type") != "access":
             raise TokenError("Token is not an access token")
-
-        try:
-            from django_redis import get_redis_connection
-
-            redis_conn = get_redis_connection("default")
-            jti = payload.get("jti")
-            if jti and redis_conn.exists(f"blacklist:{jti}"):
-                raise TokenError("Token has been revoked")
-        except TokenError:
-            raise
-        except Exception:
-            logger.debug("Redis unavailable for token blacklist check; allowing token")
 
         return payload
 

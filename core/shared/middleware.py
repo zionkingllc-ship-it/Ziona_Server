@@ -1,12 +1,61 @@
 import logging
+import threading
 import time
 import traceback
 import uuid
+from collections import OrderedDict
 
 from django.conf import settings
 from django.http import HttpRequest, HttpResponse, JsonResponse
 
 logger = logging.getLogger("core.middleware")
+
+
+# ---------------------------------------------------------------------------
+# In-process IP block cache
+# ---------------------------------------------------------------------------
+# A small thread-safe OrderedDict that caches recently-blocked IPs for up to
+# _IP_BLOCK_CACHE_TTL seconds. When an IP is rate-limited, we store it here
+# so that subsequent requests from that IP within the same process can be
+# rejected without issuing any Redis command at all.
+#
+# Multi-worker safety note:
+#   This cache lives in process memory, so each Gunicorn worker maintains its
+#   own independent copy.  This is intentional and safe because:
+#     • The Redis sorted-set counter (shared state) is the authoritative source
+#       of truth for *whether* an IP is blocked.
+#     • This cache only avoids the Redis round-trip for IPs this worker has
+#       ALREADY confirmed to be blocked via Redis.
+#     • Worst case: another worker blocks an IP that this worker has not yet
+#       seen — this worker performs one extra Redis call before learning about
+#       the block.  That is acceptable behaviour.
+# ---------------------------------------------------------------------------
+_ip_block_lock = threading.Lock()
+_ip_block_cache: OrderedDict = OrderedDict()
+_IP_BLOCK_CACHE_MAX = 2000  # Maximum IPs to track per worker
+_IP_BLOCK_CACHE_TTL = 10  # Seconds to trust a cached block decision
+
+
+def _check_ip_blocked(ip: str) -> bool:
+    """Return True if this IP is known-blocked in this worker's local cache."""
+    now = time.monotonic()
+    with _ip_block_lock:
+        exp = _ip_block_cache.get(ip)
+        if exp is None:
+            return False
+        if exp > now:
+            return True
+        del _ip_block_cache[ip]
+        return False
+
+
+def _mark_ip_blocked(ip: str, ttl: int) -> None:
+    """Cache an IP as blocked for up to _IP_BLOCK_CACHE_TTL seconds."""
+    now = time.monotonic()
+    with _ip_block_lock:
+        if len(_ip_block_cache) >= _IP_BLOCK_CACHE_MAX:
+            _ip_block_cache.popitem(last=False)  # Evict oldest entry (LRU)
+        _ip_block_cache[ip] = now + min(ttl, _IP_BLOCK_CACHE_TTL)
 
 
 class StructuredLoggingMiddleware:
@@ -51,8 +100,15 @@ class StructuredLoggingMiddleware:
 class RateLimitMiddleware:
     """Redis-based sliding window rate limiting.
 
-    Enforces per-IP and per-user rate limits based on
-    endpoint type. Returns 429 when limits are exceeded.
+    Enforces per-IP and per-user rate limits based on endpoint type.
+    Returns 429 when limits are exceeded.
+
+    Uses an atomic Lua script to perform the entire sliding-window check
+    (ZREMRANGEBYSCORE + ZCARD + ZADD + EXPIRE) in a single Redis command,
+    reducing Upstash request consumption by 75% vs. a manual pipeline.
+
+    An in-process IP block cache provides a zero-Redis fast path for IPs
+    that this worker already knows are rate-limited.
 
     Rate limits are configurable via Django settings:
     - RATE_LIMIT_LOGIN: Login endpoint limit
@@ -78,69 +134,42 @@ class RateLimitMiddleware:
         if not getattr(settings, "RATE_LIMIT_ENABLED", True):
             return self.get_response(request)
 
+        ip = _get_client_ip(request)
+
+        # --- Fast path: IP is already known-blocked in this worker (0 Redis commands) ---
+        if _check_ip_blocked(ip):
+            return self._rate_limit_response(1)
+
+        from core.shared.redis_lua import LuaLimiter
+
+        # --- Auth endpoint rate limits (per IP) ---
         path = request.path.rstrip("/")
         for limited_path, config_key in self.RATE_LIMITED_PATHS.items():
             if path == limited_path.rstrip("/"):
                 limit_str = getattr(settings, config_key, "10/60s")
-                identifier = _get_client_ip(request)
-                is_limited, retry_after = self._check_rate_limit(
-                    f"ratelimit:{limited_path}:{identifier}",
-                    limit_str,
+                max_requests, window_seconds = _parse_rate_limit(limit_str)
+                key = f"ratelimit:{limited_path}:{ip}"
+
+                is_limited, retry_after = LuaLimiter.check_rate_limit(
+                    key, max_requests, window_seconds
                 )
                 if is_limited:
+                    _mark_ip_blocked(ip, retry_after)
                     return self._rate_limit_response(retry_after)
+                break  # Path matched — stop checking other paths
 
+        # --- GraphQL mutation rate limit (per user/IP) ---
         if request.path.rstrip("/") == "/graphql" and request.method == "POST":
-            user_id = getattr(request, "user_id", None) or _get_client_ip(request)
+            user_id = getattr(request, "user_id", None) or ip
             limit_str = getattr(settings, "RATE_LIMIT_MUTATIONS", "30/60s")
-            is_limited, retry_after = self._check_rate_limit(
-                f"ratelimit:graphql:{user_id}",
-                limit_str,
-            )
+            max_requests, window_seconds = _parse_rate_limit(limit_str)
+            key = f"ratelimit:graphql:{user_id}"
+
+            is_limited, retry_after = LuaLimiter.check_rate_limit(key, max_requests, window_seconds)
             if is_limited:
                 return self._rate_limit_response(retry_after)
 
         return self.get_response(request)
-
-    def _check_rate_limit(self, key: str, limit_str: str) -> tuple[bool, int]:
-        """Check if a rate limit has been exceeded using Redis.
-
-        Args:
-            key: Redis key for this rate limit counter.
-            limit_str: Rate limit string (e.g., '5/15m').
-
-        Returns:
-            Tuple of (is_limited, retry_after_seconds).
-        """
-        try:
-            from django_redis import get_redis_connection
-
-            max_requests, window_seconds = _parse_rate_limit(limit_str)
-            redis_conn = get_redis_connection("default")
-
-            now = time.time()
-            window_start = now - window_seconds
-
-            pipeline = redis_conn.pipeline()
-            pipeline.zremrangebyscore(key, 0, window_start)
-            pipeline.zcard(key)
-            pipeline.zadd(key, {str(now): now})
-            pipeline.expire(key, window_seconds)
-            results = pipeline.execute()
-
-            current_count = results[1]
-            if current_count >= max_requests:
-                oldest = redis_conn.zrange(key, 0, 0, withscores=True)
-                if oldest:
-                    retry_after = int(oldest[0][1] + window_seconds - now) + 1
-                    return True, max(retry_after, 1)
-                return True, window_seconds
-
-            return False, 0
-
-        except Exception:
-            logger.warning("Rate limiting unavailable - Redis connection failed")
-            return False, 0
 
     def _rate_limit_response(self, retry_after: int) -> JsonResponse:
         """Return a 429 Too Many Requests response."""

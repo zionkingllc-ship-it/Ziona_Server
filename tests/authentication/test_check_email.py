@@ -128,9 +128,9 @@ def test_check_email_normalization(client: Client) -> None:
 def test_check_email_rate_limit(client: Client) -> None:
     url = reverse("authentication:check-email")
 
-    with patch(
-        "core.shared.middleware.RateLimitMiddleware._check_rate_limit", return_value=(True, 60)
-    ):
+    # Patch the LuaLimiter that the refactored middleware delegates to.
+    # Return (is_limited=True, retry_after=60) to simulate an exceeded limit.
+    with patch("core.shared.redis_lua.LuaLimiter.check_rate_limit", return_value=(True, 60)):
         response = client.post(url, {"email": "test@example.com"}, content_type="application/json")
 
         assert response.status_code == 429

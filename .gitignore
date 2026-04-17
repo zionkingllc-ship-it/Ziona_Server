@@ -75,6 +75,8 @@ uv.lock
 # Documentation
 docs/graphql-docs/
 public/docs/
+ZIONA_API_COMPLETE_REFERENCE.md
+ZIONA_API_DOCUMENT.md
 
 # JavaScript
 node_modules/
