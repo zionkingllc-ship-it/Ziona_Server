@@ -1,5 +1,6 @@
 """GraphQL types, queries, and mutations for the engagement domain."""
 
+from __future__ import annotations
 
 import logging
 
@@ -31,6 +32,8 @@ class SavePayload:
 
     success: bool
     saved: bool = False
+    folder: BookmarkFolderType | None = None
+    post: FeedPost | None = None
     stats: PostStats | None = None
     error: ErrorType | None = None
     message: str | None = None
@@ -76,7 +79,7 @@ class CommentType:
     created_at: str
     # Inline reply preview: first 3 replies.
     # Use commentReplies(commentId: ...) query to load more.
-    replies: list["CommentType"] = strawberry.field(default_factory=list)
+    replies: list[CommentType] = strawberry.field(default_factory=list)
 
 
 @strawberry.type
@@ -409,6 +412,7 @@ class EngagementMutations:
         info: strawberry.types.Info,
         post_id: str,
         folder_id: str | None = None,
+        folder_name: str | None = None,
     ) -> SavePayload:
         """
         Save a post directly to a custom user Folder bookmark state natively.
@@ -432,7 +436,22 @@ class EngagementMutations:
             )
 
         try:
-            result = EngagementService.save_post(user_id, post_id, folder_id)
+            result = EngagementService.save_post(user_id, post_id, folder_id, folder_name)
+
+            # Map post natively
+            post_obj = None
+            if result.post:
+                post_obj = _dto_to_feed_post(result.post)
+
+            folder_obj = None
+            if result.folder:
+                folder_obj = BookmarkFolderType(
+                    id=result.folder.id,
+                    name=result.folder.name,
+                    saved_count=result.folder.saved_count,
+                    created_at=result.folder.created_at,
+                )
+
             from core.posts.services import PostService
 
             p = PostService.get_post(post_id, user_id)
@@ -442,7 +461,9 @@ class EngagementMutations:
                 shares_count=p.stats.shares_count,
                 saves_count=p.stats.saves_count,
             )
-            return SavePayload(success=True, saved=result.saved, stats=stats)
+            return SavePayload(
+                success=True, saved=result.saved, stats=stats, folder=folder_obj, post=post_obj
+            )
         except EngagementError as e:
             return SavePayload(
                 success=False,

@@ -506,9 +506,9 @@ class PostService:
                     },
                 )
 
-            # Special case for Bible posts
-            if post.scripture_book and post.scripture_chapter:
-                actual_type = "bible"
+            # We now allow TEXT posts with scripture natively.
+            # Using the exact post.post_type stored in DB (text, video, image)
+            actual_type = post.post_type
 
         def _get_count(post, attr, fallback_qs=None):
             val = getattr(post, attr, None)

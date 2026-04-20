@@ -436,6 +436,7 @@ class EngagementService:
         user_id: str,
         post_id: str,
         folder_id: str | None = None,
+        folder_name: str | None = None,
     ) -> SaveResponseDTO:
         """Save/bookmark a post.
 
@@ -462,7 +463,9 @@ class EngagementService:
         EngagementService._ensure_default_folders(user_id)
 
         folder = None
-        if folder_id:
+        if folder_name and not folder_id:
+            folder, _ = BookmarkFolder.objects.get_or_create(user_id=user_id, name=folder_name)
+        elif folder_id:
             folder = BookmarkFolder.objects.filter(id=folder_id, user_id=user_id).first()
             if not folder:
                 raise EngagementError(
@@ -480,7 +483,26 @@ class EngagementService:
                 "post_saved",
                 extra={"user_id": user_id, "post_id": post_id},
             )
-            return SaveResponseDTO(success=True, saved=True)
+            # Rehydrate Full Pointers correctly
+            folder_dto = None
+            if folder:
+                folder_count = Save.objects.filter(folder_id=folder.id).count()
+                from core.shared.dtos import BookmarkFolderDTO
+
+                folder_dto = BookmarkFolderDTO(
+                    id=str(folder.id),
+                    name=folder.name,
+                    saved_count=folder_count,
+                    created_at=folder.created_at.isoformat(),
+                )
+
+            from core.posts.services import PostService
+
+            post_dto = PostService._build_post_dto(
+                post=post, media_items=list(post.media_files.all()), viewer_id=user_id
+            )
+
+            return SaveResponseDTO(success=True, saved=True, folder=folder_dto, post=post_dto)
         except IntegrityError as e:
             raise EngagementError(
                 message="You have already saved this post.",

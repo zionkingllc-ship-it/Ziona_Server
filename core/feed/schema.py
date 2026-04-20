@@ -3,6 +3,7 @@
 
 import dataclasses
 import logging
+import typing
 
 import strawberry
 
@@ -170,6 +171,9 @@ class FeedPost:
     share_url: str
     created_at: str
     scripture: FeedPostScripture | None = None
+    saved_in_folders: list[
+        typing.Annotated["BookmarkFolderType", strawberry.lazy("core.engagement.schema")]  # noqa: F821
+    ] | None = None
 
     _media_list: strawberry.Private[list[MediaFileType]] = dataclasses.field(default_factory=list)
 
@@ -353,6 +357,18 @@ def _dto_to_feed_post(dto) -> FeedPost:
             else None
         ),
         _media_list=media_list,
+        saved_in_folders=[
+            typing.cast(
+                typing.Any,
+                {
+                    "id": folder.get("id"),
+                    "name": folder.get("name"),
+                    "saved_count": folder.get("saved_count", 0),
+                    "created_at": folder.get("created_at", ""),
+                },
+            )
+            for folder in getattr(dto, "saved_in_folders", []) or []
+        ],
     )
 
 

@@ -1,4 +1,5 @@
 import logging
+import typing
 from typing import Annotated, Optional
 
 import strawberry
@@ -411,6 +412,9 @@ class Post:
     post_type: PostType = strawberry.field(name="type")
     created_at: str
     share_url: str
+    saved_in_folders: list[
+        typing.Annotated["BookmarkFolderType", strawberry.lazy("core.engagement.schema")]  # noqa: F821
+    ] | None = None
 
     _category_id: strawberry.Private[str | None] = None
     _dto: strawberry.Private[object] = None
@@ -554,6 +558,18 @@ def _dto_to_post(dto) -> Post:
         _category_id=dto.category_id,
         _dto=dto,
         _raw_type=dto.type,
+        saved_in_folders=[
+            typing.cast(
+                typing.Any,
+                {
+                    "id": folder.get("id"),
+                    "name": folder.get("name"),
+                    "saved_count": folder.get("saved_count", 0),
+                    "created_at": folder.get("created_at", ""),
+                },
+            )
+            for folder in getattr(dto, "saved_in_folders", []) or []
+        ],
     )
 
 

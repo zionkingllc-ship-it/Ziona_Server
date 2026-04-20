@@ -96,6 +96,7 @@ class PostResponseDTO(CamelCaseModel):
     id: str
     type: Literal["video", "image", "text", "bible"]
     created_at: str  # ISO 8601
+    saved_in_folders: list[BookmarkFolderDTO] | None = None
     caption: str | None = None
     category_id: str | None = None
     author: AuthorDTO
@@ -124,9 +125,6 @@ class ScriptureDTO(CamelCaseModel):
     verse_start: int
     verse_end: int | None = None
     verses: list[ScriptureVerseDTO] = []
-
-
-PostResponseDTO.model_rebuild()
 
 
 class UserSuggestionDTO(CamelCaseModel):
@@ -212,6 +210,8 @@ class SaveResponseDTO(CamelCaseModel):
     success: bool
     saved: bool
     saves_count: int = 0
+    folder: BookmarkFolderDTO | None = None
+    post: PostResponseDTO | None = None
 
 
 class BookmarkFolderDTO(CamelCaseModel):
@@ -373,3 +373,8 @@ class SetInterestsResponseDTO(CamelCaseModel):
 
     success: bool
     interests: list[str] = []
+
+
+# Resolve forward refs
+PostResponseDTO.model_rebuild()
+SaveResponseDTO.model_rebuild()
