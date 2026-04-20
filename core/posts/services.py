@@ -240,6 +240,22 @@ class PostService:
         except Exception:
             logger.warning("Failed to queue feed cache invalidation")
 
+        # 7. Fan-out post to followers' Redis feed inboxes (async).
+        try:
+            from core.feed.tasks import fan_out_post_to_inboxes
+
+            fan_out_post_to_inboxes.delay(str(post.id), str(user.id))
+        except Exception:
+            logger.warning("Failed to queue feed inbox fan-out")
+
+        # 8. Increment cached active-post counter.
+        try:
+            from core.shared.counter_cache import post_counter
+
+            post_counter.increment()
+        except Exception:
+            logger.warning("Failed to increment post counter cache")
+
         return PostService._build_post_dto(
             post,
             resolved_media_files,
@@ -383,6 +399,22 @@ class PostService:
             cache.delete(f"user_me_data_{user_id}")
         except Exception:
             logger.warning("Failed to clear user_me_data cache after delete_post")
+
+        # Remove post from followers' Redis feed inboxes.
+        try:
+            from core.feed.tasks import remove_post_from_inboxes
+
+            remove_post_from_inboxes.delay(str(post.id), str(post.user_id))
+        except Exception:
+            logger.warning("Failed to queue feed inbox removal")
+
+        # Decrement cached active-post counter.
+        try:
+            from core.shared.counter_cache import post_counter
+
+            post_counter.decrement()
+        except Exception:
+            logger.warning("Failed to decrement post counter cache")
 
         logger.info(
             "post_deleted",
