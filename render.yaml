@@ -13,9 +13,10 @@ services:
       python manage.py collectstatic --noinput && 
       python manage.py seed_posts && 
       python manage.py shell -c "from strawberry.printer import print_schema; from config.graphql_schema import schema; open('schema.graphql', 'w').write(print_schema(schema))" && 
+      python manage.py import_bible kjv asv web rv --resume && 
       npm install && 
       npm run docs:build
-    startCommand: celery -A config worker --loglevel=info --concurrency=1 & python manage.py import_bible kjv asv web rv --resume & gunicorn config.wsgi:application --bind 0.0.0.0:$PORT --workers 1 --timeout 120
+    startCommand: celery -A config worker --loglevel=info --concurrency=1 & gunicorn config.wsgi:application --bind 0.0.0.0:$PORT --workers 1 --threads 2 --timeout 120 --keep-alive 120
     envVars:
       - key: DJANGO_SETTINGS_MODULE
         value: config.settings.staging
