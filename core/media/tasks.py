@@ -147,9 +147,15 @@ def _generate_video_thumbnail(media_file: MediaFile) -> None:
     # stdout=PIPE captures the JPEG bytes directly in memory.
     # stderr=PIPE silences FFmpeg's verbose output from polluting logs.
     # timeout=60 ensures a hung FFmpeg process never blocks a worker forever.
+    #
+    # imageio_ffmpeg.get_ffmpeg_exe() returns the absolute path to the
+    # pip-bundled static FFmpeg binary — no system install required.
     # -----------------------------------------------------------------------
+    import imageio_ffmpeg
+
+    ffmpeg_bin = imageio_ffmpeg.get_ffmpeg_exe()
     cmd = [
-        "ffmpeg",
+        ffmpeg_bin,
         "-ss",
         "1",  # Seek to 1s
         "-i",

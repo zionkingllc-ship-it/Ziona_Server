@@ -28,6 +28,9 @@ django-celery-beat==2.6.0
 # GCP Storage
 google-cloud-storage==2.14.0
 
+# Media Processing (bundles a static FFmpeg binary via pip — no OS install needed)
+imageio-ffmpeg==0.5.1
+
 # ASGI Server
 uvicorn[standard]==0.27.0
 gunicorn==21.2.0
