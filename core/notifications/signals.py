@@ -2,12 +2,12 @@ import logging
 import re
 
 from django.contrib.auth import get_user_model
-from django.db.models.signals import post_save
+from django.db.models.signals import post_delete, post_save
 from django.dispatch import receiver
 
 from core.circles.models import Anchor
 from core.engagement.models import Comment, Like
-from core.notifications.models import NotificationType
+from core.notifications.models import Notification, NotificationStatus, NotificationType
 from core.notifications.services import batch_like_notifications, create_notification
 from core.posts.models import Post
 
@@ -130,3 +130,54 @@ def handle_anchor_notifications(sender, instance, created, **kwargs):
         return
     # Marked for daily batch processing by Celery task (send_daily_anchor_notifications)
     pass
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Issue #8: Orphaned notification cleanup on content deletion
+#
+# Notification.reference_id is a plain UUIDField (not a FK), so Django cannot
+# automatically cascade when a Post or Comment is deleted. Without these
+# signals, tapping a notification for deleted content causes a 404 on the
+# client. We soft-delete matching notifications so the row is preserved for
+# analytics but is invisible to the user.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+@receiver(post_delete, sender=Post)
+def cleanup_notifications_on_post_delete(sender, instance, **kwargs):
+    """Soft-delete any notifications whose reference_id points to this post."""
+    try:
+        updated = Notification.objects.filter(
+            reference_id=instance.id,
+            reference_type="post",
+            status=NotificationStatus.ACTIVE,
+        ).update(status=NotificationStatus.DELETED)
+        if updated:
+            logger.info(
+                "orphaned_notifications_cleaned",
+                extra={"post_id": str(instance.id), "count": updated},
+            )
+    except Exception as e:
+        logger.error(
+            f"Error cleaning notifications for deleted post {instance.id}: {e}", exc_info=True
+        )
+
+
+@receiver(post_delete, sender=Comment)
+def cleanup_notifications_on_comment_delete(sender, instance, **kwargs):
+    """Soft-delete any notifications whose reference_id points to this comment."""
+    try:
+        updated = Notification.objects.filter(
+            reference_id=instance.id,
+            reference_type="comment",
+            status=NotificationStatus.ACTIVE,
+        ).update(status=NotificationStatus.DELETED)
+        if updated:
+            logger.info(
+                "orphaned_notifications_cleaned",
+                extra={"comment_id": str(instance.id), "count": updated},
+            )
+    except Exception as e:
+        logger.error(
+            f"Error cleaning notifications for deleted comment {instance.id}: {e}", exc_info=True
+        )

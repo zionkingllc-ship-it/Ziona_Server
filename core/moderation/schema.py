@@ -140,14 +140,19 @@ class ModerationMutations:
         info: strawberry.types.Info,
         report_id: str,
         status: str,
+        action: str | None = None,
+        internal_notes: str | None = None,
     ) -> ReportPayload:
         """
-        Transition report ticket workflow explicitly dynamically.
+        Transition report ticket workflow and execute the moderation action.
 
         **Authentication:** Required (User Role mapping Admin)
         **Parameters:**
         - report_id (String, required) - Valid remote ticket
-        - status (String, required) - Resolution context natively
+        - status (String, required) - Resolution context (reviewed, actioned, dismissed)
+        - action (String, optional) - Moderation action: dismiss, hide_content,
+          warn_user, delete_content, delete_and_warn
+        - internal_notes (String, optional) - Admin-only notes, never shown to users
         **Returns:** ReportPayload tracking transition exactly natively
         **Errors:** UNAUTHENTICATED, PERMISSION_DENIED
         """
@@ -176,6 +181,8 @@ class ModerationMutations:
                 report_id=report_id,
                 reviewer_id=user_id,
                 status=status,
+                action=action,
+                internal_notes=internal_notes or "",
             )
             from core.moderation.models import Report
 

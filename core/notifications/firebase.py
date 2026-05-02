@@ -48,7 +48,10 @@ def initialize_firebase():
 def send_fcm_notification(tokens: list[str], title: str, body: str, data: dict[str, Any]):
     """
     Send push notification via FCM using multicast.
-    Expects data containing standard Deep Link payload.
+
+    Tokens are sent in chunks of at most 500 to respect the FCM hard limit.
+    Each chunk is dispatched independently so a failure in one chunk does not
+    prevent the remaining chunks from being sent.
     """
     if not tokens:
         return
@@ -65,38 +68,48 @@ def send_fcm_notification(tokens: list[str], title: str, body: str, data: dict[s
     # Ensure data values are strings as required by FCM
     formatted_data = {str(k): str(v) for k, v in data.items() if v is not None}
 
-    message = messaging.MulticastMessage(
-        notification=messaging.Notification(
-            title=title,
-            body=body,
-        ),
-        data=formatted_data,
-        tokens=tokens,
-    )
+    # FCM hard limit: a single MulticastMessage may not contain more than 500
+    # registration tokens.  We chunk the list and send each slice separately.
+    fcm_chunk_size = 500
+    all_invalid_tokens: list[str] = []
 
-    try:
-        response = messaging.send_each_for_multicast(message)
-        logger.info(
-            f"FCM Multicast: {response.success_count} successes, {response.failure_count} failures."
+    for chunk_start in range(0, len(tokens), fcm_chunk_size):
+        chunk = tokens[chunk_start : chunk_start + fcm_chunk_size]
+
+        message = messaging.MulticastMessage(
+            notification=messaging.Notification(
+                title=title,
+                body=body,
+            ),
+            data=formatted_data,
+            tokens=chunk,
         )
 
-        if response.failure_count > 0:
-            invalid_tokens = []
-            for i, result in enumerate(response.responses):
-                if not result.success:
-                    # e.g., Unregistered, InvalidRegistration
-                    err_code = getattr(result.exception, "code", "UNKNOWN")
-                    if err_code in [
-                        "NOT_FOUND",
-                        "INVALID_ARGUMENT",
-                        "messaging/invalid-registration-token",
-                        "messaging/registration-token-not-registered",
-                    ]:
-                        invalid_tokens.append(tokens[i])
+        try:
+            response = messaging.send_each_for_multicast(message)
+            logger.info(
+                f"FCM chunk [{chunk_start}:{chunk_start + len(chunk)}]: "
+                f"{response.success_count} successes, {response.failure_count} failures."
+            )
 
-            if invalid_tokens:
-                DeviceToken.objects.filter(token__in=invalid_tokens).update(is_active=False)
-                logger.info(f"Deactivated {len(invalid_tokens)} invalid device tokens.")
+            if response.failure_count > 0:
+                for i, result in enumerate(response.responses):
+                    if not result.success:
+                        err_code = getattr(result.exception, "code", "UNKNOWN")
+                        if err_code in [
+                            "NOT_FOUND",
+                            "INVALID_ARGUMENT",
+                            "messaging/invalid-registration-token",
+                            "messaging/registration-token-not-registered",
+                        ]:
+                            all_invalid_tokens.append(chunk[i])
 
-    except Exception as e:
-        logger.error(f"Failed to send multicast FCM message: {e}", exc_info=True)
+        except Exception as e:
+            logger.error(
+                f"Failed to send FCM chunk [{chunk_start}:{chunk_start + len(chunk)}]: {e}",
+                exc_info=True,
+            )
+
+    if all_invalid_tokens:
+        DeviceToken.objects.filter(token__in=all_invalid_tokens).update(is_active=False)
+        logger.info(f"Deactivated {len(all_invalid_tokens)} invalid device tokens.")

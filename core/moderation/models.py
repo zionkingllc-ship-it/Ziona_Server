@@ -83,14 +83,14 @@ class Report(TimestampedModel):
         "posts.Post",
         null=True,
         blank=True,
-        on_delete=models.CASCADE,
+        on_delete=models.SET_NULL,  # Preserve audit trail when post is deleted
         related_name="reports",
     )
     comment = models.ForeignKey(
         "engagement.Comment",
         null=True,
         blank=True,
-        on_delete=models.CASCADE,
+        on_delete=models.SET_NULL,  # Preserve audit trail when comment is deleted
         related_name="reports",
     )
     reason = models.CharField(
@@ -133,6 +133,14 @@ class Report(TimestampedModel):
             models.Index(fields=["post"], name="idx_report_post"),
             models.Index(fields=["comment"], name="idx_report_comment"),
             models.Index(fields=["target_type", "target_id"], name="idx_report_target"),
+        ]
+        constraints = [
+            # Prevent the same user from filing duplicate reports for the
+            # same content+reason (idempotency at DB level — Issue #7).
+            models.UniqueConstraint(
+                fields=["reporter", "target_type", "target_id", "reason"],
+                name="unique_user_report",
+            )
         ]
 
     def __str__(self) -> str:

@@ -197,22 +197,41 @@ def batch_like_notifications(
 ):
     """
     Track and batch multiple likes within a 5-minute window.
+
+    Uses atomic Redis SET operations (sadd / scard / smembers) to avoid the
+    read-modify-write race condition present in a plain list-based cache approach.
+    Two concurrent likes both call sadd independently; each is a single atomic
+    server-side op so neither can overwrite the other.
+
+    Falls back to the original list approach when the cache backend does not
+    expose a Redis client (e.g. LocMemCache in tests / CI).
     """
     cache_key = f"likes_batch_{reference_type}_{reference_id}"
-    likes_data = cache.get(cache_key, [])
 
-    if actor_username not in likes_data:
-        likes_data.append(actor_username)
-        cache.set(cache_key, likes_data, timeout=300)  # 5 minutes
+    try:
+        # Atomic Redis SET path ─ preferred in production
+        redis_client = cache.client.get_client()
+        # sadd returns the number of elements actually added (0 if already present)
+        redis_client.sadd(cache_key, actor_username)
+        # Refresh the TTL on every new like so the window stays at 5 minutes
+        redis_client.expire(cache_key, 300)
+        count = redis_client.scard(cache_key)
+        members = {
+            m.decode() if isinstance(m, bytes) else m for m in redis_client.smembers(cache_key)
+        }
+        first_liker = next(iter(members))  # deterministic enough for display
+    except (AttributeError, Exception):
+        # Fallback: non-Redis cache backend (tests, dev with LocMemCache)
+        likes_data = cache.get(cache_key, [])
+        if actor_username not in likes_data:
+            likes_data.append(actor_username)
+            cache.set(cache_key, likes_data, timeout=300)
+        count = len(likes_data)
+        first_liker = likes_data[0]
 
-    # We delay creating single notifications if we are batching.
-    # For MVP: immediately rewrite the most recent notification for this target
-    count = len(likes_data)
     if count == 1:
         message = NOTIFICATION_TEMPLATES[like_type].format(username=actor_username)
     else:
-        # Example: "John and 2 others liked your post"
-        first_liker = likes_data[0]
         others_count = count - 1
         message = BATCHED_LIKE_TEMPLATES[like_type].format(
             username=first_liker, others_count=others_count
