@@ -229,7 +229,7 @@ class PostService:
             from django.core.cache import cache
 
             cache.delete(f"user_me_data_{user_id}")
-        except Exception:
+        except (ConnectionError, TimeoutError, OSError):
             logger.warning("Failed to clear user_me_data cache after create_post")
 
         # 6. Invalidate followers' feed caches asynchronously.
@@ -237,7 +237,7 @@ class PostService:
             from core.feed.tasks import invalidate_followers_feed_cache
 
             invalidate_followers_feed_cache.delay(str(user.id))
-        except Exception:
+        except Exception:  # noqa: BLE001 — Celery broker can raise arbitrary connection errors
             logger.warning("Failed to queue feed cache invalidation")
 
         # 7. Fan-out post to followers' Redis feed inboxes (async).
@@ -245,7 +245,7 @@ class PostService:
             from core.feed.tasks import fan_out_post_to_inboxes
 
             fan_out_post_to_inboxes.delay(str(post.id), str(user.id))
-        except Exception:
+        except Exception:  # noqa: BLE001 — Celery broker can raise arbitrary connection errors
             logger.warning("Failed to queue feed inbox fan-out")
 
         # 8. Increment cached active-post counter.
@@ -253,7 +253,7 @@ class PostService:
             from core.shared.counter_cache import post_counter
 
             post_counter.increment()
-        except Exception:
+        except (ConnectionError, TimeoutError, OSError):
             logger.warning("Failed to increment post counter cache")
 
         return PostService._build_post_dto(
@@ -348,7 +348,7 @@ class PostService:
             from django.core.cache import cache
 
             cache.delete(f"user_me_data_{user_id}")
-        except Exception:
+        except (ConnectionError, TimeoutError, OSError):
             logger.warning("Failed to clear user_me_data cache after update_post")
 
         logger.info(
@@ -397,7 +397,7 @@ class PostService:
             from django.core.cache import cache
 
             cache.delete(f"user_me_data_{user_id}")
-        except Exception:
+        except (ConnectionError, TimeoutError, OSError):
             logger.warning("Failed to clear user_me_data cache after delete_post")
 
         # Remove post from followers' Redis feed inboxes.
@@ -405,7 +405,7 @@ class PostService:
             from core.feed.tasks import remove_post_from_inboxes
 
             remove_post_from_inboxes.delay(str(post.id), str(post.user_id))
-        except Exception:
+        except Exception:  # noqa: BLE001 — Celery broker can raise arbitrary connection errors
             logger.warning("Failed to queue feed inbox removal")
 
         # Decrement cached active-post counter.
@@ -413,7 +413,7 @@ class PostService:
             from core.shared.counter_cache import post_counter
 
             post_counter.decrement()
-        except Exception:
+        except (ConnectionError, TimeoutError, OSError):
             logger.warning("Failed to decrement post counter cache")
 
         logger.info(

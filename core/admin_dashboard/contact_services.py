@@ -107,8 +107,14 @@ class ContactService:
             contact.replied_at = datetime.now(timezone.utc)
         contact.save(update_fields=["status", "replied_at"])
 
-        # Send email
-        _send_reply_email(contact, message)
+        # Dispatch email asynchronously AFTER the transaction commits.
+        # Using on_commit() guarantees:
+        #   1. The Celery task only fires once the DB row is durably written.
+        #   2. The SMTP network call never holds the DB row lock.
+        #   3. Celery can retry on transient SMTP failures without data loss.
+        from core.admin_dashboard.tasks import send_contact_reply_email
+
+        transaction.on_commit(lambda: send_contact_reply_email.delay(str(contact.id), message))
 
         log_admin_action(
             admin_user=admin_user,
@@ -204,24 +210,6 @@ class ContactService:
 # ─────────────────────────────────────────
 # Private helpers
 # ─────────────────────────────────────────
-
-
-def _send_reply_email(contact, reply_message: str):
-    """Send reply email via Django's configured email backend (Ensend)."""
-    try:
-        from django.conf import settings
-        from django.core.mail import send_mail
-
-        send_mail(
-            subject="Re: Your message to Ziona Support",
-            message=reply_message,
-            from_email=settings.DEFAULT_FROM_EMAIL,
-            recipient_list=[contact.email],
-            fail_silently=True,
-        )
-        logger.info("reply_email_sent", extra={"to": contact.email})
-    except Exception:
-        logger.warning("Failed to send reply email", exc_info=True)
 
 
 def _contact_to_dict(contact) -> dict:

@@ -113,6 +113,14 @@ class UserManagementService:
                 code=ErrorCode.USER_NOT_FOUND,
             )
 
+        # Role-hierarchy guard: admins cannot moderate other admin accounts.
+        # This prevents privilege escalation where a rogue admin locks out founders.
+        if user.is_admin:
+            raise AdminError(
+                message="Cannot apply moderation actions to an administrator account.",
+                code=ErrorCode.PERMISSION_DENIED,
+            )
+
         if user.status == UserStatus.WARNED:
             raise AdminError(
                 message="User is already warned.",
@@ -172,6 +180,13 @@ class UserManagementService:
             raise AdminError(
                 message="User not found.",
                 code=ErrorCode.USER_NOT_FOUND,
+            )
+
+        # Role-hierarchy guard: admins cannot moderate other admin accounts.
+        if user.is_admin:
+            raise AdminError(
+                message="Cannot apply moderation actions to an administrator account.",
+                code=ErrorCode.PERMISSION_DENIED,
             )
 
         if user.status == UserStatus.SUSPENDED:
@@ -245,6 +260,13 @@ class UserManagementService:
             raise AdminError(
                 message="User not found.",
                 code=ErrorCode.USER_NOT_FOUND,
+            )
+
+        # Role-hierarchy guard: admins cannot delete other admin accounts.
+        if user.is_admin:
+            raise AdminError(
+                message="Cannot apply moderation actions to an administrator account.",
+                code=ErrorCode.PERMISSION_DENIED,
             )
 
         # Snapshot before delete

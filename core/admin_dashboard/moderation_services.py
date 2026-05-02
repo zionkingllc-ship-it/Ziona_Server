@@ -42,7 +42,9 @@ class AdminModerationService:
         qs = Report.objects.select_related(
             "reporter",
             "post",
+            "post__user",  # Eliminates N+1: _report_to_dict reads post.user.username
             "comment",
+            "comment__user",  # Eliminates N+1: _report_to_dict reads comment.user.username
             "reviewed_by",
         ).order_by("-created_at")
 

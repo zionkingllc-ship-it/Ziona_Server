@@ -21,6 +21,56 @@ logger = logging.getLogger("core.admin_dashboard")
     retry_backoff=True,
     acks_late=True,
 )
+def send_contact_reply_email(self, contact_id: str, reply_message: str):
+    """Send a reply email to a contact message submitter.
+
+    Dispatched asynchronously via transaction.on_commit() from
+    contact_services.reply_to_contact so the SMTP network call never
+    holds a database row lock.
+
+    Uses fail_silently=False so Celery can retry on transient SMTP failures.
+    Retries up to 3 times with exponential back-off (60s, 120s, 240s).
+    """
+    try:
+        from django.conf import settings
+        from django.core.mail import send_mail
+
+        from core.admin_dashboard.models import ContactMessage
+
+        contact = ContactMessage.objects.filter(id=contact_id).first()
+        if not contact:
+            logger.warning(
+                "send_contact_reply_email: contact not found — skipping.",
+                extra={"contact_id": contact_id},
+            )
+            return
+
+        send_mail(
+            subject="Re: Your message to Ziona Support",
+            message=reply_message,
+            from_email=settings.DEFAULT_FROM_EMAIL,
+            recipient_list=[contact.email],
+            fail_silently=False,  # Let Celery retry on SMTP failure
+        )
+        logger.info("reply_email_sent", extra={"to": contact.email, "contact_id": contact_id})
+
+    except Exception as exc:
+        logger.error(
+            f"send_contact_reply_email failed (attempt {self.request.retries + 1}): {exc}",
+            extra={"contact_id": contact_id},
+            exc_info=True,
+        )
+        raise self.retry(exc=exc, countdown=60 * (2**self.request.retries)) from exc
+
+
+@shared_task(
+    bind=True,
+    max_retries=3,
+    default_retry_delay=60,
+    autoretry_for=(Exception,),
+    retry_backoff=True,
+    acks_late=True,
+)
 def post_scheduled_anchor(self, anchor_id: str):
     """Post a scheduled anchor when its scheduled time arrives.
 

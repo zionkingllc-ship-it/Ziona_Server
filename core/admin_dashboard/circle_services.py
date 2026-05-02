@@ -130,7 +130,17 @@ class CircleManagementService:
         Returns:
             Dict with the created circle data.
         """
-        from core.circles.models import Circle
+        from core.circles.models import Circle, CircleRule
+
+        # ── Bug #6: Prevent unhandled IntegrityError 500 on duplicate circle names ──
+        # Uses case-insensitive filter so "Prayer Group" and "prayer group" are
+        # treated as the same circle. Runs inside the atomic transaction so there
+        # is no TOCTOU race between the check and the create.
+        if Circle.objects.filter(name__iexact=name, deleted_at__isnull=True).exists():
+            raise AdminError(
+                message=f"A circle named '{name}' already exists.",
+                code=ErrorCode.DUPLICATE_NAME,
+            )
 
         circle = Circle.objects.create(
             name=name,
@@ -141,6 +151,83 @@ class CircleManagementService:
             is_active=True,
             status="active",
         )
+
+        # ── Bug #5: Seed 9 default community guidelines ──
+        # The CircleRule model is a global rules table (no circle FK).
+        # We seed it once, idempotently, so every circle creation
+        # ensures the platform-wide defaults exist.
+        _default_circle_rules = [
+            (
+                1,
+                "Respect & Dignity",
+                "Treat all members with respect. Personal attacks, insults, or "
+                "degrading language are not permitted.",
+            ),
+            (
+                2,
+                "Christ-Centered Content",
+                "All posts and discussions should align with Biblical teachings "
+                "and glorify Christ.",
+            ),
+            (
+                3,
+                "No Hate Speech",
+                "Hate speech, discrimination, or content targeting any group "
+                "based on race, ethnicity, or gender is strictly prohibited.",
+            ),
+            (
+                4,
+                "No Spam or Self-Promotion",
+                "Unsolicited advertisements, spam, or excessive self-promotion " "are not allowed.",
+            ),
+            (
+                5,
+                "Guard Your Words",
+                "Use language that builds up the body of Christ. Profanity and "
+                "crude language are not welcome here.",
+            ),
+            (
+                6,
+                "Protect Privacy",
+                "Do not share personal information of other members without their "
+                "explicit consent.",
+            ),
+            (
+                7,
+                "Scripture Integrity",
+                "Quote Scripture accurately and in context. Misrepresentation of "
+                "the Bible is not permitted.",
+            ),
+            (
+                8,
+                "No False Teaching",
+                "Content promoting heresy, cults, or doctrine clearly contrary to "
+                "orthodox Christianity will be removed.",
+            ),
+            (
+                9,
+                "Report, Don't Retaliate",
+                "If you see a rule violation, use the report feature. Do not "
+                "engage in arguments or retaliate.",
+            ),
+        ]
+
+        if not CircleRule.objects.filter(is_default=True).exists():
+            CircleRule.objects.bulk_create(
+                [
+                    CircleRule(
+                        rule_number=num,
+                        title=title,
+                        description=desc,
+                        is_default=True,
+                    )
+                    for num, title, desc in _default_circle_rules
+                ]
+            )
+            logger.info(
+                "default_circle_rules_seeded",
+                extra={"circle_id": str(circle.id), "count": len(_default_circle_rules)},
+            )
 
         log_admin_action(
             admin_user=admin_user,

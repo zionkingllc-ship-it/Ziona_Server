@@ -258,10 +258,14 @@ class AnalyticsService:
         total_data = []
         new_data = []
 
-        for entry in entries:
-            labels.append(entry["date"].strftime("%b %d"))
-            total_data.append(entry["total_users"])
-            new_data.append(entry["new_users"])
+        # Fill every calendar day in the range with 0 first, then merge DB
+        # entries. This guarantees the arrays are contiguous even when Celery
+        # Beat misses a night and no DailyAnalytics row exists for that date.
+        filled = _fill_date_gaps(days, entries, ["total_users", "new_users"])
+        for day, vals in sorted(filled.items()):
+            labels.append(day.strftime("%b %d"))
+            total_data.append(vals["total_users"])
+            new_data.append(vals["new_users"])
 
         return {
             "labels": labels,
@@ -299,10 +303,11 @@ class AnalyticsService:
         posts_data = []
         comments_data = []
 
-        for entry in entries:
-            labels.append(entry["date"].strftime("%b %d"))
-            posts_data.append(entry["posts_count"])
-            comments_data.append(entry["comments_count"])
+        filled = _fill_date_gaps(days, entries, ["posts_count", "comments_count"])
+        for day, vals in sorted(filled.items()):
+            labels.append(day.strftime("%b %d"))
+            posts_data.append(vals["posts_count"])
+            comments_data.append(vals["comments_count"])
 
         return {
             "labels": labels,
@@ -336,10 +341,11 @@ class AnalyticsService:
         received_data = []
         resolved_data = []
 
-        for entry in entries:
-            labels.append(entry["date"].strftime("%b %d"))
-            received_data.append(entry["reports_received"])
-            resolved_data.append(entry["reports_resolved"])
+        filled = _fill_date_gaps(days, entries, ["reports_received", "reports_resolved"])
+        for day, vals in sorted(filled.items()):
+            labels.append(day.strftime("%b %d"))
+            received_data.append(vals["reports_received"])
+            resolved_data.append(vals["reports_resolved"])
 
         return {
             "labels": labels,
@@ -380,6 +386,41 @@ def _time_range_to_days(time_range: str) -> int:
         "last_quarter": 90,
     }
     return mapping.get(time_range, 30)
+
+
+def _fill_date_gaps(days: int, db_entries, date_fields: list[str]) -> dict:
+    """Build a complete date-keyed baseline for the given window, padded with zeros.
+
+    Iterates the full date range in Python and merges DB entries into it.
+    This guarantees chart arrays are contiguous (no skipped X-axis points)
+    even when Celery Beat misses a night and no DailyAnalytics row exists.
+
+    Args:
+        days: Number of past days to cover.
+        db_entries: Queryset or iterable of dicts with a 'date' key.
+        date_fields: Field names to extract from each entry.
+
+    Returns:
+        OrderedDict[date, {field: value}] covering all `days` days.
+    """
+    from django.utils import timezone
+
+    baseline: dict = {}
+    today = timezone.now().date()
+
+    # Seed every day in the window with zeros (oldest → newest)
+    for i in range(days, 0, -1):
+        day = today - timedelta(days=i)
+        baseline[day] = {field: 0 for field in date_fields}
+
+    # Merge real DB values where rows exist
+    for entry in db_entries:
+        day = entry["date"]
+        if day in baseline:
+            for field in date_fields:
+                baseline[day][field] = entry.get(field, 0)
+
+    return baseline
 
 
 def _format_action_description(audit_entry) -> str:

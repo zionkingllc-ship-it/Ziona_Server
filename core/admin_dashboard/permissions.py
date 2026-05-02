@@ -54,7 +54,11 @@ def get_admin_user(info: Info):
     except User.DoesNotExist:
         return None
 
-    if not user.is_admin or not user.is_active:
+    # Guard #1: must have admin role and not be soft-deleted (is_active=False)
+    # Guard #2: explicitly block suspended admins — suspend_user() only sets
+    #           user.status = SUSPENDED; it does NOT set is_active = False, so
+    #           the is_active check alone is insufficient.
+    if not user.is_admin or not user.is_active or user.status == "suspended":
         return None
 
     return user
