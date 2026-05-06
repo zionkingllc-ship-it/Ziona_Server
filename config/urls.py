@@ -10,6 +10,7 @@ from strawberry.django.views import GraphQLView
 
 from config.graphql_schema import schema
 from config.swagger import openapi_schema, swagger_ui
+from core.donations.webhooks import stripe_webhook
 from core.posts.views import (
     android_asset_links,
     apple_app_site_association,
@@ -55,6 +56,7 @@ urlpatterns = [
         name="android-asset-links",
     ),
     path("post/<str:post_id>/", share_preview, name="share-preview"),
+    path("api/webhooks/stripe/", stripe_webhook, name="stripe-webhook"),
 ]
 
 

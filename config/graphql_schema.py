@@ -4,9 +4,11 @@ from strawberry.schema import Schema
 from core.admin_dashboard.schema import AdminDashboardMutations, AdminDashboardQueries
 from core.authentication.schema import AuthMutations, AuthQueries
 from core.circles.schema import CircleMutations, CircleQueries
+from core.donations.schema import DonationMutations, DonationQueries
 from core.engagement.schema import EngagementMutations, EngagementQueries
 from core.feed.schema import FeedQueries
 from core.follows.schema import FollowMutations, FollowQueries
+from core.landing.schema import LandingMutations, LandingQueries
 from core.media.schema import MediaMutations
 from core.moderation.schema import ModerationMutations, ModerationQueries
 from core.notifications.schema import NotificationMutations, NotificationQueries
@@ -30,6 +32,8 @@ class Query(
     UserQueries,
     CircleQueries,
     AdminDashboardQueries,
+    LandingQueries,
+    DonationQueries,
 ):
     """Root query type — extends all domain queries."""
 
@@ -49,6 +53,8 @@ class Mutation(
     NotificationMutations,
     CircleMutations,
     AdminDashboardMutations,
+    LandingMutations,
+    DonationMutations,
 ):
     """Root mutation type — extends all domain mutations."""
 

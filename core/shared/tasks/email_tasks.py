@@ -27,39 +27,61 @@ def send_email_async(
     message: str,
     from_email: str | None,
     recipient_list: list[str],
+    html_message: str | None = None,
 ) -> dict:
     """Send an email asynchronously via Celery.
 
-    This task automatically retries on failure with exponential backoff:
+    Supports both plain-text and HTML emails. When `html_message` is provided
+    the email is sent as a multipart/alternative message (plain + HTML) so
+    the Ensend backend receives a proper HTML body.
+
+    Retries automatically with exponential back-off:
     - Retry 1: 1 minute
     - Retry 2: ~5 minutes
     - Retry 3: ~15 minutes
 
-    After 3 failed attempts, logs error to Sentry and gives up.
-
     Args:
         subject: Email subject line.
-        message: Email body (plain text or HTML).
+        message: Plain-text email body (always required as fallback).
         from_email: Sender email address (uses DEFAULT_FROM_EMAIL if None).
         recipient_list: List of recipient email addresses.
+        html_message: Optional HTML body. When supplied, sent as
+            multipart/alternative alongside the plain-text body.
 
     Returns:
         dict with 'success' and 'message' keys.
-
-    Raises:
-        Exception: Retries automatically on any exception.
     """
     try:
-        send_mail(
-            subject=subject,
-            message=message,
-            from_email=from_email or settings.DEFAULT_FROM_EMAIL,
-            recipient_list=recipient_list,
-            fail_silently=False,
-        )
+        sender = from_email or settings.DEFAULT_FROM_EMAIL
+
+        if html_message:
+            from django.core.mail import EmailMultiAlternatives
+
+            msg = EmailMultiAlternatives(
+                subject=subject,
+                body=message,
+                from_email=sender,
+                to=recipient_list,
+            )
+            msg.attach_alternative(html_message, "text/html")
+            msg.send(fail_silently=False)
+        else:
+            send_mail(
+                subject=subject,
+                message=message,
+                from_email=sender,
+                recipient_list=recipient_list,
+                fail_silently=False,
+            )
+
         logger.info(
-            f"Email sent successfully via Celery: {subject}",
-            extra={"recipients": recipient_list, "task_id": self.request.id},
+            "email_sent",
+            extra={
+                "subject": subject,
+                "recipients": recipient_list,
+                "html": bool(html_message),
+                "task_id": self.request.id,
+            },
         )
         return {"success": True, "message": "Email sent"}
 

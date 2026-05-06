@@ -55,6 +55,9 @@ class Notification(TimestampedModel):
         choices=NotificationStatus.choices,
         default=NotificationStatus.ACTIVE,
     )
+    # Digest tracking — set to True once this notification appears in a digest email
+    digest_sent = models.BooleanField(default=False, db_index=True)
+    digest_sent_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         db_table = "notifications"
@@ -86,6 +89,10 @@ class NotificationPreference(TimestampedModel):
     like_notifications = models.BooleanField(default=True)
     circle_activity_notifications = models.BooleanField(default=True)
     admin_announcements = models.BooleanField(default=True)
+    digest_email_enabled = models.BooleanField(
+        default=True,
+        help_text="Whether to receive the daily notification digest email.",
+    )
 
     class Meta:
         db_table = "notification_preferences"

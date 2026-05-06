@@ -58,6 +58,9 @@ LOCAL_APPS = [
     "core.circles",
     "core.scripture",
     "core.admin_dashboard",
+    "core.landing",
+    "core.donations",
+    "core.emails",
 ]
 
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
@@ -218,6 +221,10 @@ CELERY_BEAT_SCHEDULE = {
         "task": "core.notifications.tasks.cleanup_old_notifications",
         "schedule": crontab(day_of_week=0, hour=2, minute=0),
     },
+    "send-daily-notification-digest": {
+        "task": "core.notifications.tasks.send_daily_notification_digest",
+        "schedule": crontab(hour=8, minute=0),
+    },
     "calculate-daily-analytics": {
         "task": "core.admin_dashboard.tasks.calculate_daily_analytics",
         "schedule": crontab(hour=0, minute=5),
@@ -229,6 +236,10 @@ CELERY_BEAT_SCHEDULE = {
     "check-scheduled-anchors": {
         "task": "core.admin_dashboard.tasks.check_scheduled_anchors",
         "schedule": 60,  # every minute
+    },
+    "refresh-company-stats": {
+        "task": "core.landing.tasks.refresh_company_stats",
+        "schedule": crontab(minute=0),  # every hour
     },
 }
 
@@ -243,6 +254,21 @@ ENSEND_API_KEY = env("ENSEND_API_KEY", default="")
 ENSEND_API_URL = env("ENSEND_API_URL", default="https://api.smtpexpress.com/send")
 ENSEND_SENDER_NAME = env("ENSEND_SENDER_NAME", default="Ziona Team")
 DEFAULT_FROM_EMAIL = env("DEFAULT_FROM_EMAIL", default="noreply@ziona.app")
+
+# Brand-specific support routing (used by EmailService.send_internal_contact_notification)
+ZIONA_SUPPORT_EMAIL = env("ZIONA_SUPPORT_EMAIL", default="support@ziona.app")
+ZIONKING_CONTACT_EMAIL = env("ZIONKING_CONTACT_EMAIL", default="info@zionking.org")
+
+# Stripe
+STRIPE_SECRET_KEY = env("STRIPE_SECRET_KEY", default="")
+STRIPE_WEBHOOK_SECRET = env("STRIPE_WEBHOOK_SECRET", default="")
+STRIPE_MONTHLY_PRICE_ID = env("STRIPE_MONTHLY_PRICE_ID", default="")
+
+# App Store Links (used by seed_app_links management command)
+IOS_APP_STORE_URL = env("IOS_APP_STORE_URL", default="https://apps.apple.com/app/ziona")
+ANDROID_PLAY_STORE_URL = env(
+    "ANDROID_PLAY_STORE_URL", default="https://play.google.com/store/apps/ziona"
+)
 
 
 FIREBASE_CREDENTIALS_FILE = env("FIREBASE_CREDENTIALS_FILE", default="")
