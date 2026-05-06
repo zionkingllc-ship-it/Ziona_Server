@@ -18,7 +18,7 @@ from django.core.management.base import BaseCommand
 from core.users.models import UserRole
 
 # -- Credentials (Dev/Staging ONLY) ------------------------------------------
-ADMIN_EMAIL = "Admin@ziona.app"
+ADMIN_EMAIL = "admin@ziona.app"
 ADMIN_PASSWORD = "Admin00"
 ADMIN_USERNAME = "ziona_admin"
 # ----------------------------------------------------------------------------
