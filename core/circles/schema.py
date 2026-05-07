@@ -8,14 +8,19 @@ import strawberry
 from strawberry.types import Info
 
 from core.circles.services import (
+    create_circle_post,
     get_all_circles,
+    get_circle_feed,
     get_my_circles,
     get_suggested_circles,
     join_circle,
     leave_circle,
+    like_anchor,
+    pray_for_anchor,
+    pray_for_circle_post,
 )
 from core.shared.exceptions import ZionaError
-from core.shared.types import ErrorType
+from core.shared.types import ErrorType, PageInfo
 from core.users.schema import UserType, _get_authenticated_user_id
 
 
@@ -123,6 +128,51 @@ class AnchorType:
             return UserType.from_db_model(self._dto.created_by)
         return None
 
+    # ── Mobile engagement counters ──────────────────────────────────────────
+
+    @strawberry.field(name="prayedCount")
+    def prayed_count(self) -> int:
+        return self._dto.prayed_count or 0
+
+    @strawberry.field(name="anchorLikedCount")
+    def anchor_liked_count(self) -> int:
+        return self._dto.anchor_liked_count or 0
+
+    # ── Visual / theming fields ──────────────────────────────────────────────
+
+    @strawberry.field(name="backgroundColors")
+    def background_colors(self) -> list[str] | None:
+        val = self._dto.background_colors
+        return val if val else None
+
+    @strawberry.field(name="backgroundImage")
+    def background_image(self) -> str | None:
+        return self._dto.background_image or None
+
+    @strawberry.field(name="anchorText")
+    def anchor_text(self) -> str | None:
+        return self._dto.anchor_text or None
+
+    @strawberry.field(name="anchorVerse")
+    def anchor_verse(self) -> str | None:
+        return self._dto.anchor_verse or None
+
+    @strawberry.field(name="anchorImageText")
+    def anchor_image_text(self) -> str | None:
+        return self._dto.anchor_image_text or None
+
+    @strawberry.field(name="anchorThumbnail")
+    def anchor_thumbnail(self) -> str | None:
+        return self._dto.anchor_thumbnail or None
+
+    @strawberry.field(name="anchorImage")
+    def anchor_image(self) -> str | None:
+        return self._dto.anchor_image or None
+
+    @strawberry.field(name="anchorVideo")
+    def anchor_video(self) -> str | None:
+        return self._dto.anchor_video or None
+
     @classmethod
     def from_db_model(cls, anchor_instance):
         if not anchor_instance:
@@ -205,6 +255,14 @@ class CircleType:
         anchor = get_active_anchor(str(self._dto.id))
         return AnchorType.from_db_model(anchor)
 
+    @strawberry.field(name="bannerImage")
+    def banner_image(self) -> str | None:
+        return self._dto.banner_image or None
+
+    @strawberry.field(name="profileImage")
+    def profile_image(self) -> str | None:
+        return self._dto.profile_image_url or None
+
     @classmethod
     def from_db_model(cls, circle_instance):
         if not circle_instance:
@@ -222,6 +280,83 @@ class CircleType:
 class JoinCirclePayload:
     success: bool
     circle: CircleType | None = None
+    error: ErrorType | None = None
+
+
+# ──────────────────────────────────────────────
+#  Circle Feed Types
+# ──────────────────────────────────────────────
+
+
+@strawberry.type
+class CirclePostAuthorType:
+    id: str
+    name: str | None = None
+    avatar_url: str | None = strawberry.field(name="avatarUrl", default=None)
+
+    @classmethod
+    def from_user(cls, user) -> "CirclePostAuthorType":
+        instance = cls(id=str(user.id))
+        instance.name = getattr(user, "full_name", None) or getattr(user, "username", None) or ""
+        instance.avatar_url = getattr(user, "avatar_url", None)
+        return instance
+
+
+@strawberry.type
+class CirclePostType:
+    id: str
+    user: CirclePostAuthorType
+    created_at: datetime = strawberry.field(name="createdAt")
+    text: str | None = None
+    image: str | None = None
+    likes_count: int = strawberry.field(name="likesCount", default=0)
+    comments_count: int = strawberry.field(name="commentsCount", default=0)
+    prayed_count: int = strawberry.field(name="prayedCount", default=0)
+    anchor_liked_count: int = strawberry.field(name="anchorLikedCount", default=0)
+
+    @classmethod
+    def from_db_model(cls, post) -> "CirclePostType":
+        return cls(
+            id=str(post.id),
+            user=CirclePostAuthorType.from_user(post.user),
+            created_at=post.created_at,
+            text=post.text or None,
+            image=post.image_url or None,
+            likes_count=post.likes_count,
+            comments_count=post.comments_count,
+            prayed_count=post.prayed_count,
+            anchor_liked_count=post.anchor_liked_count,
+        )
+
+
+@strawberry.type
+class CircleFeedResponse:
+    posts: list[CirclePostType]
+    page_info: PageInfo = strawberry.field(name="pageInfo")
+
+
+@strawberry.type
+class CreateCirclePostPayload:
+    success: bool
+    post: CirclePostType | None = None
+    error: ErrorType | None = None
+
+
+@strawberry.type
+class AnchorEngagementPayload:
+    success: bool
+    prayed: bool | None = None
+    liked: bool | None = None
+    prayed_count: int | None = strawberry.field(name="prayedCount", default=None)
+    anchor_liked_count: int | None = strawberry.field(name="anchorLikedCount", default=None)
+    error: ErrorType | None = None
+
+
+@strawberry.type
+class CirclePostEngagementPayload:
+    success: bool
+    prayed: bool | None = None
+    prayed_count: int | None = strawberry.field(name="prayedCount", default=None)
     error: ErrorType | None = None
 
 
@@ -279,6 +414,20 @@ class CircleQueries:
 
         anchors = get_anchor_history(circle_id, limit, cursor)
         return [AnchorType.from_db_model(a) for a in anchors]
+
+    @strawberry.field(name="circleFeed")
+    def circle_feed(
+        self, info: Info, circle_id: str, page: int = 1, page_size: int = 20
+    ) -> CircleFeedResponse:
+        posts, has_next_page, total_count = get_circle_feed(circle_id, page, page_size)
+        return CircleFeedResponse(
+            posts=[CirclePostType.from_db_model(p) for p in posts],
+            page_info=PageInfo(
+                has_next_page=has_next_page,
+                total_count=total_count,
+                current_page=page,
+            ),
+        )
 
     @strawberry.field(name="anchorByDate")
     def anchor_by_date(self, circle_id: str, date: str) -> AnchorType | None:
@@ -651,5 +800,94 @@ class CircleMutations:
             return CircleReportPayload(success=True)
         except ZionaError as e:
             return CircleReportPayload(
+                success=False, error=ErrorType(code=e.code, message=e.message)
+            )
+
+    @strawberry.mutation(name="createCirclePost")
+    def create_circle_post(
+        self,
+        info: Info,
+        circle_id: str,
+        text: str | None = None,
+        image: str | None = None,
+        media_url: str | None = None,
+    ) -> CreateCirclePostPayload:
+        viewer_id = _get_authenticated_user_id(info)
+        if not viewer_id:
+            return CreateCirclePostPayload(
+                success=False,
+                error=ErrorType(code="UNAUTHORIZED", message="Login required"),
+            )
+        try:
+            post = create_circle_post(
+                user_id=viewer_id,
+                circle_id=circle_id,
+                text=text or "",
+                image_url=image or "",
+                media_url=media_url or "",
+            )
+            return CreateCirclePostPayload(success=True, post=CirclePostType.from_db_model(post))
+        except ZionaError as e:
+            return CreateCirclePostPayload(
+                success=False, error=ErrorType(code=e.code, message=e.message)
+            )
+
+    @strawberry.mutation(name="prayForAnchor")
+    def pray_for_anchor(self, info: Info, anchor_id: str) -> AnchorEngagementPayload:
+        viewer_id = _get_authenticated_user_id(info)
+        if not viewer_id:
+            return AnchorEngagementPayload(
+                success=False,
+                error=ErrorType(code="UNAUTHORIZED", message="Login required"),
+            )
+        try:
+            result = pray_for_anchor(user_id=viewer_id, anchor_id=anchor_id)
+            return AnchorEngagementPayload(
+                success=True,
+                prayed=result["prayed"],
+                prayed_count=result["prayed_count"],
+            )
+        except ZionaError as e:
+            return AnchorEngagementPayload(
+                success=False, error=ErrorType(code=e.code, message=e.message)
+            )
+
+    @strawberry.mutation(name="likeAnchor")
+    def like_anchor(self, info: Info, anchor_id: str) -> AnchorEngagementPayload:
+        viewer_id = _get_authenticated_user_id(info)
+        if not viewer_id:
+            return AnchorEngagementPayload(
+                success=False,
+                error=ErrorType(code="UNAUTHORIZED", message="Login required"),
+            )
+        try:
+            result = like_anchor(user_id=viewer_id, anchor_id=anchor_id)
+            return AnchorEngagementPayload(
+                success=True,
+                liked=result["liked"],
+                anchor_liked_count=result["anchor_liked_count"],
+            )
+        except ZionaError as e:
+            return AnchorEngagementPayload(
+                success=False, error=ErrorType(code=e.code, message=e.message)
+            )
+
+    @strawberry.mutation(name="prayForCirclePost")
+    def pray_for_circle_post(self, info: Info, post_id: str) -> CirclePostEngagementPayload:
+        viewer_id = _get_authenticated_user_id(info)
+        if not viewer_id:
+            return CirclePostEngagementPayload(
+                success=False,
+                error=ErrorType(code="UNAUTHORIZED", message="Login required"),
+            )
+        try:
+            result = pray_for_circle_post(user_id=viewer_id, post_id=post_id)
+            return CirclePostEngagementPayload(
+                success=True,
+                prayed=result["prayed"],
+                prayed_count=result["prayed_count"],
+            )
+        except ZionaError as e:
+            return CirclePostEngagementPayload(
                 success=False, error=ErrorType(code=e.code, message=e.message)
             )

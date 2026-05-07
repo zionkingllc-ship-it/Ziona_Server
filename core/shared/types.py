@@ -30,3 +30,12 @@ class ScriptureVerse:
 
     number: int
     text: str
+
+
+@strawberry.type
+class PageInfo:
+    """Reusable pagination metadata. Used by all paginated GraphQL responses."""
+
+    has_next_page: bool = strawberry.field(name="hasNextPage")
+    total_count: int = strawberry.field(name="totalCount")
+    current_page: int = strawberry.field(name="currentPage")

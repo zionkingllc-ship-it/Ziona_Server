@@ -14,6 +14,7 @@ class Circle(models.Model):
     description = models.TextField()
     cover_image = models.URLField(max_length=500)
     profile_image_url = models.URLField(max_length=500, blank=True, default="")
+    banner_image = models.URLField(max_length=500, blank=True, default="")
     created_by = models.ForeignKey(
         User, on_delete=models.SET_NULL, null=True, related_name="created_circles"
     )
@@ -153,6 +154,21 @@ class Anchor(models.Model):
 
     # Media fields (for image/video type)
     media_url = models.URLField(max_length=500, blank=True)
+    # Typed media fields — separate from the generic media_url
+    anchor_image = models.URLField(max_length=500, blank=True, default="")
+    anchor_video = models.URLField(max_length=500, blank=True, default="")
+    anchor_thumbnail = models.URLField(max_length=500, blank=True, default="")
+
+    # Visual / theming fields (mobile card rendering)
+    background_colors = models.JSONField(default=list, blank=True)
+    background_image = models.URLField(max_length=500, blank=True, default="")
+    anchor_text = models.TextField(blank=True, default="")
+    anchor_verse = models.TextField(blank=True, default="")
+    anchor_image_text = models.TextField(blank=True, default="")
+
+    # Engagement counters (denormalized — updated atomically via F() expressions)
+    prayed_count = models.PositiveIntegerField(default=0)
+    anchor_liked_count = models.PositiveIntegerField(default=0)
 
     # Admin scheduling & lifecycle
     anchor_status = models.CharField(
@@ -384,3 +400,100 @@ class CircleReport(models.Model):
 
     def __str__(self):
         return f"Report {self.id} on {self.target_type} {self.target_id}"
+
+
+# ──────────────────────────────────────────────
+#  PHASE 5: Circle Feed & Engagement Models
+# ──────────────────────────────────────────────
+
+
+class CirclePost(models.Model):
+    """A post by a Circle member. Circle-only — not in the global feed."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    circle = models.ForeignKey(Circle, on_delete=models.CASCADE, related_name="posts")
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="circle_posts")
+    text = models.TextField(blank=True, default="")
+    image_url = models.URLField(max_length=500, blank=True, default="")
+    media_url = models.URLField(max_length=500, blank=True, default="")
+
+    # Denormalized engagement counters — updated atomically via F() expressions
+    likes_count = models.PositiveIntegerField(default=0)
+    comments_count = models.PositiveIntegerField(default=0)
+    prayed_count = models.PositiveIntegerField(default=0)
+    anchor_liked_count = models.PositiveIntegerField(default=0)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    deleted_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = "circle_posts"
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(
+                fields=["circle", "-created_at"],
+                name="idx_cposts_circle_created",
+            ),
+            models.Index(fields=["user"], name="idx_circle_posts_user"),
+        ]
+
+    def __str__(self):
+        return f"Post by {self.user_id} in {self.circle_id}"
+
+
+class AnchorEngagement(models.Model):
+    """Tracks pray/like interactions on an Anchor per user. Toggle semantics."""
+
+    ENGAGEMENT_TYPE_CHOICES = (
+        ("pray", "Pray"),
+        ("like", "Like"),
+    )
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    anchor = models.ForeignKey(Anchor, on_delete=models.CASCADE, related_name="engagements")
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="anchor_engagements")
+    engagement_type = models.CharField(max_length=10, choices=ENGAGEMENT_TYPE_CHOICES)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "anchor_engagements"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["anchor", "user", "engagement_type"],
+                name="unique_anchor_user_engagement",
+            )
+        ]
+        indexes = [
+            models.Index(
+                fields=["anchor", "engagement_type"],
+                name="idx_anchor_engagements_type",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.user_id} {self.engagement_type} on anchor {self.anchor_id}"
+
+
+class CirclePostEngagement(models.Model):
+    """Tracks pray interactions on a CirclePost per user. Toggle semantics."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    post = models.ForeignKey(CirclePost, on_delete=models.CASCADE, related_name="engagements")
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="circle_post_engagements")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "circle_post_engagements"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["post", "user"],
+                name="unique_circle_post_user_pray",
+            )
+        ]
+        indexes = [
+            models.Index(fields=["post"], name="idx_cpost_engage_post"),
+        ]
+
+    def __str__(self):
+        return f"{self.user_id} prayed on post {self.post_id}"
