@@ -16,7 +16,9 @@ def test_admin_required_success(authenticated_admin):
     request_mock.META["REMOTE_ADDR"] = "127.0.0.1"
 
     info = MagicMock()
-    info.context = {"request": request_mock}
+    # Mock context as an object with 'request' attribute
+    info.context = MagicMock()
+    info.context.request = request_mock
 
     result = dummy_resolver(None, info=info)
     assert result == "Success!"
@@ -38,7 +40,9 @@ def test_admin_required_forbidden(create_user):
     request_mock.META["REMOTE_ADDR"] = "127.0.0.1"
 
     info = MagicMock()
-    info.context = {"request": request_mock}
+    # Mock context as an object with 'request' attribute
+    info.context = MagicMock()
+    info.context.request = request_mock
 
     with pytest.raises(PermissionError) as exc_info:
         dummy_resolver(None, info=info)

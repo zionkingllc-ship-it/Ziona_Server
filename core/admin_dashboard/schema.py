@@ -868,7 +868,7 @@ class AdminDashboardMutations:
         from core.authentication.services import AuthService
         from core.shared.exceptions import ZionaError
 
-        request = info.context["request"]
+        request = info.context.request
         ip = _get_client_ip(request)
 
         try:
@@ -919,7 +919,7 @@ class AdminDashboardMutations:
         from core.admin_dashboard.user_services import UserManagementService
         from core.shared.exceptions import AdminError
 
-        admin_user = info.context["admin_user"]
+        admin_user = info.context.admin_user
         ip = info.context.get("admin_ip", "")
 
         try:
@@ -942,7 +942,7 @@ class AdminDashboardMutations:
         from core.admin_dashboard.user_services import UserManagementService
         from core.shared.exceptions import AdminError
 
-        admin_user = info.context["admin_user"]
+        admin_user = info.context.admin_user
         ip = info.context.get("admin_ip", "")
 
         try:
@@ -965,7 +965,7 @@ class AdminDashboardMutations:
         from core.admin_dashboard.user_services import UserManagementService
         from core.shared.exceptions import AdminError
 
-        admin_user = info.context["admin_user"]
+        admin_user = info.context.admin_user
         ip = info.context.get("admin_ip", "")
 
         try:
@@ -987,7 +987,7 @@ class AdminDashboardMutations:
         from core.admin_dashboard.user_services import UserManagementService
         from core.shared.exceptions import AdminError
 
-        admin_user = info.context["admin_user"]
+        admin_user = info.context.admin_user
         ip = info.context.get("admin_ip", "")
 
         try:
@@ -1018,7 +1018,7 @@ class AdminDashboardMutations:
         from core.admin_dashboard.circle_services import CircleManagementService
         from core.shared.exceptions import AdminError
 
-        admin_user = info.context["admin_user"]
+        admin_user = info.context.admin_user
         ip = info.context.get("admin_ip", "")
 
         try:
@@ -1054,7 +1054,7 @@ class AdminDashboardMutations:
         from core.admin_dashboard.circle_services import CircleManagementService
         from core.shared.exceptions import AdminError
 
-        admin_user = info.context["admin_user"]
+        admin_user = info.context.admin_user
         ip = info.context.get("admin_ip", "")
 
         try:
@@ -1080,7 +1080,7 @@ class AdminDashboardMutations:
         from core.admin_dashboard.circle_services import CircleManagementService
         from core.shared.exceptions import AdminError
 
-        admin_user = info.context["admin_user"]
+        admin_user = info.context.admin_user
         ip = info.context.get("admin_ip", "")
 
         try:
@@ -1102,7 +1102,7 @@ class AdminDashboardMutations:
         from core.admin_dashboard.circle_services import CircleManagementService
         from core.shared.exceptions import AdminError
 
-        admin_user = info.context["admin_user"]
+        admin_user = info.context.admin_user
         ip = info.context.get("admin_ip", "")
 
         try:
@@ -1141,7 +1141,7 @@ class AdminDashboardMutations:
         from core.admin_dashboard.anchor_services import AnchorManagementService
         from core.shared.exceptions import AdminError
 
-        admin_user = info.context["admin_user"]
+        admin_user = info.context.admin_user
         ip = info.context.get("admin_ip", "")
 
         try:
@@ -1181,7 +1181,7 @@ class AdminDashboardMutations:
         from core.admin_dashboard.anchor_services import AnchorManagementService
         from core.shared.exceptions import AdminError
 
-        admin_user = info.context["admin_user"]
+        admin_user = info.context.admin_user
         ip = info.context.get("admin_ip", "")
 
         try:
@@ -1210,7 +1210,7 @@ class AdminDashboardMutations:
         from core.admin_dashboard.anchor_services import AnchorManagementService
         from core.shared.exceptions import AdminError
 
-        admin_user = info.context["admin_user"]
+        admin_user = info.context.admin_user
         ip = info.context.get("admin_ip", "")
 
         try:
@@ -1248,7 +1248,7 @@ class AdminDashboardMutations:
         from core.admin_dashboard.anchor_services import AnchorManagementService
         from core.shared.exceptions import AdminError
 
-        admin_user = info.context["admin_user"]
+        admin_user = info.context.admin_user
         ip = info.context.get("admin_ip", "")
 
         try:
@@ -1282,7 +1282,7 @@ class AdminDashboardMutations:
         from core.admin_dashboard.anchor_services import AnchorManagementService
         from core.shared.exceptions import AdminError
 
-        admin_user = info.context["admin_user"]
+        admin_user = info.context.admin_user
         ip = info.context.get("admin_ip", "")
 
         try:
@@ -1316,7 +1316,7 @@ class AdminDashboardMutations:
         from core.admin_dashboard.moderation_services import AdminModerationService
         from core.shared.exceptions import AdminError
 
-        admin_user = info.context["admin_user"]
+        admin_user = info.context.admin_user
         ip = info.context.get("admin_ip", "")
 
         try:
@@ -1354,7 +1354,7 @@ class AdminDashboardMutations:
         from core.admin_dashboard.contact_services import ContactService
         from core.shared.exceptions import AdminError
 
-        admin_user = info.context["admin_user"]
+        admin_user = info.context.admin_user
         ip = info.context.get("admin_ip", "")
 
         try:
@@ -1388,7 +1388,7 @@ class AdminDashboardMutations:
         from core.admin_dashboard.contact_services import ContactService
         from core.shared.exceptions import AdminError
 
-        admin_user = info.context["admin_user"]
+        admin_user = info.context.admin_user
         ip = info.context.get("admin_ip", "")
 
         try:

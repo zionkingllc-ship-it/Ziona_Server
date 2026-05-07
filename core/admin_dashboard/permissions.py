@@ -30,7 +30,7 @@ def get_admin_user(info: Info):
     from core.authentication.tokens import TokenService
     from core.users.models import User
 
-    request = info.context["request"]
+    request = info.context.request
     auth_header = request.META.get("HTTP_AUTHORIZATION", "")
 
     if not auth_header.startswith("Bearer "):
@@ -76,7 +76,7 @@ def admin_required(func):
         @strawberry.mutation
         @admin_required
         def my_admin_mutation(self, info, ...) -> SomePayload:
-            admin_user = info.context["admin_user"]
+            admin_user = info.context.admin_user  # ← FIX 5: was ["admin_user"]
             ...
     """
 
@@ -98,7 +98,7 @@ def admin_required(func):
                 message="Internal server error",
             )
 
-        request = info.context["request"]
+        request = info.context.request
         ip_address = _get_client_ip(request)
         admin_user = get_admin_user(info)
 
@@ -113,8 +113,8 @@ def admin_required(func):
             )
 
         # Inject admin_user into context for downstream use
-        info.context["admin_user"] = admin_user
-        info.context["admin_ip"] = ip_address
+        info.context.admin_user = admin_user
+        info.context.admin_ip = ip_address
 
         return func(*args, **kwargs)
 
@@ -128,7 +128,7 @@ def _log_unauthorized_attempt(info: Info, ip_address: str, endpoint_name: str):
         from core.authentication.tokens import TokenService
 
         # Try to identify who attempted access
-        request = info.context["request"]
+        request = info.context.request
         auth_header = request.META.get("HTTP_AUTHORIZATION", "")
         user_id = None
 

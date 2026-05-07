@@ -251,7 +251,7 @@ class AuthMutations:
         """
         from core.authentication.services import AuthenticationError, AuthService
 
-        request = info.context["request"]
+        request = info.context.request
         ip = request.META.get("REMOTE_ADDR", "unknown")
 
         try:
@@ -341,7 +341,7 @@ class AuthMutations:
         """
         from core.authentication.services import AuthenticationError, AuthService
 
-        request = info.context["request"]
+        request = info.context.request
 
         try:
             result = AuthService.login(
@@ -497,7 +497,7 @@ class AuthMutations:
         current_jti = None
         if sign_out_other_devices:
             try:
-                request = info.context["request"]
+                request = info.context.request
                 auth_header = request.META.get("HTTP_AUTHORIZATION", "")
                 token = auth_header[7:]
                 payload = TokenService.validate_access_token(token)
@@ -510,7 +510,7 @@ class AuthMutations:
                 )
 
         try:
-            request = info.context["request"]
+            request = info.context.request
             result = PasswordService.change_password(
                 user_id=user_id,
                 current_password=current_password,
@@ -567,7 +567,7 @@ class AuthMutations:
         from core.authentication.oauth_service import OAuthService
         from core.authentication.validators import AuthenticationError
 
-        request = info.context["request"]
+        request = info.context.request
         try:
             result = OAuthService.google_oauth_login(
                 id_token=id_token,
@@ -612,7 +612,7 @@ class AuthMutations:
         from core.authentication.otp_service import OTPService
         from core.authentication.validators import AuthenticationError
 
-        request = info.context["request"]
+        request = info.context.request
         try:
             result = OTPService.unified_send_otp(
                 email=email,
@@ -661,7 +661,7 @@ class AuthMutations:
         from core.authentication.otp_service import OTPService
         from core.authentication.validators import AuthenticationError
 
-        request = info.context["request"]
+        request = info.context.request
         try:
             result = OTPService.unified_verify_otp(
                 email=email,
@@ -715,7 +715,7 @@ class AuthMutations:
         from core.authentication.password_service import PasswordService
         from core.authentication.validators import AuthenticationError
 
-        request = info.context["request"]
+        request = info.context.request
         try:
             result = PasswordService.request_password_reset(
                 email=email,

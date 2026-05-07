@@ -34,7 +34,7 @@ class IsAuthenticated(BasePermission):
 
     def has_permission(self, source: Any, info: Info, **kwargs: Any) -> bool:
         """Check if request has a valid access token."""
-        request = info.context["request"]
+        request = info.context.request
         auth_header = request.META.get("HTTP_AUTHORIZATION", "")
 
         if not auth_header.startswith("Bearer "):
@@ -46,9 +46,9 @@ class IsAuthenticated(BasePermission):
             payload = TokenService.validate_access_token(token)
             try:
                 user = User.objects.get(id=payload["user_id"])
-                info.context["user"] = user
-                info.context["user_id"] = str(user.id)
-                info.context["user_role"] = payload.get("role", "user")
+                info.context.user = user
+                info.context.user_id = str(user.id)
+                info.context.user_role = payload.get("role", "user")
             except User.DoesNotExist:
                 return False
             return True

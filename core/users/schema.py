@@ -96,7 +96,7 @@ class UpdateUsernamePayload:
 
 def _get_authenticated_user_id(info: strawberry.types.Info) -> str | None:
     """Extract user_id from Bearer token in request."""
-    request = info.context["request"]
+    request = info.context.request
     auth_header = request.META.get("HTTP_AUTHORIZATION", "")
 
     if not auth_header.startswith("Bearer "):
