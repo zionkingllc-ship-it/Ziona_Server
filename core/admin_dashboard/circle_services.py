@@ -43,10 +43,8 @@ class CircleManagementService:
         qs = (
             Circle.objects.filter(deleted_at__isnull=True)
             .annotate(
-                member_count_val=Count(
-                    "memberships",
-                    filter=Q(memberships__is_active=True),
-                ),
+                # CircleMembership has no is_active field — count all memberships
+                member_count_val=Count("memberships"),
             )
             .select_related("created_by")
         )
@@ -84,10 +82,8 @@ class CircleManagementService:
         circle = (
             Circle.objects.filter(id=circle_id, deleted_at__isnull=True)
             .annotate(
-                member_count_val=Count(
-                    "memberships",
-                    filter=Q(memberships__is_active=True),
-                ),
+                # CircleMembership has no is_active field — count all memberships
+                member_count_val=Count("memberships"),
             )
             .select_related("created_by")
             .first()
@@ -385,7 +381,7 @@ class CircleManagementService:
         page_size: int = 20,
     ) -> dict:
         """List circle members with pagination."""
-        from core.circles.models import Circle, Membership
+        from core.circles.models import Circle, CircleMembership
 
         circle = Circle.objects.filter(id=circle_id, deleted_at__isnull=True).first()
         if not circle:
@@ -395,7 +391,7 @@ class CircleManagementService:
         offset = (page - 1) * page_size
 
         qs = (
-            Membership.objects.filter(circle=circle, is_active=True)
+            CircleMembership.objects.filter(circle=circle)
             .select_related("user")
             .order_by("-joined_at")
         )
@@ -411,7 +407,8 @@ class CircleManagementService:
                     "full_name": m.user.full_name,
                     "avatar_url": m.user.avatar_url or "",
                     "joined_at": m.joined_at.isoformat() if m.joined_at else "",
-                    "is_active": m.is_active,
+                    # CircleMembership has no is_active field; use the user account status
+                    "is_active": m.user.is_active,
                 }
                 for m in members
             ],
