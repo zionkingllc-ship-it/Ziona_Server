@@ -84,7 +84,12 @@ def get_anchor_by_date(circle_id: str, date) -> Anchor | None:
     )
 
 
-def get_anchor_history(circle_id: str, limit: int = 20, cursor: str | None = None) -> list[Anchor]:
+def get_anchor_history(
+    circle_id: str,
+    limit: int = 20,
+    cursor: str | None = None,
+    include_active: bool = True,
+) -> list[Anchor]:
     """Get past anchors for a circle, ordered by published_at DESC."""
     queryset = (
         Anchor.objects.filter(
@@ -94,6 +99,9 @@ def get_anchor_history(circle_id: str, limit: int = 20, cursor: str | None = Non
         .select_related("created_by", "circle")
         .order_by("-published_at")
     )
+
+    if not include_active:
+        queryset = queryset.filter(expires_at__lte=timezone.now())
 
     if cursor:
         queryset = queryset.filter(published_at__lt=cursor)
@@ -123,6 +131,15 @@ def create_anchor(
     scripture_text: str = "",
     # Media fields
     media_url: str = "",
+    anchor_image: str = "",
+    anchor_video: str = "",
+    anchor_thumbnail: str = "",
+    # Visual / theming fields
+    background_colors: list[str] | None = None,
+    background_image: str = "",
+    anchor_text: str = "",
+    anchor_verse: str = "",
+    anchor_image_text: str = "",
     # Devotional pages
     pages: list | None = None,
 ) -> Anchor:
@@ -153,10 +170,10 @@ def create_anchor(
         ) from None
 
     # ── Validate anchor type ──
-    valid_types = ["bible_verse", "devotional", "image", "video"]
+    valid_types = ["bible_verse", "devotional", "text", "image", "video", "image_text"]
     if anchor_type not in valid_types:
         raise ZionaError(
-            message="Anchor type must be bible_verse, devotional, image, or video",
+            message="Anchor type must be bible_verse, devotional, text, image, video, or image_text",
             code="INVALID_ANCHOR_TYPE",
         )
 
@@ -210,6 +227,14 @@ def create_anchor(
         scripture_translation=scripture_translation,
         scripture_text=scripture_text,
         media_url=media_url,
+        anchor_image=anchor_image,
+        anchor_video=anchor_video,
+        anchor_thumbnail=anchor_thumbnail,
+        background_colors=background_colors or [],
+        background_image=background_image,
+        anchor_text=anchor_text,
+        anchor_verse=anchor_verse,
+        anchor_image_text=anchor_image_text,
         published_at=published_at,
         expires_at=expires_at,
     )

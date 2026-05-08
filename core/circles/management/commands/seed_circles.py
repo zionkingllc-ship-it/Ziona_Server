@@ -34,11 +34,12 @@ class Command(BaseCommand):
         # Seed Rules
         for rule_data in CIRCLE_RULES:
             CircleRule.objects.get_or_create(
+                circle__isnull=True,
                 rule_number=rule_data["rule_number"],
+                is_default=True,
                 defaults={
                     "title": rule_data["title"],
                     "description": rule_data["description"],
-                    "is_default": True,
                 },
             )
         self.stdout.write(

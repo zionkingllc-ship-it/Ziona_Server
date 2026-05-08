@@ -11,7 +11,7 @@ CIRCLE_ERROR_CODES = {
     "ANCHOR_EXPIRED": "This anchor has expired (24-hour window passed)",
     "ANCHOR_NOT_ACTIVE_YET": "Anchor is scheduled for future publication",
     "NO_ACTIVE_ANCHOR": "No active anchor found for this Circle",
-    "INVALID_ANCHOR_TYPE": "Anchor type must be bible_verse, devotional, image, or video",
+    "INVALID_ANCHOR_TYPE": "Anchor type must be bible_verse, devotional, text, image, video, or image_text",
     "MISSING_SCRIPTURE_REFERENCE": "Bible verse anchors require scripture reference",
     "CANNOT_SCHEDULE_PAST": "Cannot schedule an anchor in the past",
     "SCHEDULE_TOO_FAR": "Cannot schedule an anchor more than 30 days in advance",

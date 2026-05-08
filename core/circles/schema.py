@@ -28,8 +28,10 @@ from core.users.schema import UserType, _get_authenticated_user_id
 class AnchorTypeEnum(enum.Enum):
     BIBLE_VERSE = "bible_verse"
     DEVOTIONAL = "devotional"
+    TEXT = "text"
     IMAGE = "image"
     VIDEO = "video"
+    IMAGE_TEXT = "image_text"
 
 
 # ──────────────────────────────────────────────
@@ -65,6 +67,10 @@ class AnchorType:
     def anchor_type(self) -> str:
         return self._dto.anchor_type
 
+    @strawberry.field(name="type")
+    def mobile_type(self) -> str:
+        return self._dto.anchor_type
+
     @strawberry.field(name="createdAt")
     def created_at(self) -> datetime:
         return self._dto.created_at
@@ -94,6 +100,35 @@ class AnchorType:
     @strawberry.field(name="mediaUrl")
     def media_url(self) -> str | None:
         return self._dto.media_url or None
+
+    @strawberry.field
+    def scripture(self) -> str | None:
+        return self.bible_reference()
+
+    @strawberry.field(name="likedImage")
+    def liked_image(self) -> int | None:
+        return 1 if self.anchor_liked_count() else None
+
+    @strawberry.field(name="bibleReference")
+    def bible_reference(self) -> str | None:
+        if not self._dto.scripture_book:
+            return None
+
+        reference = self._dto.scripture_book
+        if self._dto.scripture_chapter:
+            reference = f"{reference} {self._dto.scripture_chapter}"
+        if self._dto.scripture_verse_start:
+            reference = f"{reference}:{self._dto.scripture_verse_start}"
+            if (
+                self._dto.scripture_verse_end
+                and self._dto.scripture_verse_end != self._dto.scripture_verse_start
+            ):
+                reference = f"{reference}-{self._dto.scripture_verse_end}"
+        return reference
+
+    @strawberry.field(name="bibleText")
+    def bible_text(self) -> str | None:
+        return self._dto.scripture_text or None
 
     @strawberry.field(name="scriptureReference")
     def scripture_reference(self) -> ScriptureReference | None:
@@ -195,6 +230,7 @@ class CreateAnchorPayload:
 
 @strawberry.type
 class CircleRule:
+    id: int
     rule_number: int = strawberry.field(name="ruleNumber")
     title: str
     description: str
@@ -211,8 +247,16 @@ class CircleType:
     name: str
     description: str
 
+    @strawberry.field
+    def title(self) -> str:
+        return self._dto.name
+
     @strawberry.field(name="coverImage")
     def cover_image(self) -> str:
+        return self._dto.cover_image
+
+    @strawberry.field
+    def image(self) -> str:
         return self._dto.cover_image
 
     @strawberry.field(name="createdAt")
@@ -221,15 +265,34 @@ class CircleType:
 
     @strawberry.field(name="memberCount")
     def member_count(self) -> int:
+        if self._dto.display_member_count is not None:
+            return self._dto.display_member_count
         if hasattr(self._dto, "member_count"):
             return self._dto.member_count
         return self._dto.get_member_count()
+
+    @strawberry.field
+    def members(self) -> int:
+        return self.member_count()
 
     @strawberry.field(name="memberPreviews")
     def member_previews(self) -> list[UserType]:
         if hasattr(self._dto, "preview_memberships"):
             return [UserType.from_db_model(m.user) for m in self._dto.preview_memberships]
         return [UserType.from_db_model(u) for u in self._dto.get_member_previews(limit=4)]
+
+    @strawberry.field
+    def avatars(self) -> list[str]:
+        if hasattr(self._dto, "preview_memberships"):
+            users = [m.user for m in self._dto.preview_memberships]
+        else:
+            users = self._dto.get_member_previews(limit=4)
+        return [user.avatar_url for user in users if getattr(user, "avatar_url", "")]
+
+    @strawberry.field(name="memberAvatars")
+    def member_avatars(self) -> list[str]:
+        users = self._dto.get_member_previews(limit=8)
+        return [user.avatar_url for user in users if getattr(user, "avatar_url", "")]
 
     @strawberry.field(name="isSubscribed")
     def is_subscribed(self, info: Info) -> bool:
@@ -239,14 +302,13 @@ class CircleType:
         user_id = _get_authenticated_user_id(info)
         return self._dto.is_user_subscribed(user_id)
 
+    @strawberry.field(name="isJoined")
+    def is_joined(self, info: Info) -> bool:
+        return self.is_subscribed(info)
+
     @strawberry.field
     def rules(self) -> list[CircleRule]:
-        from core.circles.models import CircleRule as CircleRuleModel
-
-        return [
-            CircleRule(rule_number=rule.rule_number, title=rule.title, description=rule.description)
-            for rule in CircleRuleModel.get_default_rules()
-        ]
+        return _circle_rules_for(self._dto)
 
     @strawberry.field(name="activeAnchor")
     def active_anchor(self) -> AnchorType | None:
@@ -294,6 +356,10 @@ class CirclePostAuthorType:
     name: str | None = None
     avatar_url: str | None = strawberry.field(name="avatarUrl", default=None)
 
+    @strawberry.field
+    def avatar(self) -> str | None:
+        return self.avatar_url
+
     @classmethod
     def from_user(cls, user) -> "CirclePostAuthorType":
         instance = cls(id=str(user.id))
@@ -314,6 +380,30 @@ class CirclePostType:
     prayed_count: int = strawberry.field(name="prayedCount", default=0)
     anchor_liked_count: int = strawberry.field(name="anchorLikedCount", default=0)
 
+    @strawberry.field
+    def likes(self) -> int:
+        return self.likes_count
+
+    @strawberry.field
+    def comments(self) -> int:
+        return self.comments_count
+
+    @strawberry.field(name="likeCount")
+    def like_count(self) -> int:
+        return self.likes_count
+
+    @strawberry.field(name="likedImage")
+    def liked_image(self) -> int | None:
+        return 1 if self.likes_count else None
+
+    @strawberry.field(name="savedCount")
+    def saved_count(self) -> int:
+        return 0
+
+    @strawberry.field(name="sharedCount")
+    def shared_count(self) -> int:
+        return 0
+
     @classmethod
     def from_db_model(cls, post) -> "CirclePostType":
         return cls(
@@ -333,6 +423,49 @@ class CirclePostType:
 class CircleFeedResponse:
     posts: list[CirclePostType]
     page_info: PageInfo = strawberry.field(name="pageInfo")
+
+
+@strawberry.type
+class CircleFeedDataType:
+    banner_image: str | None = strawberry.field(name="bannerImage")
+    profile_image: str | None = strawberry.field(name="profileImage")
+    name: str
+    description: str
+    member_count: int = strawberry.field(name="memberCount")
+    is_joined: bool = strawberry.field(name="isJoined")
+    active_anchor: AnchorType | None = strawberry.field(name="activeAnchor", default=None)
+    past_anchors: list[AnchorType] = strawberry.field(name="pastAnchors")
+    posts: list[CirclePostType]
+    member_avatars: list[str] = strawberry.field(name="memberAvatars")
+    rules: list[CircleRule]
+
+
+def _build_circle_feed_response(circle_id: str, page: int, page_size: int) -> CircleFeedResponse:
+    posts, has_next_page, total_count = get_circle_feed(circle_id, page, page_size)
+    return CircleFeedResponse(
+        posts=[CirclePostType.from_db_model(p) for p in posts],
+        page_info=PageInfo(
+            has_next_page=has_next_page,
+            total_count=total_count,
+            current_page=page,
+        ),
+    )
+
+
+def _circle_rules_for(circle) -> list[CircleRule]:
+    from core.circles.models import CircleRule as CircleRuleModel
+
+    scoped_rules = list(circle.rules.all())
+    rules = scoped_rules or list(CircleRuleModel.get_default_rules())
+    return [
+        CircleRule(
+            id=rule.rule_number,
+            rule_number=rule.rule_number,
+            title=rule.title,
+            description=rule.description,
+        )
+        for rule in rules
+    ]
 
 
 @strawberry.type
@@ -408,25 +541,68 @@ class CircleQueries:
 
     @strawberry.field(name="anchorHistory")
     def anchor_history(
-        self, circle_id: str, limit: int = 20, cursor: str | None = None
+        self,
+        circle_id: str,
+        limit: int = 20,
+        cursor: str | None = None,
+        include_active: bool = True,
     ) -> list[AnchorType]:
         from core.circles.anchor_services import get_anchor_history
 
-        anchors = get_anchor_history(circle_id, limit, cursor)
+        anchors = get_anchor_history(circle_id, limit, cursor, include_active=include_active)
         return [AnchorType.from_db_model(a) for a in anchors]
 
     @strawberry.field(name="circleFeed")
     def circle_feed(
         self, info: Info, circle_id: str, page: int = 1, page_size: int = 20
     ) -> CircleFeedResponse:
-        posts, has_next_page, total_count = get_circle_feed(circle_id, page, page_size)
-        return CircleFeedResponse(
-            posts=[CirclePostType.from_db_model(p) for p in posts],
-            page_info=PageInfo(
-                has_next_page=has_next_page,
-                total_count=total_count,
-                current_page=page,
-            ),
+        return _build_circle_feed_response(circle_id, page, page_size)
+
+    @strawberry.field(name="circlePosts")
+    def circle_posts(
+        self, info: Info, circle_id: str, page: int = 1, page_size: int = 20
+    ) -> CircleFeedResponse:
+        return _build_circle_feed_response(circle_id, page, page_size)
+
+    @strawberry.field(name="circleFeedData")
+    def circle_feed_data(
+        self,
+        info: Info,
+        circle_id: str,
+        page: int = 1,
+        page_size: int = 20,
+        history_limit: int = 5,
+    ) -> CircleFeedDataType | None:
+        from core.circles.anchor_services import get_active_anchor, get_anchor_history
+        from core.circles.models import Circle
+
+        try:
+            circle = Circle.objects.get(id=circle_id, is_active=True, deleted_at__isnull=True)
+        except Circle.DoesNotExist:
+            return None
+
+        viewer_id = _get_authenticated_user_id(info)
+        posts, _, _ = get_circle_feed(circle_id, page, page_size)
+        past_anchors = get_anchor_history(
+            circle_id,
+            limit=history_limit,
+            include_active=False,
+        )
+        circle_type = CircleType.from_db_model(circle)
+        return CircleFeedDataType(
+            banner_image=circle.banner_image or None,
+            profile_image=circle.profile_image_url or None,
+            name=circle.name,
+            description=circle.description,
+            member_count=circle.display_member_count
+            if circle.display_member_count is not None
+            else circle.get_member_count(),
+            is_joined=circle.is_user_subscribed(viewer_id),
+            active_anchor=AnchorType.from_db_model(get_active_anchor(circle_id)),
+            past_anchors=[AnchorType.from_db_model(anchor) for anchor in past_anchors],
+            posts=[CirclePostType.from_db_model(post) for post in posts],
+            member_avatars=circle_type.member_avatars(),
+            rules=_circle_rules_for(circle),
         )
 
     @strawberry.field(name="anchorByDate")
@@ -642,9 +818,17 @@ class CircleMutations:
         scripture_chapter: int | None = None,
         scripture_verse_start: int | None = None,
         scripture_verse_end: int | None = None,
-        scripture_translation: str = strawberry.field(name="scriptureTranslation", default="KJV"),
+        scripture_translation: str = "KJV",
         scripture_text: str = "",
         media_url: str = "",
+        anchor_text: str = "",
+        anchor_verse: str = "",
+        background_colors: list[str] | None = None,
+        background_image: str = "",
+        anchor_image: str = "",
+        anchor_video: str = "",
+        anchor_image_text: str = "",
+        anchor_thumbnail: str = "",
     ) -> CreateAnchorPayload:
         viewer_id = _get_authenticated_user_id(info)
         if not viewer_id:
@@ -678,6 +862,14 @@ class CircleMutations:
                 scripture_translation=scripture_translation,
                 scripture_text=scripture_text,
                 media_url=media_url,
+                anchor_text=anchor_text,
+                anchor_verse=anchor_verse,
+                background_colors=background_colors,
+                background_image=background_image,
+                anchor_image=anchor_image,
+                anchor_video=anchor_video,
+                anchor_image_text=anchor_image_text,
+                anchor_thumbnail=anchor_thumbnail,
             )
             return CreateAnchorPayload(success=True, anchor=AnchorType.from_db_model(anchor))
         except ZionaError as e:

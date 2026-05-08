@@ -15,6 +15,7 @@ class Circle(models.Model):
     cover_image = models.URLField(max_length=500)
     profile_image_url = models.URLField(max_length=500, blank=True, default="")
     banner_image = models.URLField(max_length=500, blank=True, default="")
+    display_member_count = models.PositiveIntegerField(null=True, blank=True)
     created_by = models.ForeignKey(
         User, on_delete=models.SET_NULL, null=True, related_name="created_circles"
     )
@@ -108,6 +109,13 @@ class CircleMembership(models.Model):
 
 class CircleRule(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    circle = models.ForeignKey(
+        Circle,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="rules",
+    )
     rule_number = models.IntegerField()
     title = models.CharField(max_length=255)
     description = models.TextField()
@@ -122,7 +130,7 @@ class CircleRule(models.Model):
 
     @classmethod
     def get_default_rules(cls):
-        return cls.objects.filter(is_default=True)
+        return cls.objects.filter(circle__isnull=True, is_default=True)
 
 
 class Anchor(models.Model):
@@ -131,8 +139,10 @@ class Anchor(models.Model):
     ANCHOR_TYPE_CHOICES = (
         ("bible_verse", "Bible Verse"),
         ("devotional", "Devotional"),
+        ("text", "Text"),
         ("image", "Image"),
         ("video", "Video"),
+        ("image_text", "Image Text"),
     )
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)

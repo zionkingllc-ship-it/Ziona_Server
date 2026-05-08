@@ -90,7 +90,7 @@ class AnchorManagementService:
             raise AdminError(message="Circle not found.", code=ErrorCode.CIRCLE_NOT_FOUND)
 
         # Validate by type
-        valid_types = ["bible_verse", "devotional", "image", "video"]
+        valid_types = ["bible_verse", "devotional", "text", "image", "video", "image_text"]
         if anchor_type not in valid_types:
             raise AdminError(
                 message=f"Invalid anchor type. Must be one of: {', '.join(valid_types)}.",
