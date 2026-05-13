@@ -170,6 +170,7 @@ CORS_ALLOWED_ORIGINS = env.list(
         "http://localhost:3000",
         "http://localhost:19006",
         "https://studio.apollographql.com",
+        "https://ziona-admin-dashboard.vercel.app",
     ],
 )
 CORS_ALLOW_CREDENTIALS = True
