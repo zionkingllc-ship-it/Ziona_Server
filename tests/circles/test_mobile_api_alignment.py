@@ -367,7 +367,7 @@ def test_seed_circle_sample_data_is_idempotent():
 
     assert first_counts == second_counts
     assert first_counts[0] == 7
-    assert first_counts[1] == 6
+    assert first_counts[1] == 8
     assert first_counts[2] == 11
     assert Circle.objects.get(name="Faith, Work & Purpose").display_member_count == 1247
 

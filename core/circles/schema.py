@@ -11,11 +11,13 @@ from core.circles.services import (
     create_circle_post,
     get_all_circles,
     get_circle_feed,
+    get_circle_post,
     get_my_circles,
     get_suggested_circles,
     join_circle,
     leave_circle,
     like_anchor,
+    like_circle_post,
     pray_for_anchor,
     pray_for_circle_post,
 )
@@ -55,6 +57,27 @@ class AnchorPageType:
     title: str
     content: str
     media_url: str = strawberry.field(name="mediaUrl", default="")
+
+
+# ──────────────────────────────────────────────
+#  Viewer State Types
+# ──────────────────────────────────────────────
+
+
+@strawberry.type
+class CirclePostViewerState:
+    """Viewer's engagement state on a CirclePost."""
+
+    liked: bool = False
+    prayed: bool = False
+
+
+@strawberry.type
+class AnchorViewerState:
+    """Viewer's engagement state on an Anchor."""
+
+    liked: bool = False
+    prayed: bool = False
 
 
 @strawberry.type
@@ -107,7 +130,33 @@ class AnchorType:
 
     @strawberry.field(name="likedImage")
     def liked_image(self) -> int | None:
-        return 1 if self.anchor_liked_count() else None
+        # Kept for backward compatibility.
+        # Mobile dev: migrate to viewerState.liked for per-user like state.
+        return 1 if self._dto.anchor_liked_count else None
+
+    @strawberry.field(name="viewerState")
+    def viewer_state(self, info: Info) -> AnchorViewerState | None:
+        """Per-user like/pray state for this anchor.
+
+        Dynamically resolved (not cached) because the Anchor object itself
+        is served from Redis — the viewer state must always be fresh.
+        """
+        from core.circles.models import AnchorEngagement
+
+        viewer_id = _get_authenticated_user_id(info)
+        if not viewer_id:
+            return AnchorViewerState(liked=False, prayed=False)
+
+        engagements = set(
+            AnchorEngagement.objects.filter(
+                anchor_id=self.id,
+                user_id=viewer_id,
+            ).values_list("engagement_type", flat=True)
+        )
+        return AnchorViewerState(
+            liked="like" in engagements,
+            prayed="pray" in engagements,
+        )
 
     @strawberry.field(name="bibleReference")
     def bible_reference(self) -> str | None:
@@ -394,7 +443,19 @@ class CirclePostType:
 
     @strawberry.field(name="likedImage")
     def liked_image(self) -> int | None:
+        # Kept for backward compatibility.
+        # Mobile dev: migrate to viewerState.liked for per-user like state.
         return 1 if self.likes_count else None
+
+    @strawberry.field(name="viewerState")
+    def viewer_state(self) -> CirclePostViewerState | None:
+        """Per-user like/pray state, populated from Exists annotations
+        set by get_circle_feed and get_circle_post.
+        """
+        return CirclePostViewerState(
+            liked=getattr(self, "_is_liked_by_viewer", False),
+            prayed=getattr(self, "_is_prayed_by_viewer", False),
+        )
 
     @strawberry.field(name="savedCount")
     def saved_count(self) -> int:
@@ -406,7 +467,7 @@ class CirclePostType:
 
     @classmethod
     def from_db_model(cls, post) -> "CirclePostType":
-        return cls(
+        instance = cls(
             id=str(post.id),
             user=CirclePostAuthorType.from_user(post.user),
             created_at=post.created_at,
@@ -417,6 +478,11 @@ class CirclePostType:
             prayed_count=post.prayed_count,
             anchor_liked_count=post.anchor_liked_count,
         )
+        # Carry viewer annotations from the ORM queryset onto the instance
+        # so the viewerState resolver can read them without an extra DB call.
+        instance._is_liked_by_viewer = getattr(post, "is_liked_by_viewer", False)
+        instance._is_prayed_by_viewer = getattr(post, "is_prayed_by_viewer", False)
+        return instance
 
 
 @strawberry.type
@@ -440,8 +506,12 @@ class CircleFeedDataType:
     rules: list[CircleRule]
 
 
-def _build_circle_feed_response(circle_id: str, page: int, page_size: int) -> CircleFeedResponse:
-    posts, has_next_page, total_count = get_circle_feed(circle_id, page, page_size)
+def _build_circle_feed_response(
+    circle_id: str, page: int, page_size: int, viewer_id: str | None = None
+) -> CircleFeedResponse:
+    posts, has_next_page, total_count = get_circle_feed(
+        circle_id, page, page_size, viewer_id=viewer_id
+    )
     return CircleFeedResponse(
         posts=[CirclePostType.from_db_model(p) for p in posts],
         page_info=PageInfo(
@@ -466,6 +536,16 @@ def _circle_rules_for(circle) -> list[CircleRule]:
         )
         for rule in rules
     ]
+
+
+@strawberry.type
+class LikeCirclePostPayload:
+    """Response for likeCirclePost mutation."""
+
+    success: bool
+    liked: bool | None = None
+    likes_count: int | None = strawberry.field(name="likesCount", default=None)
+    error: ErrorType | None = None
 
 
 @strawberry.type
@@ -556,13 +636,43 @@ class CircleQueries:
     def circle_feed(
         self, info: Info, circle_id: str, page: int = 1, page_size: int = 20
     ) -> CircleFeedResponse:
-        return _build_circle_feed_response(circle_id, page, page_size)
+        viewer_id = _get_authenticated_user_id(info)
+        return _build_circle_feed_response(circle_id, page, page_size, viewer_id)
 
     @strawberry.field(name="circlePosts")
     def circle_posts(
         self, info: Info, circle_id: str, page: int = 1, page_size: int = 20
     ) -> CircleFeedResponse:
-        return _build_circle_feed_response(circle_id, page, page_size)
+        viewer_id = _get_authenticated_user_id(info)
+        return _build_circle_feed_response(circle_id, page, page_size, viewer_id)
+
+    @strawberry.field(
+        name="circlePost",
+        description="Fetch a single CirclePost by ID. Use this for post detail screens.",
+    )
+    def circle_post(self, info: Info, id: str) -> CirclePostType | None:
+        from core.shared.exceptions import ZionaError
+
+        viewer_id = _get_authenticated_user_id(info)
+        try:
+            post = get_circle_post(post_id=id, viewer_id=viewer_id)
+            return CirclePostType.from_db_model(post)
+        except ZionaError:
+            return None
+
+    @strawberry.field(
+        name="anchor",
+        description="Fetch a single Anchor by ID. Use this for deep-link/push-notification screens.",
+    )
+    def anchor_by_id(self, info: Info, id: str) -> AnchorType | None:
+        from core.circles.anchor_services import get_anchor_by_id
+        from core.shared.exceptions import ZionaError
+
+        try:
+            anchor = get_anchor_by_id(anchor_id=id)
+            return AnchorType.from_db_model(anchor)
+        except ZionaError:
+            return None
 
     @strawberry.field(name="circleFeedData")
     def circle_feed_data(
@@ -582,7 +692,7 @@ class CircleQueries:
             return None
 
         viewer_id = _get_authenticated_user_id(info)
-        posts, _, _ = get_circle_feed(circle_id, page, page_size)
+        posts, _, _ = get_circle_feed(circle_id, page, page_size, viewer_id=viewer_id)
         past_anchors = get_anchor_history(
             circle_id,
             limit=history_limit,
@@ -1081,5 +1191,28 @@ class CircleMutations:
             )
         except ZionaError as e:
             return CirclePostEngagementPayload(
+                success=False, error=ErrorType(code=e.code, message=e.message)
+            )
+
+    @strawberry.mutation(
+        name="likeCirclePost",
+        description="Toggle a like on a CirclePost. Returns the new like state and count.",
+    )
+    def like_circle_post(self, info: Info, post_id: str) -> LikeCirclePostPayload:
+        viewer_id = _get_authenticated_user_id(info)
+        if not viewer_id:
+            return LikeCirclePostPayload(
+                success=False,
+                error=ErrorType(code="UNAUTHORIZED", message="Login required"),
+            )
+        try:
+            result = like_circle_post(user_id=viewer_id, post_id=post_id)
+            return LikeCirclePostPayload(
+                success=True,
+                liked=result["liked"],
+                likes_count=result["likes_count"],
+            )
+        except ZionaError as e:
+            return LikeCirclePostPayload(
                 success=False, error=ErrorType(code=e.code, message=e.message)
             )

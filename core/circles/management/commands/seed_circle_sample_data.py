@@ -6,7 +6,7 @@ from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 from django.utils import timezone
 
-from core.circles.models import Anchor, Circle, CircleMembership, CirclePost, CircleRule
+from core.circles.models import Anchor, AnchorPage, Circle, CircleMembership, CirclePost, CircleRule
 from core.users.models import User
 
 SYSTEM_EMAIL = "circles-sample-admin@ziona.app"
@@ -283,6 +283,47 @@ PAST_ANCHORS = [
         "days_ago": 5,
         "prayed_count": 61,
         "anchor_liked_count": 178,
+    },
+    {
+        "title": "6 Days Ago — Bible Verse",
+        "anchor_type": "bible_verse",
+        "content": "For I know the plans I have for you, declares the Lord.",
+        "scripture_book": "Jeremiah",
+        "scripture_chapter": 29,
+        "scripture_verse_start": 11,
+        "scripture_verse_end": 11,
+        "scripture_translation": "NIV",
+        "scripture_text": "For I know the plans I have for you, declares the Lord, plans to prosper you and not to harm you, plans to give you hope and a future.",
+        "anchor_verse": "Jeremiah 29:11 (NIV)",
+        "anchor_text": "Lord, remind us today that your plans for us are good. When we feel uncertain or afraid, help us to rest in the knowledge that you hold our future. Give us hope and courage to trust you fully.",
+        "background_colors": ["#EDE7F6", "#D1C4E9"],
+        "days_ago": 6,
+        "prayed_count": 94,
+        "anchor_liked_count": 267,
+    },
+    {
+        "title": "7 Days Ago — Devotional",
+        "anchor_type": "devotional",
+        "content": "A 3-part devotional on walking in faith.",
+        "anchor_text": "May this devotional strengthen your walk with God today.",
+        "background_colors": ["#E8F5E9", "#C8E6C9"],
+        "days_ago": 7,
+        "prayed_count": 72,
+        "anchor_liked_count": 145,
+        "pages": [
+            {
+                "title": "Day 1: The Call",
+                "content": "Abraham did not know where he was going, yet he went. Faith is not the absence of uncertainty — it is taking the next step in obedience when God calls. Today, identify one area where God is asking you to step out in trust.",
+            },
+            {
+                "title": "Day 2: The Cost",
+                "content": "Discipleship has a cost. Jesus said 'take up your cross daily'. This is not a call to misery but to surrender — releasing our grip on what we control so God can fill our hands with what He has planned.",
+            },
+            {
+                "title": "Day 3: The Promise",
+                "content": "God's faithfulness is not contingent on our performance. He who began a good work in you will carry it on to completion. Rest today in the certainty that God finishes what He starts — and He started something in you.",
+            },
+        ],
     },
 ]
 
@@ -620,6 +661,20 @@ class Command(BaseCommand):
             title=data["title"],
             defaults=defaults,
         )
+
+        # Seed AnchorPage entries for devotional anchors
+        if data["anchor_type"] == "devotional" and data.get("pages"):
+            for idx, page_data in enumerate(data["pages"], start=1):
+                AnchorPage.objects.update_or_create(
+                    anchor=anchor,
+                    page_number=idx,
+                    defaults={
+                        "title": page_data.get("title", ""),
+                        "content": page_data.get("content", ""),
+                        "media_url": page_data.get("media_url", ""),
+                    },
+                )
+
         return anchor
 
     def _upsert_posts(self, circles: dict[str, Circle], users: dict[str, User]) -> None:

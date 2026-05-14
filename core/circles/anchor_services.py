@@ -84,6 +84,24 @@ def get_anchor_by_date(circle_id: str, date) -> Anchor | None:
     )
 
 
+def get_anchor_by_id(anchor_id: str) -> Anchor:
+    """
+    Fetch a single Anchor by its UUID.
+
+    Does NOT use the Redis cache — this is a direct ID lookup (e.g. deep-link
+    from a push notification) where caching adds no value and stale data is
+    undesirable. Raises ZionaError if the anchor does not exist or is deleted.
+    """
+    from core.shared.exceptions import ZionaError
+
+    try:
+        return Anchor.objects.select_related("created_by", "circle").get(
+            id=anchor_id, deleted_at__isnull=True
+        )
+    except Anchor.DoesNotExist:
+        raise ZionaError(message="Anchor not found", code="ANCHOR_NOT_FOUND") from None
+
+
 def get_anchor_history(
     circle_id: str,
     limit: int = 20,

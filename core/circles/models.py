@@ -486,24 +486,39 @@ class AnchorEngagement(models.Model):
 
 
 class CirclePostEngagement(models.Model):
-    """Tracks pray interactions on a CirclePost per user. Toggle semantics."""
+    """Tracks like/pray interactions on a CirclePost per user. Toggle semantics.
+
+    Mirrors AnchorEngagement — one row per (post, user, engagement_type) so a
+    user can both like AND pray on the same post independently.
+    """
+
+    ENGAGEMENT_TYPE_CHOICES = (
+        ("pray", "Pray"),
+        ("like", "Like"),
+    )
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     post = models.ForeignKey(CirclePost, on_delete=models.CASCADE, related_name="engagements")
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="circle_post_engagements")
+    engagement_type = models.CharField(
+        max_length=10,
+        choices=ENGAGEMENT_TYPE_CHOICES,
+        default="pray",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         db_table = "circle_post_engagements"
         constraints = [
             models.UniqueConstraint(
-                fields=["post", "user"],
-                name="unique_circle_post_user_pray",
+                fields=["post", "user", "engagement_type"],
+                name="unique_circle_post_user_engagement",
             )
         ]
         indexes = [
-            models.Index(fields=["post"], name="idx_cpost_engage_post"),
+            models.Index(fields=["post", "engagement_type"], name="idx_cpost_engage_type"),
+            models.Index(fields=["user"], name="idx_cpost_engage_user"),
         ]
 
     def __str__(self):
-        return f"{self.user_id} prayed on post {self.post_id}"
+        return f"{self.user_id} {self.engagement_type} on post {self.post_id}"

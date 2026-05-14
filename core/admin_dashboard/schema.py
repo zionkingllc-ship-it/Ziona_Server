@@ -920,7 +920,7 @@ class AdminDashboardMutations:
         from core.shared.exceptions import AdminError
 
         admin_user = info.context.admin_user
-        ip = info.context.get("admin_ip", "")
+        ip = getattr(info.context, "admin_ip", "")
 
         try:
             result = UserManagementService.warn_user(
@@ -943,7 +943,7 @@ class AdminDashboardMutations:
         from core.shared.exceptions import AdminError
 
         admin_user = info.context.admin_user
-        ip = info.context.get("admin_ip", "")
+        ip = getattr(info.context, "admin_ip", "")
 
         try:
             result = UserManagementService.suspend_user(
@@ -966,7 +966,7 @@ class AdminDashboardMutations:
         from core.shared.exceptions import AdminError
 
         admin_user = info.context.admin_user
-        ip = info.context.get("admin_ip", "")
+        ip = getattr(info.context, "admin_ip", "")
 
         try:
             UserManagementService.delete_user(
@@ -988,7 +988,7 @@ class AdminDashboardMutations:
         from core.shared.exceptions import AdminError
 
         admin_user = info.context.admin_user
-        ip = info.context.get("admin_ip", "")
+        ip = getattr(info.context, "admin_ip", "")
 
         try:
             result = UserManagementService.reactivate_user(
@@ -1019,7 +1019,7 @@ class AdminDashboardMutations:
         from core.shared.exceptions import AdminError
 
         admin_user = info.context.admin_user
-        ip = info.context.get("admin_ip", "")
+        ip = getattr(info.context, "admin_ip", "")
 
         try:
             result = CircleManagementService.create_circle(
@@ -1055,7 +1055,7 @@ class AdminDashboardMutations:
         from core.shared.exceptions import AdminError
 
         admin_user = info.context.admin_user
-        ip = info.context.get("admin_ip", "")
+        ip = getattr(info.context, "admin_ip", "")
 
         try:
             result = CircleManagementService.edit_circle(
@@ -1081,7 +1081,7 @@ class AdminDashboardMutations:
         from core.shared.exceptions import AdminError
 
         admin_user = info.context.admin_user
-        ip = info.context.get("admin_ip", "")
+        ip = getattr(info.context, "admin_ip", "")
 
         try:
             result = CircleManagementService.activate_circle(
@@ -1103,7 +1103,7 @@ class AdminDashboardMutations:
         from core.shared.exceptions import AdminError
 
         admin_user = info.context.admin_user
-        ip = info.context.get("admin_ip", "")
+        ip = getattr(info.context, "admin_ip", "")
 
         try:
             result = CircleManagementService.deactivate_circle(
@@ -1142,7 +1142,7 @@ class AdminDashboardMutations:
         from core.shared.exceptions import AdminError
 
         admin_user = info.context.admin_user
-        ip = info.context.get("admin_ip", "")
+        ip = getattr(info.context, "admin_ip", "")
 
         try:
             result = AnchorManagementService.create_anchor(
@@ -1182,7 +1182,7 @@ class AdminDashboardMutations:
         from core.shared.exceptions import AdminError
 
         admin_user = info.context.admin_user
-        ip = info.context.get("admin_ip", "")
+        ip = getattr(info.context, "admin_ip", "")
 
         try:
             parsed_time = dt.fromisoformat(scheduled_for)
@@ -1211,7 +1211,7 @@ class AdminDashboardMutations:
         from core.shared.exceptions import AdminError
 
         admin_user = info.context.admin_user
-        ip = info.context.get("admin_ip", "")
+        ip = getattr(info.context, "admin_ip", "")
 
         try:
             result = AnchorManagementService.send_now(
@@ -1249,7 +1249,7 @@ class AdminDashboardMutations:
         from core.shared.exceptions import AdminError
 
         admin_user = info.context.admin_user
-        ip = info.context.get("admin_ip", "")
+        ip = getattr(info.context, "admin_ip", "")
 
         try:
             result = AnchorManagementService.edit_scheduled_anchor(
@@ -1283,7 +1283,7 @@ class AdminDashboardMutations:
         from core.shared.exceptions import AdminError
 
         admin_user = info.context.admin_user
-        ip = info.context.get("admin_ip", "")
+        ip = getattr(info.context, "admin_ip", "")
 
         try:
             result = AnchorManagementService.cancel_scheduled_anchor(
@@ -1317,7 +1317,7 @@ class AdminDashboardMutations:
         from core.shared.exceptions import AdminError
 
         admin_user = info.context.admin_user
-        ip = info.context.get("admin_ip", "")
+        ip = getattr(info.context, "admin_ip", "")
 
         try:
             result = AdminModerationService.review_report(
@@ -1355,7 +1355,7 @@ class AdminDashboardMutations:
         from core.shared.exceptions import AdminError
 
         admin_user = info.context.admin_user
-        ip = info.context.get("admin_ip", "")
+        ip = getattr(info.context, "admin_ip", "")
 
         try:
             result = ContactService.reply_to_contact(
@@ -1389,7 +1389,7 @@ class AdminDashboardMutations:
         from core.shared.exceptions import AdminError
 
         admin_user = info.context.admin_user
-        ip = info.context.get("admin_ip", "")
+        ip = getattr(info.context, "admin_ip", "")
 
         try:
             result = ContactService.update_contact_status(

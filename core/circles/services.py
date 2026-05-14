@@ -1,5 +1,5 @@
 from django.db import transaction
-from django.db.models import Count, F, Prefetch
+from django.db.models import Count, Exists, F, OuterRef, Prefetch
 
 from core.circles.models import (
     Anchor,
@@ -168,10 +168,12 @@ VALIDATION_ERROR = "VALIDATION_ERROR"
 
 
 def get_circle_feed(
-    circle_id: str, page: int = 1, page_size: int = 20
+    circle_id: str, page: int = 1, page_size: int = 20, viewer_id: str | None = None
 ) -> tuple[list[CirclePost], bool, int]:
     """
     Return paginated CirclePosts for a given circle.
+    Annotates each post with is_liked_by_viewer and is_prayed_by_viewer
+    using Exists subqueries — zero N+1 queries.
 
     Returns:
         (posts, has_next_page, total_count)
@@ -189,12 +191,104 @@ def get_circle_feed(
         .order_by("-created_at")
     )
 
+    # Annotate viewer engagement state in a single DB round-trip
+    if viewer_id:
+        queryset = queryset.annotate(
+            is_liked_by_viewer=Exists(
+                CirclePostEngagement.objects.filter(
+                    post=OuterRef("pk"),
+                    user_id=viewer_id,
+                    engagement_type="like",
+                )
+            ),
+            is_prayed_by_viewer=Exists(
+                CirclePostEngagement.objects.filter(
+                    post=OuterRef("pk"),
+                    user_id=viewer_id,
+                    engagement_type="pray",
+                )
+            ),
+        )
+    else:
+        queryset = queryset.annotate(
+            is_liked_by_viewer=Exists(CirclePostEngagement.objects.none()),
+            is_prayed_by_viewer=Exists(CirclePostEngagement.objects.none()),
+        )
+
     total_count = queryset.count()
     offset = (page - 1) * page_size
     posts = list(queryset[offset : offset + page_size + 1])
 
     has_next_page = len(posts) > page_size
     return posts[:page_size], has_next_page, total_count
+
+
+def get_circle_post(post_id: str, viewer_id: str | None = None) -> CirclePost:
+    """
+    Fetch a single CirclePost by ID with viewer engagement annotations.
+    Raises ZionaError(CIRCLE_POST_NOT_FOUND) if not found or soft-deleted.
+    """
+    queryset = CirclePost.objects.filter(id=post_id, deleted_at__isnull=True).select_related("user")
+
+    if viewer_id:
+        queryset = queryset.annotate(
+            is_liked_by_viewer=Exists(
+                CirclePostEngagement.objects.filter(
+                    post=OuterRef("pk"),
+                    user_id=viewer_id,
+                    engagement_type="like",
+                )
+            ),
+            is_prayed_by_viewer=Exists(
+                CirclePostEngagement.objects.filter(
+                    post=OuterRef("pk"),
+                    user_id=viewer_id,
+                    engagement_type="pray",
+                )
+            ),
+        )
+    else:
+        queryset = queryset.annotate(
+            is_liked_by_viewer=Exists(CirclePostEngagement.objects.none()),
+            is_prayed_by_viewer=Exists(CirclePostEngagement.objects.none()),
+        )
+
+    post = queryset.first()
+    if not post:
+        raise ZionaError(message="Post not found", code=CIRCLE_POST_NOT_FOUND)
+    return post
+
+
+@transaction.atomic
+def like_circle_post(user_id: str, post_id: str) -> dict:
+    """
+    Toggle a like engagement on a CirclePost.
+    Mirrors like_anchor — uses CirclePostEngagement with engagement_type='like'.
+    Updates CirclePost.likes_count atomically via F() expressions.
+
+    Returns:
+        {"liked": bool, "likes_count": int}
+    """
+    try:
+        post = CirclePost.objects.select_for_update().get(id=post_id, deleted_at__isnull=True)
+    except CirclePost.DoesNotExist:
+        raise ZionaError(message="Post not found", code=CIRCLE_POST_NOT_FOUND) from None
+
+    engagement, created = CirclePostEngagement.objects.get_or_create(
+        post=post,
+        user_id=user_id,
+        engagement_type="like",
+    )
+
+    if created:
+        CirclePost.objects.filter(id=post_id).update(likes_count=F("likes_count") + 1)
+        post.refresh_from_db(fields=["likes_count"])
+        return {"liked": True, "likes_count": post.likes_count}
+
+    engagement.delete()
+    CirclePost.objects.filter(id=post_id).update(likes_count=F("likes_count") - 1)
+    post.refresh_from_db(fields=["likes_count"])
+    return {"liked": False, "likes_count": max(post.likes_count, 0)}
 
 
 @transaction.atomic
@@ -312,7 +406,11 @@ def pray_for_circle_post(user_id: str, post_id: str) -> dict:
     except CirclePost.DoesNotExist:
         raise ZionaError(message="Post not found", code=CIRCLE_POST_NOT_FOUND) from None
 
-    engagement, created = CirclePostEngagement.objects.get_or_create(post=post, user_id=user_id)
+    engagement, created = CirclePostEngagement.objects.get_or_create(
+        post=post,
+        user_id=user_id,
+        engagement_type="pray",
+    )
 
     if created:
         CirclePost.objects.filter(id=post_id).update(prayed_count=F("prayed_count") + 1)
