@@ -46,10 +46,15 @@ def create_notification(
     reference_id: uuid.UUID,
     reference_type: str,
     message: str,
+    sender_id: int | None = None,
 ) -> Notification | None:
     """
     Create an in-app notification and trigger a push notification.
     Applies preferences and anti-spam rules.
+
+    Args:
+        sender_id: The user who triggered the notification (e.g. a liker, commenter).
+                   Pass None for system/admin notifications.
     """
     if not _is_notification_enabled(user_id, type_str):
         return None
@@ -74,10 +79,10 @@ def create_notification(
         reference_id=reference_id,
         reference_type=reference_type,
         message=message,
+        sender_id=sender_id,
     )
 
     # Trigger push notification asynchronously (would be a Celery task in prod)
-    # Stubbed here for direct service call
     send_push_notification(
         user_id=user_id,
         title="Ziona App",
@@ -86,7 +91,7 @@ def create_notification(
             "type": type_str,
             "reference_id": str(reference_id) if reference_id else "",
             "reference_type": reference_type,
-            "screen": "NotificationDetail",  # Example screen
+            "screen": "NotificationDetail",
         },
     )
 
@@ -128,13 +133,15 @@ def get_notifications(user_id: int, limit: int = 20, cursor: str | None = None):
     """
     Fetch paginated notifications.
     Unread first, then order by created_at DESC.
+    Uses select_related('sender') so the GraphQL user field costs zero extra queries.
     """
-    queryset = Notification.objects.filter(
-        user_id=user_id, status=NotificationStatus.ACTIVE
-    ).order_fields("is_read", "-created_at")
+    queryset = (
+        Notification.objects.filter(user_id=user_id, status=NotificationStatus.ACTIVE)
+        .select_related("sender")
+        .order_by("is_read", "-created_at")
+    )
 
     if cursor:
-        # Simple cursor implementation using created_at ISO string
         try:
             from django.utils.dateparse import parse_datetime
 

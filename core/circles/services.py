@@ -168,10 +168,20 @@ VALIDATION_ERROR = "VALIDATION_ERROR"
 
 
 def get_circle_feed(
-    circle_id: str, page: int = 1, page_size: int = 20, viewer_id: str | None = None
+    circle_id: str,
+    page: int = 1,
+    page_size: int = 20,
+    viewer_id: str | None = None,
+    sort_by: str = "NEW",
+    author_id: str | None = None,
 ) -> tuple[list[CirclePost], bool, int]:
     """
     Return paginated CirclePosts for a given circle.
+
+    Args:
+        sort_by: "TRENDING" orders by total engagement desc; "NEW" (default) by -created_at.
+        author_id: When provided, filters posts to only those by this user ("My Posts").
+
     Annotates each post with is_liked_by_viewer and is_prayed_by_viewer
     using Exists subqueries — zero N+1 queries.
 
@@ -185,13 +195,26 @@ def get_circle_feed(
             message="Circle does not exist or has been deleted", code=CIRCLE_NOT_FOUND
         ) from None
 
-    queryset = (
-        CirclePost.objects.filter(circle=circle, deleted_at__isnull=True)
-        .select_related("user")
-        .order_by("-created_at")
+    queryset = CirclePost.objects.filter(circle=circle, deleted_at__isnull=True).select_related(
+        "user"
     )
 
-    # Annotate viewer engagement state in a single DB round-trip
+    # ── Author filter ("My Posts" toggle) ──────────────────────────────────
+    if author_id:
+        queryset = queryset.filter(user_id=author_id)
+
+    # ── Sorting ─────────────────────────────────────────────────────────────
+    if sort_by == "TRENDING":
+        # Annotate a single engagement_total so we sort in one DB pass.
+        # Ties broken by recency so the feed stays fresh.
+        queryset = queryset.annotate(
+            engagement_total=F("likes_count") + F("comments_count") + F("prayed_count")
+        ).order_by("-engagement_total", "-created_at")
+    else:
+        # "NEW" — most recent first (default)
+        queryset = queryset.order_by("-created_at")
+
+    # ── Viewer engagement state (zero N+1 via Exists subqueries) ───────────
     if viewer_id:
         queryset = queryset.annotate(
             is_liked_by_viewer=Exists(

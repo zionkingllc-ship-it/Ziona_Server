@@ -522,3 +522,71 @@ class CirclePostEngagement(models.Model):
 
     def __str__(self):
         return f"{self.user_id} {self.engagement_type} on post {self.post_id}"
+
+
+# ──────────────────────────────────────────────
+#  PHASE 6: Circle Post Comments
+# ──────────────────────────────────────────────
+
+
+class CirclePostComment(models.Model):
+    """An inline comment on a CirclePost.
+
+    Mirrors the global feed Comment model but scoped to the Circle context.
+    Soft-deleted via deleted_at so comment counts remain accurate until
+    the next counter reconciliation pass.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    post = models.ForeignKey(CirclePost, on_delete=models.CASCADE, related_name="comments")
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="circle_post_comments")
+    text = models.TextField()
+
+    # Denormalized counter — updated atomically via F() expressions so we
+    # never need a COUNT(*) subquery when rendering a comment row.
+    likes_count = models.PositiveIntegerField(default=0)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    deleted_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = "circle_post_comments"
+        # oldest-first is the natural reading order for comment threads
+        ordering = ["created_at"]
+        indexes = [
+            models.Index(
+                fields=["post", "created_at"],
+                name="idx_cpcomments_post_dt",
+            ),
+            models.Index(fields=["user"], name="idx_cpcomments_user"),
+        ]
+
+    def __str__(self):
+        return f"Comment by {self.user_id} on post {self.post_id}"
+
+
+class CirclePostCommentLike(models.Model):
+    """A like on a CirclePostComment. Toggle semantics (one row per user/comment pair).
+
+    Creating a row = like; deleting the row = unlike.
+    The comment's likes_count counter is updated atomically on each toggle.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    comment = models.ForeignKey(CirclePostComment, on_delete=models.CASCADE, related_name="likes")
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="circle_comment_likes")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "circle_post_comment_likes"
+        constraints = [
+            models.UniqueConstraint(fields=["comment", "user"], name="unique_circle_comment_like")
+        ]
+        indexes = [
+            models.Index(fields=["comment"], name="idx_cpcomment_likes_comment"),
+            models.Index(fields=["user"], name="idx_cpcomment_likes_user"),
+        ]
+
+    def __str__(self):
+        return f"{self.user_id} liked comment {self.comment_id}"

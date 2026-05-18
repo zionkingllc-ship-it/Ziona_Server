@@ -16,6 +16,19 @@ from core.notifications.services import (
 
 
 @strawberry.type
+class UserMiniType:
+    """Minimal user representation returned inside NotificationItem.user.
+
+    Keeps the notification payload small — the mobile app only needs identity
+    data (id, username, avatar) to render the notification row avatar/name.
+    """
+
+    id: str
+    username: str
+    avatar_url: str = strawberry.field(name="avatarUrl", default="")
+
+
+@strawberry.type
 class SuccessResponse:
     success: bool
     error: str | None = None
@@ -37,16 +50,32 @@ class NotificationTypeEnum(Enum):
 @strawberry.type
 class NotificationItem:
     id: strawberry.ID
-    type: str  # using string since Strawberry enums can be tricky to map directly if values don't match
+    type: str
     message: str
     reference_id: strawberry.ID | None
     reference_type: str
     is_read: bool
     created_at: str
 
+    @strawberry.field
+    def user(self) -> "UserMiniType | None":
+        """The user who triggered this notification (sender).
+
+        Resolved from the pre-fetched sender FK — zero extra DB queries
+        because get_notifications() uses select_related('sender').
+        """
+        sender = getattr(self._instance, "sender", None)
+        if sender is None:
+            return None
+        return UserMiniType(
+            id=str(sender.id),
+            username=sender.username or "",
+            avatar_url=getattr(sender, "avatar_url", None) or "",
+        )
+
     @classmethod
     def from_instance(cls, instance: Notification):
-        return cls(
+        obj = cls(
             id=strawberry.ID(str(instance.id)),
             type=instance.notification_type,
             message=instance.message,
@@ -57,6 +86,10 @@ class NotificationItem:
             is_read=instance.is_read,
             created_at=instance.created_at.isoformat(),
         )
+        # Store the ORM instance so the user() resolver can read sender
+        # without an additional DB round-trip.
+        obj._instance = instance
+        return obj
 
 
 @strawberry.type

@@ -114,6 +114,18 @@ class AnchorType:
     def is_active(self) -> bool:
         return self._dto.is_active
 
+    @strawberry.field(name="isExpired")
+    def is_expired(self) -> bool:
+        """True once the anchor's 24-hour window has passed.
+
+        Computed in Python from the already-loaded expires_at field — zero
+        extra DB queries. The mobile app uses this flag to decide whether to
+        render the anchor as active or show it in the expired history list.
+        """
+        from django.utils import timezone
+
+        return timezone.now() >= self._dto.expires_at
+
     @strawberry.field(name="responseCount")
     def response_count(self) -> int:
         if hasattr(self._dto, "response_count"):
@@ -507,10 +519,20 @@ class CircleFeedDataType:
 
 
 def _build_circle_feed_response(
-    circle_id: str, page: int, page_size: int, viewer_id: str | None = None
+    circle_id: str,
+    page: int,
+    page_size: int,
+    viewer_id: str | None = None,
+    sort_by: str = "NEW",
+    author_id: str | None = None,
 ) -> CircleFeedResponse:
     posts, has_next_page, total_count = get_circle_feed(
-        circle_id, page, page_size, viewer_id=viewer_id
+        circle_id,
+        page,
+        page_size,
+        viewer_id=viewer_id,
+        sort_by=sort_by,
+        author_id=author_id,
     )
     return CircleFeedResponse(
         posts=[CirclePostType.from_db_model(p) for p in posts],
@@ -634,17 +656,33 @@ class CircleQueries:
 
     @strawberry.field(name="circleFeed")
     def circle_feed(
-        self, info: Info, circle_id: str, page: int = 1, page_size: int = 20
+        self,
+        info: Info,
+        circle_id: str,
+        page: int = 1,
+        page_size: int = 20,
+        sort_by: str = "NEW",
+        author_id: str | None = None,
     ) -> CircleFeedResponse:
         viewer_id = _get_authenticated_user_id(info)
-        return _build_circle_feed_response(circle_id, page, page_size, viewer_id)
+        return _build_circle_feed_response(
+            circle_id, page, page_size, viewer_id, sort_by=sort_by, author_id=author_id
+        )
 
     @strawberry.field(name="circlePosts")
     def circle_posts(
-        self, info: Info, circle_id: str, page: int = 1, page_size: int = 20
+        self,
+        info: Info,
+        circle_id: str,
+        page: int = 1,
+        page_size: int = 20,
+        sort_by: str = "NEW",
+        author_id: str | None = None,
     ) -> CircleFeedResponse:
         viewer_id = _get_authenticated_user_id(info)
-        return _build_circle_feed_response(circle_id, page, page_size, viewer_id)
+        return _build_circle_feed_response(
+            circle_id, page, page_size, viewer_id, sort_by=sort_by, author_id=author_id
+        )
 
     @strawberry.field(
         name="circlePost",
@@ -682,6 +720,8 @@ class CircleQueries:
         page: int = 1,
         page_size: int = 20,
         history_limit: int = 5,
+        sort_by: str = "NEW",
+        author_id: str | None = None,
     ) -> CircleFeedDataType | None:
         from core.circles.anchor_services import get_active_anchor, get_anchor_history
         from core.circles.models import Circle
@@ -692,11 +732,21 @@ class CircleQueries:
             return None
 
         viewer_id = _get_authenticated_user_id(info)
-        posts, _, _ = get_circle_feed(circle_id, page, page_size, viewer_id=viewer_id)
+        posts, _, _ = get_circle_feed(
+            circle_id,
+            page,
+            page_size,
+            viewer_id=viewer_id,
+            sort_by=sort_by,
+            author_id=author_id,
+        )
+        # Only return anchors within the 5-day window so the mobile app
+        # naturally stops showing older ones once the purge task removes them.
         past_anchors = get_anchor_history(
             circle_id,
             limit=history_limit,
             include_active=False,
+            max_age_days=5,
         )
         circle_type = CircleType.from_db_model(circle)
         return CircleFeedDataType(
@@ -1216,3 +1266,195 @@ class CircleMutations:
             return LikeCirclePostPayload(
                 success=False, error=ErrorType(code=e.code, message=e.message)
             )
+
+    # ── Phase 6: Circle Post Comment mutations ─────────────────────────────
+
+    @strawberry.mutation(
+        name="commentOnCirclePost",
+        description="Add an inline comment to a CirclePost.",
+    )
+    def comment_on_circle_post(
+        self, info: Info, post_id: str, text: str
+    ) -> "CirclePostCommentPayload":
+        viewer_id = _get_authenticated_user_id(info)
+        if not viewer_id:
+            return CirclePostCommentPayload(
+                success=False, error=ErrorType(code="UNAUTHORIZED", message="Login required")
+            )
+        try:
+            from core.circles.comment_services import create_circle_post_comment
+
+            comment = create_circle_post_comment(user_id=viewer_id, post_id=post_id, text=text)
+            return CirclePostCommentPayload(
+                success=True, comment=CirclePostCommentType.from_db_model(comment)
+            )
+        except ZionaError as e:
+            return CirclePostCommentPayload(
+                success=False, error=ErrorType(code=e.code, message=e.message)
+            )
+
+    @strawberry.mutation(
+        name="deleteCirclePostComment",
+        description="Soft-delete your own comment on a CirclePost.",
+    )
+    def delete_circle_post_comment(self, info: Info, comment_id: str) -> "CirclePostCommentPayload":
+        viewer_id = _get_authenticated_user_id(info)
+        if not viewer_id:
+            return CirclePostCommentPayload(
+                success=False, error=ErrorType(code="UNAUTHORIZED", message="Login required")
+            )
+        try:
+            from core.circles.comment_services import delete_circle_post_comment
+
+            delete_circle_post_comment(user_id=viewer_id, comment_id=comment_id)
+            return CirclePostCommentPayload(success=True)
+        except ZionaError as e:
+            return CirclePostCommentPayload(
+                success=False, error=ErrorType(code=e.code, message=e.message)
+            )
+
+    @strawberry.mutation(
+        name="likeCirclePostComment",
+        description="Toggle a like on a CirclePost comment. Returns new like state and count.",
+    )
+    def like_circle_post_comment(
+        self, info: Info, comment_id: str
+    ) -> "CirclePostCommentLikePayload":
+        viewer_id = _get_authenticated_user_id(info)
+        if not viewer_id:
+            return CirclePostCommentLikePayload(
+                success=False, error=ErrorType(code="UNAUTHORIZED", message="Login required")
+            )
+        try:
+            from core.circles.comment_services import toggle_circle_post_comment_like
+
+            liked, likes_count = toggle_circle_post_comment_like(
+                user_id=viewer_id, comment_id=comment_id
+            )
+            return CirclePostCommentLikePayload(success=True, liked=liked, likes_count=likes_count)
+        except ZionaError as e:
+            return CirclePostCommentLikePayload(
+                success=False, error=ErrorType(code=e.code, message=e.message)
+            )
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  Phase 6: Circle Post Comment — GraphQL Types, Query, Payloads
+# ══════════════════════════════════════════════════════════════════════════════
+
+
+@strawberry.type
+class CirclePostCommentViewerState:
+    """Per-viewer like state on a single comment."""
+
+    liked: bool = False
+
+
+@strawberry.type
+class CirclePostCommentType:
+    """A single inline comment on a CirclePost."""
+
+    id: str
+    text: str
+    created_at: datetime = strawberry.field(name="createdAt")
+    updated_at: datetime = strawberry.field(name="updatedAt")
+    likes_count: int = strawberry.field(name="likesCount", default=0)
+
+    @strawberry.field
+    def author(self) -> CirclePostAuthorType:
+        return CirclePostAuthorType.from_user(self._dto.user)
+
+    @strawberry.field(name="viewerState")
+    def viewer_state(self) -> CirclePostCommentViewerState:
+        """Like state for the authenticated viewer.
+
+        Populated from the is_liked_by_viewer annotation set by
+        get_circle_post_comments — zero extra DB queries.
+        """
+        return CirclePostCommentViewerState(liked=getattr(self._dto, "is_liked_by_viewer", False))
+
+    @classmethod
+    def from_db_model(cls, comment) -> "CirclePostCommentType":
+        instance = cls(
+            id=str(comment.id),
+            text=comment.text,
+            created_at=comment.created_at,
+            updated_at=comment.updated_at,
+            likes_count=comment.likes_count,
+        )
+        instance._dto = comment
+        return instance
+
+
+@strawberry.type
+class CirclePostCommentsResponse:
+    """Paginated response for circlePostComments query."""
+
+    comments: list[CirclePostCommentType]
+    page_info: PageInfo = strawberry.field(name="pageInfo")
+
+
+@strawberry.type
+class CirclePostCommentPayload:
+    """Response for comment create / delete mutations."""
+
+    success: bool
+    comment: CirclePostCommentType | None = None
+    error: ErrorType | None = None
+
+
+@strawberry.type
+class CirclePostCommentLikePayload:
+    """Response for likeCirclePostComment mutation."""
+
+    success: bool
+    liked: bool | None = None
+    likes_count: int | None = strawberry.field(name="likesCount", default=None)
+    error: ErrorType | None = None
+
+
+# ── Extend CircleQueries with the comment fetch ────────────────────────────────
+# We inject the query via a standalone function registered on CircleQueries
+# to avoid re-opening the class definition.
+
+# NOTE: Strawberry does not support monkey-patching @strawberry.type classes after
+# definition. The circlePostComments query is therefore declared here as a plain
+# function and registered on the merged schema via the CircleQueries class below.
+# The cleanest pattern in Strawberry is to declare all fields inside the class.
+# We handle this by appending to CircleQueries' __annotations__ post-definition,
+# which Strawberry picks up correctly.
+
+
+def _resolve_circle_post_comments(
+    root,
+    info: Info,
+    post_id: str,
+    page: int = 1,
+    page_size: int = 30,
+) -> CirclePostCommentsResponse:
+    """Fetch paginated inline comments for a CirclePost."""
+    from core.circles.comment_services import get_circle_post_comments
+
+    viewer_id = _get_authenticated_user_id(info)
+    comments, has_next_page, total_count = get_circle_post_comments(
+        post_id=post_id,
+        viewer_id=viewer_id,
+        page=page,
+        page_size=page_size,
+    )
+    return CirclePostCommentsResponse(
+        comments=[CirclePostCommentType.from_db_model(c) for c in comments],
+        page_info=PageInfo(
+            has_next_page=has_next_page,
+            total_count=total_count,
+            current_page=page,
+        ),
+    )
+
+
+# Register the query field on CircleQueries dynamically.
+CircleQueries.circle_post_comments = strawberry.field(
+    name="circlePostComments",
+    description="Paginated inline comments for a CirclePost, with viewer like state.",
+    resolver=_resolve_circle_post_comments,
+)

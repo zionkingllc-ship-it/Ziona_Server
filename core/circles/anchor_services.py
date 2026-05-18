@@ -107,8 +107,15 @@ def get_anchor_history(
     limit: int = 20,
     cursor: str | None = None,
     include_active: bool = True,
+    max_age_days: int | None = None,
 ) -> list[Anchor]:
-    """Get past anchors for a circle, ordered by published_at DESC."""
+    """Get past anchors for a circle, ordered by published_at DESC.
+
+    Args:
+        max_age_days: When set, only anchors whose expires_at is within this
+                      many days in the past are returned. This enforces the
+                      5-day display window without waiting for the purge task.
+    """
     queryset = (
         Anchor.objects.filter(
             circle_id=circle_id,
@@ -120,6 +127,10 @@ def get_anchor_history(
 
     if not include_active:
         queryset = queryset.filter(expires_at__lte=timezone.now())
+
+    if max_age_days is not None:
+        cutoff = timezone.now() - timedelta(days=max_age_days)
+        queryset = queryset.filter(expires_at__gte=cutoff)
 
     if cursor:
         queryset = queryset.filter(published_at__lt=cursor)

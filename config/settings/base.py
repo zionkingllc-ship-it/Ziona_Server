@@ -242,6 +242,13 @@ CELERY_BEAT_SCHEDULE = {
         "task": "core.landing.tasks.refresh_company_stats",
         "schedule": crontab(minute=0),  # every hour
     },
+    # Nightly at 02:00 UTC — purge anchors older than 5 days (business rule).
+    # Runs after the notification digest (08:00) and daily analytics (00:05)
+    # to avoid resource contention on the DB during peak Celery activity.
+    "purge-expired-anchors": {
+        "task": "circles.purge_expired_anchors",
+        "schedule": crontab(hour=2, minute=0),
+    },
 }
 
 

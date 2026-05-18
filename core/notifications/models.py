@@ -41,6 +41,16 @@ class Notification(TimestampedModel):
         related_name="notifications",
         db_index=True,
     )
+    # The user who triggered this notification (e.g. the person who liked/commented).
+    # Nullable because system/admin notifications have no human sender.
+    sender = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="sent_notifications",
+        db_index=True,
+    )
     notification_type = models.CharField(
         max_length=50,
         choices=NotificationType.choices,
