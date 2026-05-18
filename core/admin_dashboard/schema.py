@@ -1425,10 +1425,12 @@ class AdminDashboardMutations:
         from core.shared.exceptions import AdminError
 
         try:
+            ip_address = info.context.request.META.get("REMOTE_ADDR", "")
             result = ContactService.submit_message(
                 name=name,
                 email=email,
                 message=message,
+                ip_address=ip_address,
             )
             return SubmitContactPayload(
                 success=True,

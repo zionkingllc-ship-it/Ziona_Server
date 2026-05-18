@@ -432,14 +432,17 @@ def _revoke_celery_task(task_id: str):
 
 
 def _notify_circle_members(anchor):
-    """Send push notifications to all circle members about a new anchor."""
+    """Send push notifications to all circle members about a new anchor.
+
+    Uses CircleMembership — every row in that table represents an active member
+    (leaving a circle hard-deletes the row), so no is_active filter is needed.
+    """
     try:
-        from core.circles.models import Membership
+        from core.circles.models import CircleMembership
         from core.notifications.services import create_notification
 
-        member_ids = Membership.objects.filter(
+        member_ids = CircleMembership.objects.filter(
             circle_id=anchor.circle_id,
-            is_active=True,
         ).values_list("user_id", flat=True)
 
         for user_id in member_ids:

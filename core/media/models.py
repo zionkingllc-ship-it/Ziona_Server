@@ -80,9 +80,22 @@ class MediaFile(TimestampedModel):
 
     @property
     def url(self) -> str:
-        """Return public URL for the media file."""
+        """Return public URL for the media file.
+
+        In development (LOCAL_MEDIA_FALLBACK=True), returns a local Django
+        media-server URL so the frontend can render uploads without GCS.
+        In staging/production, returns the canonical GCS public URL.
+        """
         if not self.storage_path:
             return ""
+
+        # Dev-only fallback: serve from local Django media server.
+        # Never set LOCAL_MEDIA_FALLBACK in staging.py or production.py.
+        if getattr(settings, "LOCAL_MEDIA_FALLBACK", False):
+            from django.conf import settings as s
+
+            base = getattr(s, "MEDIA_URL", "/media/")
+            return f"{base}{self.storage_path}"
 
         return normalize_url(
             f"https://storage.googleapis.com/{settings.GCP_STORAGE_BUCKET}/{self.storage_path}"

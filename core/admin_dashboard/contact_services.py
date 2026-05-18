@@ -176,12 +176,46 @@ class ContactService:
         return {"success": True, "contact": _contact_to_dict(contact)}
 
     @staticmethod
-    def submit_message(name: str, email: str, message: str) -> dict:
+    def submit_message(name: str, email: str, message: str, ip_address: str = "") -> dict:
         """Public endpoint: submit a contact/support message.
+
+        Rate-limited to 5 submissions per IP per 10-minute rolling window to
+        prevent spam abuse and protect SMTP send budgets.
 
         Called from the mobile app — no admin auth required.
         """
+        from django.core.cache import cache
+
         from core.admin_dashboard.models import ContactMessage
+
+        # ── Rate limit guard ──────────────────────────────────────────────
+        # Uses the existing Redis cache — no new infrastructure needed.
+        # The rolling window is implemented with cache.set on the first hit
+        # and cache.incr on each subsequent hit within the TTL window.
+        rate_limit = 5  # max submissions per window
+        window_seconds = 600  # 10-minute rolling window
+
+        if ip_address:
+            cache_key = f"contact_submit_rate:{ip_address}"
+            submission_count = cache.get(cache_key, 0)
+
+            if submission_count >= rate_limit:
+                logger.warning(
+                    "contact_submit_rate_limited",
+                    extra={"ip_address": ip_address, "count": submission_count},
+                )
+                raise AdminError(
+                    message="Too many submissions. Please wait before trying again.",
+                    code=ErrorCode.RATE_LIMIT_EXCEEDED,
+                )
+
+            if submission_count == 0:
+                # First request in the window — set with full TTL
+                cache.set(cache_key, 1, window_seconds)
+            else:
+                # Subsequent requests — increment without resetting the TTL
+                cache.incr(cache_key)
+        # ─────────────────────────────────────────────────────────────────
 
         if not name or not email or not message:
             raise AdminError(

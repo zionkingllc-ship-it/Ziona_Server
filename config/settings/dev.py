@@ -43,3 +43,8 @@ CELERY_BROKER_URL = "redis://localhost:6379/0"
 CELERY_RESULT_BACKEND = "redis://localhost:6379/0"
 CELERY_TASK_ALWAYS_EAGER = False
 CELERY_TASK_EAGER_PROPAGATES = True
+
+# Serve uploaded media from the local Django dev server instead of GCS.
+# This allows frontend developers to render uploads without GCS credentials.
+# NEVER enable this in staging.py or production.py.
+LOCAL_MEDIA_FALLBACK = True

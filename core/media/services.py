@@ -191,10 +191,51 @@ class MediaService:
         media_id = str(uuid.uuid4())
         storage_path = f"uploads/{user_id}/{media_type.lower()}s/{media_id}.{ext}"
 
-        # In a real app, we'd use default_storage.save(storage_path, file)
-        # For Ziona, we'll simulate saving and then processing
+        # Save File Temporarily to local storage to extract dimensions
         actual_path = default_storage.save(storage_path, file)
 
+        # -- Upload to GCS: this must succeed for the response to be truthful.
+        # If GCS is misconfigured, we raise MediaError so the caller receives a
+        # typed error — never a false success with an unreachable URL.
+        try:
+            import os
+
+            from google.cloud import storage as gcs_storage
+
+            full_local_path = default_storage.path(actual_path)
+            credentials_file = settings.GCP_CREDENTIALS_FILE
+
+            if credentials_file and os.path.exists(credentials_file):
+                gcs_client = gcs_storage.Client.from_service_account_json(credentials_file)
+            else:
+                gcs_client = gcs_storage.Client()  # Application Default Credentials
+
+            bucket_obj = gcs_client.bucket(settings.GCP_STORAGE_BUCKET)
+            blob = bucket_obj.blob(storage_path)
+
+            with open(full_local_path, "rb") as f:
+                blob.upload_from_file(f, content_type=content_type)
+
+            logger.info(
+                "gcs_upload_success",
+                extra={"storage_path": storage_path, "user_id": str(user_id)},
+            )
+
+        except Exception as e:
+            logger.error(
+                "gcs_upload_failed",
+                extra={"storage_path": storage_path, "error": str(e)},
+                exc_info=True,
+            )
+            # Clean up the orphaned local file — no point keeping it if GCS failed
+            import contextlib
+
+            with contextlib.suppress(Exception):
+                default_storage.delete(actual_path)
+            raise MediaError(
+                "Failed to persist file to storage. Please try again.",
+                code="GCS_UPLOAD_FAILED",
+            ) from e
         # 3. Extract metadata
         # We need the local path for ffprobe/PIL if not on cloud
         try:

@@ -46,6 +46,24 @@ class IsAuthenticated(BasePermission):
             payload = TokenService.validate_access_token(token)
             try:
                 user = User.objects.get(id=payload["user_id"])
+
+                # Enforce moderation status immediately.
+                # The user object is already in memory — these checks add zero DB cost
+                # and zero Redis cost, preserving the Upstash budget.
+                if not user.is_active or user.deleted_at is not None:
+                    logger.warning(
+                        "access_denied_account_deleted",
+                        extra={"user_id": str(user.id)},
+                    )
+                    return False
+
+                if user.status == "suspended":
+                    logger.warning(
+                        "access_denied_account_suspended",
+                        extra={"user_id": str(user.id)},
+                    )
+                    return False
+
                 info.context.user = user
                 info.context.user_id = str(user.id)
                 info.context.user_role = payload.get("role", "user")
