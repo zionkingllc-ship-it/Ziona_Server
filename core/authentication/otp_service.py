@@ -14,6 +14,7 @@ from typing import Any
 
 from django.conf import settings
 
+from core.authentication.account_status import ensure_account_can_authenticate
 from core.authentication.tokens import TokenService
 from core.authentication.validators import AuthenticationError
 from core.shared.logging import log_security_event, mask_email
@@ -74,6 +75,8 @@ class OTPService:
                 "No account found with this email.",
                 code="USER_NOT_FOUND",
             ) from None
+
+        ensure_account_can_authenticate(user)
 
         if purpose in ("registration", "email_verification") and user.is_email_verified:
             raise AuthenticationError(
@@ -190,6 +193,8 @@ class OTPService:
                 "Invalid email or verification code.",
                 code="INVALID_OTP",
             ) from None
+
+        ensure_account_can_authenticate(user)
 
         if purpose in ("registration", "email_verification") and user.is_email_verified:
             raise AuthenticationError(
@@ -310,6 +315,8 @@ class OTPService:
         except User.DoesNotExist:
             return True
 
+        ensure_account_can_authenticate(user)
+
         if user.is_email_verified:
             raise AuthenticationError(
                 "Email is already verified",
@@ -344,6 +351,8 @@ class OTPService:
                 "Invalid email or verification code.",
                 code="INVALID_OTP",
             ) from None
+
+        ensure_account_can_authenticate(user)
 
         if user.is_email_verified:
             raise AuthenticationError(
@@ -446,6 +455,8 @@ class OTPService:
                 "No account found with this email address.",
                 code="USER_NOT_FOUND",
             ) from None
+
+        ensure_account_can_authenticate(user)
 
         if user.is_email_verified:
             raise AuthenticationError(

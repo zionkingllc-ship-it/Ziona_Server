@@ -12,6 +12,7 @@ from typing import Any
 
 from django.conf import settings
 
+from core.authentication.account_status import ensure_account_can_authenticate
 from core.authentication.tokens import TokenService
 from core.authentication.validators import AuthenticationError, validate_password
 from core.shared.logging import log_security_event, mask_email
@@ -43,6 +44,8 @@ class PasswordService:
             user = User.objects.get(email=email)
         except User.DoesNotExist:
             return True
+
+        ensure_account_can_authenticate(user)
 
         otp = "".join(secrets.choice(string.digits) for _ in range(6))
 
@@ -107,6 +110,8 @@ class PasswordService:
                 "Invalid email or OTP",
                 code="INVALID_OTP",
             ) from None
+
+        ensure_account_can_authenticate(user)
 
         try:
             from django_redis import get_redis_connection
@@ -208,6 +213,8 @@ class PasswordService:
                 "User not found.",
                 code="USER_NOT_FOUND",
             ) from None
+
+        ensure_account_can_authenticate(user)
 
         validate_password(new_password)
         user.set_password(new_password)

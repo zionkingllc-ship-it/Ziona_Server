@@ -11,6 +11,7 @@ from django.conf import settings
 from google.auth.transport import requests as google_requests
 from google.oauth2 import id_token as google_id_token
 
+from core.authentication.account_status import ensure_account_can_authenticate
 from core.authentication.tokens import TokenService
 from core.authentication.validators import AuthenticationError
 from core.shared.logging import log_security_event
@@ -72,10 +73,12 @@ class OAuthService:
                 code="INVALID_OAUTH_TOKEN",
             ) from e
 
-        existing_user = User.objects.filter(email=email).first()
+        existing_user = User.all_objects.filter(email=email).first()
         is_new_user = False
 
         if existing_user:
+            ensure_account_can_authenticate(existing_user)
+
             if existing_user.social_auth_provider is None:
                 raise AuthenticationError(
                     "This email is already registered with a password. Please sign in with your password instead, or use 'Forgot Password' to reset it.",

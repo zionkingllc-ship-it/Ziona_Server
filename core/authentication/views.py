@@ -57,7 +57,10 @@ def _auth_error_response(e: AuthenticationError) -> JsonResponse:
         "INVALID_REFRESH_TOKEN": 401,
         "MISSING_TOKEN": 401,
         "USER_NOT_FOUND": 404,
+        "ACCOUNT_NOT_FOUND": 404,
         "INVALID_CREDENTIALS": 401,
+        "ACCOUNT_SUSPENDED": 403,
+        "ACCOUNT_DEACTIVATED": 403,
     }
     status_code = status_map.get(e.code, 400)
 
@@ -617,6 +620,7 @@ class FinalizeUsernameView(BaseAuthView):
             )
 
         try:
+            from core.authentication.account_status import ensure_account_can_authenticate
             from core.authentication.tokens import TokenService
             from core.users.models import User
 
@@ -627,6 +631,7 @@ class FinalizeUsernameView(BaseAuthView):
                 raise AuthenticationError("Invalid token payload", "INVALID_TOKEN")
 
             user = User.objects.get(id=user_id)
+            ensure_account_can_authenticate(user)
 
             data = _parse_json_body(request)
             username = data.get("username", "").strip()

@@ -147,6 +147,7 @@ class AdminUserType:
     warned_at: str | None = strawberry.field(name="warnedAt", default=None)
     suspended_at: str | None = strawberry.field(name="suspendedAt", default=None)
     suspension_reason: str = strawberry.field(name="suspensionReason", default="")
+    available_actions: list[str] = strawberry.field(name="availableActions", default_factory=list)
     created_at: str = strawberry.field(name="createdAt")
     last_login: str | None = strawberry.field(name="lastLogin", default=None)
 
@@ -478,6 +479,7 @@ def _map_user(data: dict) -> AdminUserType:
         warned_at=data.get("warned_at"),
         suspended_at=data.get("suspended_at"),
         suspension_reason=data.get("suspension_reason", ""),
+        available_actions=data.get("available_actions", []),
         created_at=data["created_at"],
         last_login=data.get("last_login"),
     )
@@ -971,6 +973,41 @@ class AdminDashboardMutations:
         try:
             UserManagementService.delete_user(
                 user_id=user_id,
+                admin_user=admin_user,
+                ip_address=ip,
+            )
+            return ModerationActionPayload(success=True)
+        except AdminError as e:
+            return ModerationActionPayload(
+                success=False,
+                error=ErrorType(code=e.code, message=e.message),
+            )
+
+    @strawberry.mutation(
+        name="permanentlyDeleteUser",
+        description="Permanently anonymize and remove a user's visible data (admin only).",
+    )
+    @admin_required
+    def permanently_delete_user(
+        self,
+        info: Info,
+        user_id: str,
+        reason: str,
+        confirmation_text: str,
+        acknowledge_permanent_deletion: bool,
+    ) -> ModerationActionPayload:
+        from core.admin_dashboard.user_services import UserManagementService
+        from core.shared.exceptions import AdminError
+
+        admin_user = info.context.admin_user
+        ip = getattr(info.context, "admin_ip", "")
+
+        try:
+            UserManagementService.permanently_delete_user(
+                user_id=user_id,
+                reason=reason,
+                confirmation_text=confirmation_text,
+                acknowledge_permanent_deletion=acknowledge_permanent_deletion,
                 admin_user=admin_user,
                 ip_address=ip,
             )

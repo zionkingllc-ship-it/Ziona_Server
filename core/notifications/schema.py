@@ -47,10 +47,25 @@ class NotificationTypeEnum(Enum):
     ADMIN_ANNOUNCEMENT = "admin_announcement"
 
 
+def _default_notification_title(notification_type: str) -> str:
+    titles = {
+        NotificationTypeEnum.REPLY_COMMENT.value: "New Reply",
+        NotificationTypeEnum.REPLY_POST.value: "New Reply",
+        NotificationTypeEnum.LIKE_POST.value: "New Like",
+        NotificationTypeEnum.LIKE_COMMENT.value: "New Like",
+        NotificationTypeEnum.NEW_ANCHOR.value: "New Anchor",
+        NotificationTypeEnum.MENTION.value: "New Mention",
+        NotificationTypeEnum.NEW_CIRCLE_POST.value: "New Circle Post",
+        NotificationTypeEnum.ADMIN_ANNOUNCEMENT.value: "Ziona Update",
+    }
+    return titles.get(notification_type, "Ziona App")
+
+
 @strawberry.type
 class NotificationItem:
     id: strawberry.ID
     type: str
+    title: str
     message: str
     reference_id: strawberry.ID | None
     reference_type: str
@@ -78,6 +93,7 @@ class NotificationItem:
         obj = cls(
             id=strawberry.ID(str(instance.id)),
             type=instance.notification_type,
+            title=instance.title or _default_notification_title(instance.notification_type),
             message=instance.message,
             reference_id=strawberry.ID(str(instance.reference_id))
             if instance.reference_id
@@ -101,30 +117,51 @@ class NotificationConnection:
 
 @strawberry.type
 class NotificationPreferencesType:
-    anchor_notifications: bool
-    reply_notifications: bool
-    like_notifications: bool
-    circle_activity_notifications: bool
-    admin_announcements: bool
+    in_app_likes: bool
+    in_app_comment: bool
+    in_app_new_followers: bool
+    in_app_mention_and_tags: bool
+    interaction_likes: bool
+    interaction_comment: bool
+    interaction_post_interaction: bool
+    interaction_new_follower: bool
+    circle_likes: bool
+    circle_anchor_post: bool
+    circle_comment: bool
+    circle_friend_interaction: bool
 
     @classmethod
     def from_instance(cls, instance: NotificationPreference):
         return cls(
-            anchor_notifications=instance.anchor_notifications,
-            reply_notifications=instance.reply_notifications,
-            like_notifications=instance.like_notifications,
-            circle_activity_notifications=instance.circle_activity_notifications,
-            admin_announcements=instance.admin_announcements,
+            in_app_likes=instance.in_app_likes,
+            in_app_comment=instance.in_app_comment,
+            in_app_new_followers=instance.in_app_new_followers,
+            in_app_mention_and_tags=instance.in_app_mention_and_tags,
+            interaction_likes=instance.interaction_likes,
+            interaction_comment=instance.interaction_comment,
+            interaction_post_interaction=instance.interaction_post_interaction,
+            interaction_new_follower=instance.interaction_new_follower,
+            circle_likes=instance.circle_likes,
+            circle_anchor_post=instance.circle_anchor_post,
+            circle_comment=instance.circle_comment,
+            circle_friend_interaction=instance.circle_friend_interaction,
         )
 
 
 @strawberry.input
 class PreferencesInput:
-    anchor_notifications: bool | None = None
-    reply_notifications: bool | None = None
-    like_notifications: bool | None = None
-    circle_activity_notifications: bool | None = None
-    admin_announcements: bool | None = None
+    in_app_likes: bool | None = None
+    in_app_comment: bool | None = None
+    in_app_new_followers: bool | None = None
+    in_app_mention_and_tags: bool | None = None
+    interaction_likes: bool | None = None
+    interaction_comment: bool | None = None
+    interaction_post_interaction: bool | None = None
+    interaction_new_follower: bool | None = None
+    circle_likes: bool | None = None
+    circle_anchor_post: bool | None = None
+    circle_comment: bool | None = None
+    circle_friend_interaction: bool | None = None
 
 
 @strawberry.type
@@ -219,16 +256,23 @@ class NotificationMutations:
             raise Exception("Authentication required")
 
         pref_dict = {}
-        if preferences.anchor_notifications is not None:
-            pref_dict["anchor_notifications"] = preferences.anchor_notifications
-        if preferences.reply_notifications is not None:
-            pref_dict["reply_notifications"] = preferences.reply_notifications
-        if preferences.like_notifications is not None:
-            pref_dict["like_notifications"] = preferences.like_notifications
-        if preferences.circle_activity_notifications is not None:
-            pref_dict["circle_activity_notifications"] = preferences.circle_activity_notifications
-        if preferences.admin_announcements is not None:
-            pref_dict["admin_announcements"] = preferences.admin_announcements
+        for field in (
+            "in_app_likes",
+            "in_app_comment",
+            "in_app_new_followers",
+            "in_app_mention_and_tags",
+            "interaction_likes",
+            "interaction_comment",
+            "interaction_post_interaction",
+            "interaction_new_follower",
+            "circle_likes",
+            "circle_anchor_post",
+            "circle_comment",
+            "circle_friend_interaction",
+        ):
+            value = getattr(preferences, field)
+            if value is not None:
+                pref_dict[field] = value
 
         updated_pref = update_preferences(user.id, pref_dict)
         return NotificationPreferencesType.from_instance(updated_pref)

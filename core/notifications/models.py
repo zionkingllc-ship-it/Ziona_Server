@@ -58,6 +58,7 @@ class Notification(TimestampedModel):
     )
     reference_id = models.UUIDField(null=True, blank=True)
     reference_type = models.CharField(max_length=50, blank=True)
+    title = models.CharField(max_length=120, blank=True, default="")
     message = models.TextField()
     is_read = models.BooleanField(default=False)
     status = models.CharField(
@@ -103,6 +104,18 @@ class NotificationPreference(TimestampedModel):
         default=True,
         help_text="Whether to receive the daily notification digest email.",
     )
+    in_app_likes = models.BooleanField(default=True)
+    in_app_comment = models.BooleanField(default=True)
+    in_app_new_followers = models.BooleanField(default=True)
+    in_app_mention_and_tags = models.BooleanField(default=True)
+    interaction_likes = models.BooleanField(default=True)
+    interaction_comment = models.BooleanField(default=True)
+    interaction_post_interaction = models.BooleanField(default=True)
+    interaction_new_follower = models.BooleanField(default=True)
+    circle_likes = models.BooleanField(default=True)
+    circle_anchor_post = models.BooleanField(default=True)
+    circle_comment = models.BooleanField(default=True)
+    circle_friend_interaction = models.BooleanField(default=True)
 
     class Meta:
         db_table = "notification_preferences"

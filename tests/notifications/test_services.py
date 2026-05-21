@@ -56,7 +56,7 @@ def test_create_notification(db, user):
 
 
 def test_create_notification_preferences_disabled(db, user):
-    NotificationPreference.objects.create(user=user, anchor_notifications=False)
+    NotificationPreference.objects.create(user=user, circle_anchor_post=False)
 
     ref_id = uuid.uuid4()
     notif = create_notification(

@@ -112,6 +112,7 @@ class AnchorManagementService:
         # Use a far-future placeholder for published_at/expires_at on drafts
         # These get overwritten when the anchor is actually posted
         placeholder_time = datetime.now(timezone.utc)
+        typed_media = _typed_media_fields(anchor_type, media_url)
 
         anchor = Anchor.objects.create(
             circle=circle,
@@ -126,6 +127,8 @@ class AnchorManagementService:
             scripture_translation=scripture_translation,
             scripture_text=scripture_text,
             media_url=media_url,
+            anchor_image=typed_media["anchor_image"],
+            anchor_video=typed_media["anchor_video"],
             style_data=style_data or {},
             anchor_status="draft",
             published_at=placeholder_time,
@@ -355,6 +358,14 @@ class AnchorManagementService:
                 setattr(anchor, field, value)
                 update_fields.append(field)
 
+        media_url = updates.get("media_url")
+        if media_url is not None:
+            typed_media = _typed_media_fields(anchor.anchor_type, media_url)
+            for field, value in typed_media.items():
+                setattr(anchor, field, value)
+                if field not in update_fields:
+                    update_fields.append(field)
+
         anchor.save(update_fields=update_fields)
 
         log_admin_action(
@@ -429,6 +440,15 @@ def _revoke_celery_task(task_id: str):
         logger.info("celery_task_revoked", extra={"task_id": task_id})
     except Exception:
         logger.warning("Failed to revoke Celery task", extra={"task_id": task_id}, exc_info=True)
+
+
+def _typed_media_fields(anchor_type: str, media_url: str) -> dict[str, str]:
+    """Mirror generic media_url into mobile's typed media fields."""
+    if anchor_type in ("image", "image_text") and media_url:
+        return {"anchor_image": media_url, "anchor_video": ""}
+    if anchor_type == "video" and media_url:
+        return {"anchor_image": "", "anchor_video": media_url}
+    return {"anchor_image": "", "anchor_video": ""}
 
 
 def _notify_circle_members(anchor):

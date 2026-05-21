@@ -242,6 +242,12 @@ def create_anchor(
             code="OVERLAPPING_ANCHOR",
         )
 
+    if not anchor_image and anchor_type in ("image", "image_text") and media_url:
+        anchor_image = media_url
+
+    if not anchor_video and anchor_type == "video" and media_url:
+        anchor_video = media_url
+
     # ── Create anchor ──
     anchor = Anchor.objects.create(
         circle=circle,

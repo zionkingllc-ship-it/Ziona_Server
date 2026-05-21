@@ -18,6 +18,7 @@ from typing import Any
 from django.core.cache import cache
 from django.db import IntegrityError
 
+from core.authentication.account_status import ensure_account_can_authenticate
 from core.authentication.otp_service import OTPService
 from core.authentication.tokens import TokenError, TokenService
 from core.authentication.validators import (
@@ -72,6 +73,8 @@ class AuthService:
         if not user:
             raise AuthenticationError("User not found", "USER_NOT_FOUND")
 
+        ensure_account_can_authenticate(user)
+
         from core.profiles.services import ProfileService
 
         profile_dto = ProfileService.get_user_profile(user_id, viewer_id=user_id)
@@ -125,11 +128,13 @@ class AuthService:
         email = email.lower().strip()
         username = username.strip()
 
+        existing_user = User.all_objects.filter(email=email).first()
+        if existing_user:
+            ensure_account_can_authenticate(existing_user)
+
         validate_password(password)
         validate_username(username)
         encrypted_dob = validate_and_encrypt_dob(date_of_birth)
-
-        existing_user = User.objects.filter(email=email).first()
 
         if existing_user and existing_user.is_email_verified:
             logger.info("Registration attempt for verified email: %s", mask_email(email))
@@ -205,7 +210,7 @@ class AuthService:
         email = email.lower().strip()
 
         try:
-            user = User.objects.get(email=email)
+            user = User.all_objects.get(email=email)
         except User.DoesNotExist:
             logger.warning("Login failed: unknown email=%s", mask_email(email))
             raise AuthenticationError(
@@ -213,18 +218,13 @@ class AuthService:
                 code="INVALID_CREDENTIALS",
             ) from None
 
+        ensure_account_can_authenticate(user)
+
         if not user.check_password(password):
             logger.warning("Login failed: bad password for user_id=%s", user.id)
             raise AuthenticationError(
                 "Invalid email or password",
                 code="INVALID_CREDENTIALS",
-            )
-
-        if not user.is_active:
-            logger.warning("Login failed: deactivated account user_id=%s", user.id)
-            raise AuthenticationError(
-                "This account has been deactivated",
-                code="ACCOUNT_DEACTIVATED",
             )
 
         if not user.is_email_verified:
@@ -343,11 +343,17 @@ class AuthService:
             payload = TokenService.validate_refresh_token(refresh_token)
             user_id = payload["user_id"]
             try:
-                user = User.objects.get(id=user_id)
+                user = User.all_objects.get(id=user_id)
+                ensure_account_can_authenticate(user)
                 role = user.role
             except User.DoesNotExist:
                 raise TokenError("User not found") from None
-            return TokenService.rotate_refresh_token(refresh_token, role)
+            try:
+                return TokenService.rotate_refresh_token(refresh_token, role)
+            except TokenError as e:
+                raise AuthenticationError(str(e), code="INVALID_REFRESH_TOKEN") from e
+        except AuthenticationError:
+            raise
         except TokenError as e:
             raise AuthenticationError(str(e), code="INVALID_REFRESH_TOKEN") from e
 

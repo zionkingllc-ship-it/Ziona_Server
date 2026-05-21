@@ -24,19 +24,20 @@ User = get_user_model()
 
 
 def _is_notification_enabled(user_id: int, notification_type: str) -> bool:
-    """Check if the user has enabled this specific notification type."""
+    """Check whether the 12-field mobile preference contract permits delivery."""
     pref, _ = NotificationPreference.objects.get_or_create(user_id=user_id)
 
     mapping = {
-        NotificationType.NEW_ANCHOR: pref.anchor_notifications,
-        NotificationType.REPLY_COMMENT: pref.reply_notifications,
-        NotificationType.REPLY_POST: pref.reply_notifications,
-        NotificationType.LIKE_POST: pref.like_notifications,
-        NotificationType.LIKE_COMMENT: pref.like_notifications,
-        NotificationType.NEW_CIRCLE_POST: pref.circle_activity_notifications,
-        NotificationType.ADMIN_ANNOUNCEMENT: pref.admin_announcements,
+        NotificationType.NEW_ANCHOR: pref.circle_anchor_post,
+        NotificationType.REPLY_COMMENT: pref.in_app_comment and pref.interaction_comment,
+        NotificationType.REPLY_POST: pref.in_app_comment and pref.interaction_post_interaction,
+        NotificationType.LIKE_POST: pref.in_app_likes and pref.interaction_likes,
+        NotificationType.LIKE_COMMENT: pref.in_app_likes and pref.interaction_likes,
+        NotificationType.MENTION: pref.in_app_mention_and_tags,
+        NotificationType.NEW_CIRCLE_POST: pref.circle_anchor_post,
+        # Admin/system announcements do not have a user-facing granular toggle.
+        NotificationType.ADMIN_ANNOUNCEMENT: True,
     }
-    # Mentions are always enabled if not explicitly mapped above
     return mapping.get(notification_type, True)
 
 
@@ -47,6 +48,9 @@ def create_notification(
     reference_type: str,
     message: str,
     sender_id: int | None = None,
+    title: str = "",
+    respect_preferences: bool = True,
+    bypass_duplicate_check: bool = False,
 ) -> Notification | None:
     """
     Create an in-app notification and trigger a push notification.
@@ -56,18 +60,22 @@ def create_notification(
         sender_id: The user who triggered the notification (e.g. a liker, commenter).
                    Pass None for system/admin notifications.
     """
-    if not _is_notification_enabled(user_id, type_str):
+    if respect_preferences and not _is_notification_enabled(user_id, type_str):
         return None
 
     # Anti-spam: Do not recreate exact same notification within 1 hour
     one_hour_ago = timezone.now() - timedelta(hours=1)
-    is_duplicate = Notification.objects.filter(
-        user_id=user_id,
-        notification_type=type_str,
-        reference_id=reference_id,
-        reference_type=reference_type,
-        created_at__gte=one_hour_ago,
-    ).exists()
+    is_duplicate = (
+        False
+        if bypass_duplicate_check
+        else Notification.objects.filter(
+            user_id=user_id,
+            notification_type=type_str,
+            reference_id=reference_id,
+            reference_type=reference_type,
+            created_at__gte=one_hour_ago,
+        ).exists()
+    )
 
     if is_duplicate:
         logger.info(f"Duplicate notification prevented for {user_id} ({type_str})")
@@ -78,6 +86,7 @@ def create_notification(
         notification_type=type_str,
         reference_id=reference_id,
         reference_type=reference_type,
+        title=title,
         message=message,
         sender_id=sender_id,
     )
@@ -85,7 +94,7 @@ def create_notification(
     # Trigger push notification asynchronously (would be a Celery task in prod)
     send_push_notification(
         user_id=user_id,
-        title="Ziona App",
+        title=title or "Ziona App",
         body=message,
         data={
             "type": type_str,

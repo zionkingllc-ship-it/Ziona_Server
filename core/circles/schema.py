@@ -259,15 +259,23 @@ class AnchorType:
 
     @strawberry.field(name="anchorThumbnail")
     def anchor_thumbnail(self) -> str | None:
-        return self._dto.anchor_thumbnail or None
+        return self._dto.anchor_thumbnail or self._dto.preview_url or None
 
     @strawberry.field(name="anchorImage")
     def anchor_image(self) -> str | None:
-        return self._dto.anchor_image or None
+        if self._dto.anchor_image:
+            return self._dto.anchor_image
+        if self._dto.anchor_type in ("image", "image_text"):
+            return self._dto.media_url or None
+        return None
 
     @strawberry.field(name="anchorVideo")
     def anchor_video(self) -> str | None:
-        return self._dto.anchor_video or None
+        if self._dto.anchor_video:
+            return self._dto.anchor_video
+        if self._dto.anchor_type == "video":
+            return self._dto.media_url or None
+        return None
 
     @classmethod
     def from_db_model(cls, anchor_instance):
