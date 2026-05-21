@@ -185,6 +185,10 @@ CORS_ALLOW_HEADERS = [
     "x-csrftoken",
     "x-requested-with",
 ]
+GCS_CORS_ALLOWED_ORIGINS = env.list(
+    "GCS_CORS_ALLOWED_ORIGINS",
+    default=CORS_ALLOWED_ORIGINS,
+)
 
 
 JWT_SECRET_KEY = env("JWT_SECRET_KEY", default=SECRET_KEY)

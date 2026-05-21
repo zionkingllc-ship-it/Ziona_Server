@@ -124,6 +124,7 @@ class MediaMutations:
                 success=True,
                 upload_url=result["upload_url"],
                 media_id=result["media_id"],
+                media_url=result["media_url"],
                 expires_in=result["expires_in"],
             )
         except MediaError as e:

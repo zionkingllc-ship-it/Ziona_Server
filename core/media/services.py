@@ -75,10 +75,10 @@ class MediaService:
             file_size: File size in bytes.
 
         Returns:
-            Dict with upload_url, media_id, and expires_in.
+            Dict with upload_url, media_id, media_url, and expires_in.
 
         Raises:
-            MediaError: If file type or size is invalid.
+            MediaError: If validation fails or the signed URL cannot be generated.
         """
         if file_type not in ALLOWED_TYPES:
             raise MediaError(
@@ -114,16 +114,6 @@ class MediaService:
         else:
             storage_path = f"uploads/{user_id}/images/{media_id}.{ext}"
 
-        media_file = MediaFile.objects.create(
-            user_id=user_id,
-            file_name=file_name,
-            file_type=file_type,
-            file_size=file_size,
-            media_type=media_type,
-            storage_path=storage_path,
-            status=MediaStatus.PENDING,
-        )
-
         expiry = settings.GCP_SIGNED_URL_EXPIRY
         try:
             upload_url = _generate_gcp_signed_url(
@@ -134,10 +124,29 @@ class MediaService:
                 method="PUT",
             )
         except Exception as e:
-            logger.error(f"Failed to generate signed URL: {e}")
-            upload_url = normalize_url(
-                f"https://storage.googleapis.com/{settings.GCP_STORAGE_BUCKET}/{storage_path}"
+            logger.error(
+                "Failed to generate signed upload URL",
+                extra={"storage_path": storage_path, "file_type": file_type},
+                exc_info=True,
             )
+            raise MediaError(
+                "Could not prepare a secure upload URL. Please try again.",
+                code="UPLOAD_URL_GENERATION_FAILED",
+            ) from e
+
+        media_file = MediaFile.objects.create(
+            id=media_id,
+            user_id=user_id,
+            file_name=file_name,
+            file_type=file_type,
+            file_size=file_size,
+            media_type=media_type,
+            storage_path=storage_path,
+            status=MediaStatus.PENDING,
+        )
+        media_url = normalize_url(
+            f"https://storage.googleapis.com/{settings.GCP_STORAGE_BUCKET}/{storage_path}"
+        )
 
         logger.info(
             "Upload URL generated",
@@ -152,6 +161,7 @@ class MediaService:
         return {
             "upload_url": upload_url,
             "media_id": str(media_file.id),
+            "media_url": media_url,
             "expires_in": expiry,
         }
 
