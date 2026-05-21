@@ -13,6 +13,7 @@ from core.notifications.services import (
     register_device_token,
     update_preferences,
 )
+from core.users.schema import _get_authenticated_user_id
 
 
 @strawberry.type
@@ -59,6 +60,19 @@ def _default_notification_title(notification_type: str) -> str:
         NotificationTypeEnum.ADMIN_ANNOUNCEMENT.value: "Ziona Update",
     }
     return titles.get(notification_type, "Ziona App")
+
+
+def _get_authenticated_notification_user(info: Info):
+    user_id = _get_authenticated_user_id(info)
+    if not user_id:
+        raise Exception("Authentication required")
+
+    from core.users.models import User
+
+    try:
+        return User.objects.get(id=user_id)
+    except User.DoesNotExist:
+        raise Exception("Authentication required") from None
 
 
 @strawberry.type
@@ -170,9 +184,7 @@ class NotificationQueries:
     def notifications(
         self, info: Info, limit: int = 20, cursor: str | None = None
     ) -> NotificationConnection:
-        user = info.context.request.user
-        if not user.is_authenticated:
-            raise Exception("Authentication required")
+        user = _get_authenticated_notification_user(info)
 
         qs = get_notifications(user.id, limit=limit + 1, cursor=cursor)
         items = list(qs)
@@ -191,16 +203,12 @@ class NotificationQueries:
 
     @strawberry.field
     def unread_notification_count(self, info: Info) -> int:
-        user = info.context.request.user
-        if not user.is_authenticated:
-            raise Exception("Authentication required")
+        user = _get_authenticated_notification_user(info)
         return get_unread_count(user.id)
 
     @strawberry.field
     def notification_preferences(self, info: Info) -> NotificationPreferencesType:
-        user = info.context.request.user
-        if not user.is_authenticated:
-            raise Exception("Authentication required")
+        user = _get_authenticated_notification_user(info)
         pref, _ = NotificationPreference.objects.get_or_create(user_id=user.id)
         return NotificationPreferencesType.from_instance(pref)
 
@@ -211,9 +219,7 @@ class NotificationMutations:
     def mark_notification_as_read(
         self, info: Info, notification_id: strawberry.ID
     ) -> SuccessResponse:
-        user = info.context.request.user
-        if not user.is_authenticated:
-            raise Exception("Authentication required")
+        user = _get_authenticated_notification_user(info)
         try:
             import uuid
 
@@ -224,9 +230,7 @@ class NotificationMutations:
 
     @strawberry.mutation
     def mark_all_notifications_as_read(self, info: Info) -> SuccessResponse:
-        user = info.context.request.user
-        if not user.is_authenticated:
-            raise Exception("Authentication required")
+        user = _get_authenticated_notification_user(info)
         Notification.objects.filter(
             user_id=user.id, is_read=False, status=NotificationStatus.ACTIVE
         ).update(is_read=True, updated_at=timezone.now())
@@ -234,9 +238,7 @@ class NotificationMutations:
 
     @strawberry.mutation
     def delete_notification(self, info: Info, notification_id: strawberry.ID) -> SuccessResponse:
-        user = info.context.request.user
-        if not user.is_authenticated:
-            raise Exception("Authentication required")
+        user = _get_authenticated_notification_user(info)
         try:
             import uuid
 
@@ -251,9 +253,7 @@ class NotificationMutations:
     def update_notification_preferences(
         self, info: Info, preferences: PreferencesInput
     ) -> NotificationPreferencesType:
-        user = info.context.request.user
-        if not user.is_authenticated:
-            raise Exception("Authentication required")
+        user = _get_authenticated_notification_user(info)
 
         pref_dict = {}
         for field in (
@@ -279,9 +279,7 @@ class NotificationMutations:
 
     @strawberry.mutation
     def register_device_token(self, info: Info, token: str, platform: str) -> SuccessResponse:
-        user = info.context.request.user
-        if not user.is_authenticated:
-            raise Exception("Authentication required")
+        user = _get_authenticated_notification_user(info)
         register_device_token(user.id, token, platform)
         # We can pass the message or just return True
         return SuccessResponse(success=True)
@@ -290,10 +288,10 @@ class NotificationMutations:
     def send_admin_announcement(
         self, info: Info, message: str, target_users: list[strawberry.ID] | None = None
     ) -> SuccessResponse:
-        user = info.context.request.user
-        if not user.is_authenticated or not user.is_staff:
+        user = _get_authenticated_notification_user(info)
+        if not user.is_staff:
             raise Exception("UNAUTHORIZED_ADMIN_ACTION")
 
-        targets = [int(tid) for tid in target_users] if target_users else None
+        targets = [str(tid) for tid in target_users] if target_users else None
         create_admin_announcement(admin_id=user.id, message=message, target_users=targets)
         return SuccessResponse(success=True)

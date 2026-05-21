@@ -707,6 +707,35 @@ class CircleQueries:
             return None
 
     @strawberry.field(
+        name="circlePostComments",
+        description="Paginated inline comments for a CirclePost, with viewer like state.",
+    )
+    def circle_post_comments(
+        self,
+        info: Info,
+        post_id: str,
+        page: int = 1,
+        page_size: int = 30,
+    ) -> "CirclePostCommentsResponse":
+        from core.circles.comment_services import get_circle_post_comments
+
+        viewer_id = _get_authenticated_user_id(info)
+        comments, has_next_page, total_count = get_circle_post_comments(
+            post_id=post_id,
+            viewer_id=viewer_id,
+            page=page,
+            page_size=page_size,
+        )
+        return CirclePostCommentsResponse(
+            comments=[CirclePostCommentType.from_db_model(c) for c in comments],
+            page_info=PageInfo(
+                has_next_page=has_next_page,
+                total_count=total_count,
+                current_page=page,
+            ),
+        )
+
+    @strawberry.field(
         name="anchor",
         description="Fetch a single Anchor by ID. Use this for deep-link/push-notification screens.",
     )
@@ -1419,50 +1448,3 @@ class CirclePostCommentLikePayload:
     liked: bool | None = None
     likes_count: int | None = strawberry.field(name="likesCount", default=None)
     error: ErrorType | None = None
-
-
-# ── Extend CircleQueries with the comment fetch ────────────────────────────────
-# We inject the query via a standalone function registered on CircleQueries
-# to avoid re-opening the class definition.
-
-# NOTE: Strawberry does not support monkey-patching @strawberry.type classes after
-# definition. The circlePostComments query is therefore declared here as a plain
-# function and registered on the merged schema via the CircleQueries class below.
-# The cleanest pattern in Strawberry is to declare all fields inside the class.
-# We handle this by appending to CircleQueries' __annotations__ post-definition,
-# which Strawberry picks up correctly.
-
-
-def _resolve_circle_post_comments(
-    root,
-    info: Info,
-    post_id: str,
-    page: int = 1,
-    page_size: int = 30,
-) -> CirclePostCommentsResponse:
-    """Fetch paginated inline comments for a CirclePost."""
-    from core.circles.comment_services import get_circle_post_comments
-
-    viewer_id = _get_authenticated_user_id(info)
-    comments, has_next_page, total_count = get_circle_post_comments(
-        post_id=post_id,
-        viewer_id=viewer_id,
-        page=page,
-        page_size=page_size,
-    )
-    return CirclePostCommentsResponse(
-        comments=[CirclePostCommentType.from_db_model(c) for c in comments],
-        page_info=PageInfo(
-            has_next_page=has_next_page,
-            total_count=total_count,
-            current_page=page,
-        ),
-    )
-
-
-# Register the query field on CircleQueries dynamically.
-CircleQueries.circle_post_comments = strawberry.field(
-    name="circlePostComments",
-    description="Paginated inline comments for a CirclePost, with viewer like state.",
-    resolver=_resolve_circle_post_comments,
-)

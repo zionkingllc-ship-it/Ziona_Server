@@ -313,9 +313,43 @@ class Command(BaseCommand):
 
         now = datetime.now(timezone.utc)
         created = 0
+        report_seeders = self._get_report_seeders(reporter, count=25)
+        report_index = 0
+
+        def next_reporter():
+            nonlocal report_index
+            selected_reporter = report_seeders[report_index]
+            report_index += 1
+            return selected_reporter
+
+        def get_or_create_report(
+            *,
+            key,
+            report_reporter,
+            target_type,
+            target_id,
+            reason,
+            defaults,
+        ):
+            fixed_id = _REPORT_IDS[key]
+            existing_report = Report.objects.filter(id=fixed_id).first()
+            if existing_report is not None:
+                return existing_report, False
+
+            report, was_created = Report.objects.get_or_create(
+                reporter=report_reporter,
+                target_type=target_type,
+                target_id=target_id,
+                reason=reason,
+                defaults={
+                    "id": fixed_id,
+                    **defaults,
+                },
+            )
+            return report, was_created
 
         # ── POST REPORTS ──────────────────────────────────────────────
-        post_id = post.id if post else uuid.uuid4()
+        post_id = post.id if post else uuid.UUID("eeeeeeee-0000-4000-e000-000000000101")
 
         post_pending = [
             (
@@ -340,14 +374,15 @@ class Command(BaseCommand):
             ),
         ]
         for key, reason, description in post_pending:
-            _, was_created = Report.objects.get_or_create(
-                id=_REPORT_IDS[key],
+            report_reporter = next_reporter()
+            _, was_created = get_or_create_report(
+                key=key,
+                report_reporter=report_reporter,
+                target_type="post",
+                target_id=post_id,
+                reason=reason,
                 defaults={
-                    "reporter": reporter,
-                    "target_type": "post",
-                    "target_id": post_id,
                     "post": post,
-                    "reason": reason,
                     "description": description,
                     "status": ReportStatus.PENDING,
                 },
@@ -374,14 +409,15 @@ class Command(BaseCommand):
             ),
         ]
         for key, reason, description in post_dismissed:
-            _, was_created = Report.objects.get_or_create(
-                id=_REPORT_IDS[key],
+            report_reporter = next_reporter()
+            _, was_created = get_or_create_report(
+                key=key,
+                report_reporter=report_reporter,
+                target_type="post",
+                target_id=post_id,
+                reason=reason,
                 defaults={
-                    "reporter": reporter,
-                    "target_type": "post",
-                    "target_id": post_id,
                     "post": post,
-                    "reason": reason,
                     "description": description,
                     "status": ReportStatus.DISMISSED,
                     "reviewed_by": admin_user,
@@ -418,14 +454,15 @@ class Command(BaseCommand):
             ModerationActionChoice.WARN_USER,
         ]
         for (key, reason, description), action in zip(post_actioned, action_choices, strict=False):
-            _, was_created = Report.objects.get_or_create(
-                id=_REPORT_IDS[key],
+            report_reporter = next_reporter()
+            _, was_created = get_or_create_report(
+                key=key,
+                report_reporter=report_reporter,
+                target_type="post",
+                target_id=post_id,
+                reason=reason,
                 defaults={
-                    "reporter": reporter,
-                    "target_type": "post",
-                    "target_id": post_id,
                     "post": post,
-                    "reason": reason,
                     "description": description,
                     "status": ReportStatus.ACTIONED,
                     "reviewed_by": admin_user,
@@ -440,7 +477,7 @@ class Command(BaseCommand):
         self.stdout.write("  ✓ 12 post reports seeded (4 pending, 4 dismissed, 4 actioned)")
 
         # ── COMMENT REPORTS ───────────────────────────────────────────
-        comment_id = comment.id if comment else uuid.uuid4()
+        comment_id = comment.id if comment else uuid.UUID("eeeeeeee-0000-4000-e000-000000000201")
 
         comment_pending = [
             ("rc_pend_1", ReportReason.HATE_SPEECH, "Comment uses derogatory slurs."),
@@ -452,14 +489,15 @@ class Command(BaseCommand):
             ("rc_pend_3", ReportReason.POLICY_VIOLATION, "Comment links to an adult website."),
         ]
         for key, reason, description in comment_pending:
-            _, was_created = Report.objects.get_or_create(
-                id=_REPORT_IDS[key],
+            report_reporter = next_reporter()
+            _, was_created = get_or_create_report(
+                key=key,
+                report_reporter=report_reporter,
+                target_type="comment",
+                target_id=comment_id,
+                reason=reason,
                 defaults={
-                    "reporter": reporter,
-                    "target_type": "comment",
-                    "target_id": comment_id,
                     "comment": comment,
-                    "reason": reason,
                     "description": description,
                     "status": ReportStatus.PENDING,
                 },
@@ -481,14 +519,15 @@ class Command(BaseCommand):
             ),
         ]
         for key, reason, description in comment_dismissed:
-            _, was_created = Report.objects.get_or_create(
-                id=_REPORT_IDS[key],
+            report_reporter = next_reporter()
+            _, was_created = get_or_create_report(
+                key=key,
+                report_reporter=report_reporter,
+                target_type="comment",
+                target_id=comment_id,
+                reason=reason,
                 defaults={
-                    "reporter": reporter,
-                    "target_type": "comment",
-                    "target_id": comment_id,
                     "comment": comment,
-                    "reason": reason,
                     "description": description,
                     "status": ReportStatus.DISMISSED,
                     "reviewed_by": admin_user,
@@ -509,14 +548,15 @@ class Command(BaseCommand):
             ("rc_act_2", ReportReason.POLICY_VIOLATION, "Spam link in comment. Comment removed."),
         ]
         for key, reason, description in comment_actioned:
-            _, was_created = Report.objects.get_or_create(
-                id=_REPORT_IDS[key],
+            report_reporter = next_reporter()
+            _, was_created = get_or_create_report(
+                key=key,
+                report_reporter=report_reporter,
+                target_type="comment",
+                target_id=comment_id,
+                reason=reason,
                 defaults={
-                    "reporter": reporter,
-                    "target_type": "comment",
-                    "target_id": comment_id,
                     "comment": comment,
-                    "reason": reason,
                     "description": description,
                     "status": ReportStatus.ACTIONED,
                     "reviewed_by": admin_user,
@@ -539,13 +579,14 @@ class Command(BaseCommand):
             ("rv_pend_2", ReportReason.HATE_SPEECH, "Profile picture contains a hate symbol."),
         ]
         for key, reason, description in profile_pending:
-            _, was_created = Report.objects.get_or_create(
-                id=_REPORT_IDS[key],
+            report_reporter = next_reporter()
+            _, was_created = get_or_create_report(
+                key=key,
+                report_reporter=report_reporter,
+                target_type="profile",
+                target_id=profile_target,
+                reason=reason,
                 defaults={
-                    "reporter": reporter,
-                    "target_type": "profile",
-                    "target_id": profile_target,
-                    "reason": reason,
                     "description": description,
                     "status": ReportStatus.PENDING,
                 },
@@ -567,13 +608,14 @@ class Command(BaseCommand):
             ),
         ]
         for key, reason, description in profile_dismissed:
-            _, was_created = Report.objects.get_or_create(
-                id=_REPORT_IDS[key],
+            report_reporter = next_reporter()
+            _, was_created = get_or_create_report(
+                key=key,
+                report_reporter=report_reporter,
+                target_type="profile",
+                target_id=profile_target,
+                reason=reason,
                 defaults={
-                    "reporter": reporter,
-                    "target_type": "profile",
-                    "target_id": profile_target,
-                    "reason": reason,
                     "description": description,
                     "status": ReportStatus.DISMISSED,
                     "reviewed_by": admin_user,
@@ -613,6 +655,35 @@ class Command(BaseCommand):
 
         admin = User.objects.filter(role=UserRole.ADMIN, deleted_at__isnull=True).first()
         return admin or fallback_user
+
+    def _get_report_seeders(self, fallback_user, count: int):
+        """Return deterministic reporter accounts for unique demo reports.
+
+        The Report model prevents one user from reporting the same target for
+        the same reason twice. These seed users keep the command idempotent
+        while still giving the dashboard enough sample reports per status.
+        """
+        from core.users.models import User, UserRole, UserStatus
+
+        reporters = []
+        for index in range(1, count + 1):
+            email = f"moderation-reporter-{index:02d}@ziona.app"
+            user = User.objects.filter(email=email).first()
+            if user is None:
+                user = User.objects.create_user(
+                    email=email,
+                    username=f"mod_reporter_{index:02d}",
+                    password=None,
+                    full_name=f"Moderation Reporter {index:02d}",
+                    role=UserRole.USER,
+                    status=UserStatus.ACTIVE,
+                    is_email_verified=True,
+                )
+            reporters.append(user)
+
+        if not reporters:
+            return [fallback_user]
+        return reporters
 
     def _get_post_and_comment(self, user):
         """Return (post, comment) from seed data, creating stubs if missing."""
