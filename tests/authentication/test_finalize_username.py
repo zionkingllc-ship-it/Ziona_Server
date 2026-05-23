@@ -1,7 +1,6 @@
 from unittest.mock import patch
 
 import pytest
-from django.conf import settings
 from django.core.cache import cache
 from django.test import Client
 from django.urls import reverse
@@ -15,6 +14,14 @@ pytestmark = pytest.mark.django_db
 @pytest.fixture
 def client() -> Client:
     return Client()
+
+
+@pytest.fixture
+def google_client_id(settings) -> str:
+    client_id = "test-google-client.apps.googleusercontent.com"
+    settings.GOOGLE_CLIENT_ID = client_id
+    settings.GOOGLE_CLIENT_IDS = [client_id]
+    return client_id
 
 
 @pytest.fixture
@@ -35,13 +42,17 @@ def access_token(user: User) -> str:
 
 
 @patch("google.oauth2.id_token.verify_oauth2_token")
-def test_oauth_new_user_creates_temp_username(mock_verify, client: Client) -> None:
+def test_oauth_new_user_creates_temp_username(
+    mock_verify,
+    client: Client,
+    google_client_id: str,
+) -> None:
     mock_verify.return_value = {
         "sub": "google_uid_1",
         "email": "new.oauth1@gmail.com",
         "name": "New OAuth User 1",
         "picture": "http://example.com/pic.jpg",
-        "aud": settings.GOOGLE_CLIENT_ID,
+        "aud": google_client_id,
     }
     url = reverse("authentication:google-oauth")
     response = client.post(url, {"id_token": "fake_token"}, content_type="application/json")
@@ -53,12 +64,16 @@ def test_oauth_new_user_creates_temp_username(mock_verify, client: Client) -> No
 
 
 @patch("google.oauth2.id_token.verify_oauth2_token")
-def test_oauth_new_user_sets_needs_username_selection_flag(mock_verify, client: Client) -> None:
+def test_oauth_new_user_sets_needs_username_selection_flag(
+    mock_verify,
+    client: Client,
+    google_client_id: str,
+) -> None:
     mock_verify.return_value = {
         "sub": "google_uid_2",
         "email": "new.oauth2@gmail.com",
         "name": "New OAuth User 2",
-        "aud": settings.GOOGLE_CLIENT_ID,
+        "aud": google_client_id,
     }
     url = reverse("authentication:google-oauth")
     client.post(url, {"id_token": "fake_token"}, content_type="application/json")
@@ -68,13 +83,15 @@ def test_oauth_new_user_sets_needs_username_selection_flag(mock_verify, client: 
 
 @patch("google.oauth2.id_token.verify_oauth2_token")
 def test_oauth_response_includes_needs_username_selection_field(
-    mock_verify, client: Client
+    mock_verify,
+    client: Client,
+    google_client_id: str,
 ) -> None:
     mock_verify.return_value = {
         "sub": "google_uid_3",
         "email": "new.oauth3@gmail.com",
         "name": "New OAuth User 3",
-        "aud": settings.GOOGLE_CLIENT_ID,
+        "aud": google_client_id,
     }
     url = reverse("authentication:google-oauth")
     response = client.post(url, {"id_token": "fake_token"}, content_type="application/json")
@@ -84,7 +101,11 @@ def test_oauth_response_includes_needs_username_selection_field(
 
 
 @patch("google.oauth2.id_token.verify_oauth2_token")
-def test_oauth_existing_user_keeps_username_and_flag_false(mock_verify, client: Client) -> None:
+def test_oauth_existing_user_keeps_username_and_flag_false(
+    mock_verify,
+    client: Client,
+    google_client_id: str,
+) -> None:
     User.objects.create_user(
         email="existing.oauth@gmail.com",
         username="existingUser",
@@ -96,7 +117,7 @@ def test_oauth_existing_user_keeps_username_and_flag_false(mock_verify, client: 
         "sub": "google_uid_4",
         "email": "existing.oauth@gmail.com",
         "name": "Existing OAuth User",
-        "aud": settings.GOOGLE_CLIENT_ID,
+        "aud": google_client_id,
     }
     url = reverse("authentication:google-oauth")
     response = client.post(url, {"id_token": "fake_token"}, content_type="application/json")

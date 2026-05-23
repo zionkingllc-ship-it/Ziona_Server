@@ -14,6 +14,13 @@ def mock_google_verify():
         yield mock
 
 
+@pytest.fixture(autouse=True)
+def configure_google_client_ids(settings):
+    client_id = "test-web-client.apps.googleusercontent.com"
+    settings.GOOGLE_CLIENT_ID = client_id
+    settings.GOOGLE_CLIENT_IDS = [client_id]
+
+
 @pytest.mark.django_db
 class TestGoogleOAuth:
     """Test suite for the 5 explicit Google OAuth scenarios."""
