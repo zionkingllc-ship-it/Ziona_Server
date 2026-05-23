@@ -13,6 +13,7 @@ class TestEmailTasks:
     @patch("core.shared.tasks.email_tasks.send_mail")
     def test_send_email_success(self, mock_send_mail):
         """Test successful email sending."""
+        mock_send_mail.return_value = 1
         subject = "Test Subject"
         message = "Test message body"
         from_email = "noreply@ziona.app"
@@ -74,6 +75,22 @@ class TestEmailTasks:
             assert "Failed after retries" in result["message"]
             mock_logger.error.assert_called()
 
+    @patch("core.shared.tasks.email_tasks.send_mail")
+    def test_send_email_retries_when_backend_sends_zero_messages(self, mock_send_mail):
+        """A backend return value of 0 should be treated as a delivery failure."""
+        mock_send_mail.return_value = 0
+
+        with patch.object(send_email_async, "retry") as mock_retry:
+            mock_retry.side_effect = Exception("Retry triggered")
+
+            with pytest.raises(Exception, match="Retry triggered"):
+                send_email_async(
+                    subject="Test",
+                    message="Body",
+                    from_email="test@ziona.app",
+                    recipient_list=["user@example.com"],
+                )
+
     def test_task_queuing_non_blocking(self):
         """Test that .delay() returns immediately without blocking."""
         import time
@@ -94,6 +111,8 @@ class TestEmailTasks:
     def test_uses_default_from_email_when_none(self, mock_send_mail):
         """Test task uses DEFAULT_FROM_EMAIL when from_email is None."""
         from django.conf import settings
+
+        mock_send_mail.return_value = 1
 
         send_email_async(
             subject="Test",

@@ -43,14 +43,26 @@ class OAuthService:
         Raises:
             AuthenticationError: If token verification or account binding fails.
         """
+        allowed_client_ids = _get_google_client_ids()
+        if not allowed_client_ids:
+            logger.error("Google OAuth rejected because no client IDs are configured")
+            raise AuthenticationError(
+                "Google authentication is not configured",
+                code="OAUTH_NOT_CONFIGURED",
+            )
+
         try:
             google_user_info = google_id_token.verify_oauth2_token(
                 id_token,
                 google_requests.Request(),
-                settings.GOOGLE_CLIENT_ID,
+                None,
             )
 
-            if google_user_info.get("aud") != settings.GOOGLE_CLIENT_ID:
+            if google_user_info.get("aud") not in allowed_client_ids:
+                logger.warning(
+                    "Google token rejected due to unexpected audience",
+                    extra={"audience": google_user_info.get("aud")},
+                )
                 raise AuthenticationError(
                     "Invalid Google token audience",
                     code="INVALID_OAUTH_TOKEN",
@@ -139,3 +151,13 @@ class OAuthService:
             "refresh_token": refresh_token,
             "is_new_user": is_new_user,
         }
+
+
+def _get_google_client_ids() -> list[str]:
+    """Return configured first-party Google client IDs accepted by the backend."""
+    client_ids = getattr(settings, "GOOGLE_CLIENT_IDS", None)
+    if client_ids:
+        return [client_id for client_id in client_ids if client_id]
+
+    legacy_client_id = getattr(settings, "GOOGLE_CLIENT_ID", "")
+    return [legacy_client_id] if legacy_client_id else []

@@ -43,6 +43,8 @@ services:
         generateValue: true
       - key: ENCRYPTION_KEY
         sync: false
+      - key: GOOGLE_CLIENT_IDS
+        sync: false
       - key: ENSEND_API_KEY
         sync: false
       - key: ENSEND_API_URL

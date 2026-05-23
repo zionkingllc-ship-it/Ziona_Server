@@ -64,9 +64,9 @@ def send_email_async(
                 to=recipient_list,
             )
             msg.attach_alternative(html_message, "text/html")
-            msg.send(fail_silently=False)
+            sent_count = msg.send(fail_silently=False)
         else:
-            send_mail(
+            sent_count = send_mail(
                 subject=subject,
                 message=message,
                 from_email=sender,
@@ -74,12 +74,16 @@ def send_email_async(
                 fail_silently=False,
             )
 
+        if sent_count <= 0:
+            raise RuntimeError("Email backend accepted request but sent 0 messages")
+
         logger.info(
             "email_sent",
             extra={
                 "subject": subject,
                 "recipients": recipient_list,
                 "html": bool(html_message),
+                "sent_count": sent_count,
                 "task_id": self.request.id,
             },
         )

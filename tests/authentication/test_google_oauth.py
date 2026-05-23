@@ -22,6 +22,7 @@ class TestGoogleOAuth:
 
     def test_new_google_user(self, api_client, mock_google_verify):
         """Scenario 1: New Google User."""
+        settings.GOOGLE_CLIENT_IDS = [settings.GOOGLE_CLIENT_ID]
         mock_google_verify.return_value = {
             "aud": settings.GOOGLE_CLIENT_ID,
             "email": "new.user@google.com",
@@ -48,12 +49,65 @@ class TestGoogleOAuth:
         assert user_data["needsUsernameSelection"] is True
 
         assert "accessToken" in data["data"]["tokens"]
+        mock_google_verify.assert_called_once()
+        assert mock_google_verify.call_args.args[2] is None
 
         # Track Provider Validation
         user = User.objects.get(email="new.user@google.com")
         assert user.social_auth_provider == "google"
         assert user.google_id == "google_id_12345"
         assert not user.has_usable_password()
+
+    def test_accepts_google_token_from_configured_mobile_client_id(
+        self, api_client, mock_google_verify, settings
+    ):
+        """Valid first-party mobile audiences should be accepted."""
+        settings.GOOGLE_CLIENT_IDS = [
+            "web-client-id.apps.googleusercontent.com",
+            "ios-client-id.apps.googleusercontent.com",
+        ]
+        mock_google_verify.return_value = {
+            "aud": "ios-client-id.apps.googleusercontent.com",
+            "email": "ios.user@google.com",
+            "sub": "google_ios_12345",
+            "email_verified": True,
+            "name": "iOS User",
+        }
+
+        response = api_client.post(
+            self.url,
+            data=json.dumps({"id_token": "valid_ios_token"}),
+            content_type="application/json",
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["success"] is True
+        assert data["data"]["user"]["email"] == "ios.user@google.com"
+
+    def test_rejects_google_token_from_unconfigured_audience(
+        self, api_client, mock_google_verify, settings
+    ):
+        """A valid Google token from an unknown client ID must be rejected."""
+        settings.GOOGLE_CLIENT_IDS = ["web-client-id.apps.googleusercontent.com"]
+        mock_google_verify.return_value = {
+            "aud": "untrusted-client-id.apps.googleusercontent.com",
+            "email": "bad.audience@google.com",
+            "sub": "google_bad_audience",
+            "email_verified": True,
+        }
+
+        response = api_client.post(
+            self.url,
+            data=json.dumps({"id_token": "valid_wrong_audience_token"}),
+            content_type="application/json",
+        )
+
+        assert response.status_code == 400
+        data = response.json()
+        assert data["success"] is False
+        assert data["error"]["code"] == "INVALID_OAUTH_TOKEN"
+        assert data["error"]["message"] == "Invalid Google token audience"
 
     def test_existing_google_user_login(self, api_client, mock_google_verify):
         """Scenario 2: Existing Google User Login."""

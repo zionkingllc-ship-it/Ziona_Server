@@ -8,7 +8,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 
 from django.db import transaction
-from django.db.models import Count, Q
+from django.db.models import Count, Q, Sum
 
 from core.admin_dashboard.permissions import log_admin_action
 from core.shared.exceptions import AdminError, ErrorCode
@@ -104,6 +104,84 @@ class CircleManagementService:
         return result
 
     @staticmethod
+    def get_circle_stats(circle_id: str) -> dict:
+        """Return circle-scoped stats for the admin circle detail cards."""
+        from core.circles.models import (
+            Anchor,
+            AnchorEngagement,
+            Circle,
+            CircleMembership,
+            CirclePost,
+            CirclePostComment,
+            CirclePostEngagement,
+        )
+
+        circle_exists = Circle.objects.filter(id=circle_id, deleted_at__isnull=True).exists()
+        if not circle_exists:
+            raise AdminError(
+                message="Circle not found.",
+                code=ErrorCode.CIRCLE_NOT_FOUND,
+            )
+
+        member_count = CircleMembership.objects.filter(circle_id=circle_id).count()
+        anchor_qs = Anchor.objects.filter(circle_id=circle_id, deleted_at__isnull=True)
+        post_qs = CirclePost.objects.filter(circle_id=circle_id, deleted_at__isnull=True)
+
+        anchor_count = anchor_qs.count()
+
+        anchor_totals = anchor_qs.aggregate(
+            prayed=Sum("prayed_count"),
+            liked=Sum("anchor_liked_count"),
+        )
+        post_totals = post_qs.aggregate(
+            likes=Sum("likes_count"),
+            comments=Sum("comments_count"),
+            prayed=Sum("prayed_count"),
+            anchor_liked=Sum("anchor_liked_count"),
+        )
+
+        total_engagement = sum(
+            [
+                anchor_totals.get("prayed") or 0,
+                anchor_totals.get("liked") or 0,
+                post_totals.get("likes") or 0,
+                post_totals.get("comments") or 0,
+                post_totals.get("prayed") or 0,
+                post_totals.get("anchor_liked") or 0,
+            ]
+        )
+
+        today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+        yesterday_start = today_start - timedelta(days=1)
+
+        today_engagement = _engagement_events_for_window(
+            circle_id,
+            today_start,
+            None,
+            AnchorEngagement,
+            CirclePostEngagement,
+            CirclePostComment,
+        )
+        yesterday_engagement = _engagement_events_for_window(
+            circle_id,
+            yesterday_start,
+            today_start,
+            AnchorEngagement,
+            CirclePostEngagement,
+            CirclePostComment,
+        )
+
+        return {
+            "member_count": member_count,
+            "anchor_count": anchor_count,
+            "engagement": {
+                "label": "Total Engagement",
+                "value": total_engagement,
+                "change": _calc_percentage_change(yesterday_engagement, today_engagement),
+            },
+        }
+
+    @staticmethod
     @transaction.atomic
     def create_circle(
         name: str,
@@ -174,7 +252,7 @@ class CircleManagementService:
             (
                 4,
                 "No Spam or Self-Promotion",
-                "Unsolicited advertisements, spam, or excessive self-promotion " "are not allowed.",
+                "Unsolicited advertisements, spam, or excessive self-promotion are not allowed.",
             ),
             (
                 5,
@@ -462,3 +540,44 @@ def _circle_to_dict(circle) -> dict:
         "last_edited_at": circle.last_edited_at.isoformat() if circle.last_edited_at else None,
         "created_at": circle.created_at.isoformat() if circle.created_at else "",
     }
+
+
+def _engagement_events_for_window(
+    circle_id: str,
+    start,
+    end,
+    anchor_engagement_model,
+    post_engagement_model,
+    post_comment_model,
+) -> int:
+    """Count circle engagement events in a time window."""
+    anchor_engagements = anchor_engagement_model.objects.filter(
+        anchor__circle_id=circle_id,
+        anchor__deleted_at__isnull=True,
+        created_at__gte=start,
+    )
+    post_engagements = post_engagement_model.objects.filter(
+        post__circle_id=circle_id,
+        post__deleted_at__isnull=True,
+        created_at__gte=start,
+    )
+    comments = post_comment_model.objects.filter(
+        post__circle_id=circle_id,
+        post__deleted_at__isnull=True,
+        deleted_at__isnull=True,
+        created_at__gte=start,
+    )
+
+    if end is not None:
+        anchor_engagements = anchor_engagements.filter(created_at__lt=end)
+        post_engagements = post_engagements.filter(created_at__lt=end)
+        comments = comments.filter(created_at__lt=end)
+
+    return anchor_engagements.count() + post_engagements.count() + comments.count()
+
+
+def _calc_percentage_change(old: int | float, new: int | float) -> float:
+    """Calculate percentage change between two values."""
+    if old == 0:
+        return 100.0 if new > 0 else 0.0
+    return round((new - old) / old * 100, 1)

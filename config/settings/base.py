@@ -289,7 +289,30 @@ FIREBASE_PROJECT_ID = env("FIREBASE_PROJECT_ID", default="")
 
 ENCRYPTION_KEY = env("ENCRYPTION_KEY", default="")
 
-GOOGLE_CLIENT_ID = env("GOOGLE_CLIENT_ID", default="")
+GOOGLE_CLIENT_ID = env("GOOGLE_CLIENT_ID", default=env("GOOGLE_OAUTH_CLIENT_ID", default=""))
+
+
+def _google_client_ids() -> list[str]:
+    """Return the explicit allowlist of first-party Google OAuth client IDs."""
+    configured_ids = env.list("GOOGLE_CLIENT_IDS", default=[])
+    legacy_ids = [
+        GOOGLE_CLIENT_ID,
+        env("GOOGLE_OAUTH_CLIENT_ID", default=""),
+        env("GOOGLE_IOS_CLIENT_ID", default=""),
+        env("GOOGLE_ANDROID_CLIENT_ID", default=""),
+    ]
+
+    seen = set()
+    result = []
+    for client_id in [*legacy_ids, *configured_ids]:
+        normalized = client_id.strip()
+        if normalized and normalized not in seen:
+            seen.add(normalized)
+            result.append(normalized)
+    return result
+
+
+GOOGLE_CLIENT_IDS = _google_client_ids()
 
 
 BCRYPT_COST_FACTOR = env.int("BCRYPT_COST_FACTOR", default=12)

@@ -217,6 +217,24 @@ class AdminCirclePayload:
 
 
 @strawberry.type
+class AdminCircleStatsType:
+    """Circle-scoped admin stats for the circle detail page."""
+
+    member_count: int = strawberry.field(name="memberCount")
+    anchor_count: int = strawberry.field(name="anchorCount")
+    engagement: MetricCardType
+
+
+@strawberry.type
+class AdminCircleStatsPayload:
+    """Response for circle-scoped admin stats."""
+
+    success: bool
+    stats: AdminCircleStatsType | None = None
+    error: ErrorType | None = None
+
+
+@strawberry.type
 class CircleMemberType:
     """Member in a circle."""
 
@@ -731,6 +749,31 @@ class AdminDashboardQueries:
             return AdminCirclePayload(success=True, circle=_map_circle(result))
         except AdminError as e:
             return AdminCirclePayload(
+                success=False,
+                error=ErrorType(code=e.code, message=e.message),
+            )
+
+    @strawberry.field(
+        name="adminCircleStats",
+        description="Get circle-scoped stats for the admin circle detail page.",
+    )
+    @admin_required
+    def admin_circle_stats(self, info: Info, circle_id: str) -> AdminCircleStatsPayload:
+        from core.admin_dashboard.circle_services import CircleManagementService
+        from core.shared.exceptions import AdminError
+
+        try:
+            result = CircleManagementService.get_circle_stats(circle_id)
+            return AdminCircleStatsPayload(
+                success=True,
+                stats=AdminCircleStatsType(
+                    member_count=result["member_count"],
+                    anchor_count=result["anchor_count"],
+                    engagement=MetricCardType(**result["engagement"]),
+                ),
+            )
+        except AdminError as e:
+            return AdminCircleStatsPayload(
                 success=False,
                 error=ErrorType(code=e.code, message=e.message),
             )
