@@ -26,7 +26,13 @@ logger = logging.getLogger("core.authentication")
 class OTPService:
     """Service handling all OTP operations."""
 
-    VALID_OTP_PURPOSES = ("registration", "email_verification", "password_reset")
+    ACCOUNT_ACTION_PURPOSES = ("account_deactivation", "account_deletion")
+    VALID_OTP_PURPOSES = (
+        "registration",
+        "email_verification",
+        "password_reset",
+        *ACCOUNT_ACTION_PURPOSES,
+    )
 
     RESEND_DELAYS = [0, 30, 60]
     MAX_RESENDS_PER_PURPOSE = 3
@@ -173,6 +179,7 @@ class OTPService:
         Returns:
             registration/email_verification: Dict with user, access_token, refresh_token.
             password_reset: Dict with reset_token, expires_in.
+            account_deactivation/account_deletion: Dict with purpose, verified.
 
         Raises:
             AuthenticationError: If OTP is invalid/expired or max attempts reached.
@@ -296,7 +303,80 @@ class OTPService:
                 "purpose": purpose,
             }
 
+        if purpose in OTPService.ACCOUNT_ACTION_PURPOSES:
+            log_security_event(
+                f"auth.otp.verified.{purpose}",
+                user_id=str(user.id),
+                ip_address=ip_address,
+            )
+            return {
+                "purpose": purpose,
+                "verified": True,
+            }
+
         raise AuthenticationError("Unexpected purpose.", code="INVALID_PURPOSE")
+
+    @staticmethod
+    def verify_account_action_otp(
+        email: str,
+        user_id: str,
+        code: str,
+        purpose: str,
+    ) -> bool:
+        """Verify an account-action OTP without changing account state."""
+        email = email.lower().strip()
+        code = code.strip()
+        max_attempts = 5
+
+        if purpose not in OTPService.ACCOUNT_ACTION_PURPOSES:
+            raise AuthenticationError(
+                "Invalid account action OTP purpose.",
+                code="INVALID_PURPOSE",
+            )
+
+        OTPService._check_otp_attempts(email, purpose=purpose, max_attempts=max_attempts)
+
+        try:
+            from django_redis import get_redis_connection
+
+            redis_conn = get_redis_connection("default")
+            redis_key = f"otp:{purpose}:{user_id}"
+            stored_otp = redis_conn.get(redis_key)
+
+            attempts_key = f"otp_attempts:{purpose}:{email}"
+            current_attempts = redis_conn.get(attempts_key)
+            used = int(current_attempts) if current_attempts else 0
+
+            if stored_otp is None:
+                OTPService._increment_otp_attempts(email, purpose=purpose)
+                raise AuthenticationError(
+                    "Verification code has expired. Please request a new one.",
+                    code="OTP_EXPIRED",
+                )
+
+            if stored_otp.decode() != code:
+                OTPService._increment_otp_attempts(email, purpose=purpose)
+                remaining = max(0, max_attempts - used - 1)
+                raise AuthenticationError(
+                    "Invalid verification code. Please try again.",
+                    code="INVALID_OTP",
+                    details={"attemptsRemaining": remaining},
+                )
+
+            redis_conn.delete(redis_key)
+            redis_conn.delete(attempts_key)
+            redis_conn.delete(f"otp:resend:{purpose}:{email}")
+            redis_conn.delete(f"otp:cooldown:{purpose}:{email}")
+        except AuthenticationError:
+            raise
+        except Exception as e:
+            logger.error("Account action OTP validation failed: %s", e, exc_info=True)
+            raise AuthenticationError(
+                "Failed to validate code. Please try again.",
+                code="OTP_VALIDATION_FAILED",
+            ) from e
+
+        return True
 
     @staticmethod
     def send_verification_otp(email: str) -> bool:

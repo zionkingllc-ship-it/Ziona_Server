@@ -590,6 +590,8 @@ def _available_actions(user) -> list[str]:
 
     if getattr(user, "is_admin", False):
         return []
+    if not getattr(user, "is_active", True):
+        return ["reactivate", "delete"]
     if user.status == UserStatus.SUSPENDED:
         return ["reactivate", "delete"]
     if user.status == UserStatus.WARNED:

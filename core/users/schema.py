@@ -103,10 +103,15 @@ def _get_authenticated_user_id(info: strawberry.types.Info) -> str | None:
         return None
 
     try:
+        from core.authentication.account_status import ensure_account_can_authenticate
         from core.authentication.tokens import TokenService
+        from core.users.models import User
 
         payload = TokenService.validate_access_token(auth_header[7:])
-        return payload["user_id"]
+        user_id = payload["user_id"]
+        user = User.all_objects.get(id=user_id)
+        ensure_account_can_authenticate(user)
+        return user_id
     except Exception:
         logger.debug("Token validation failed in GraphQL", exc_info=True)
         return None

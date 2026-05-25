@@ -16,7 +16,8 @@ from datetime import date
 from typing import Any
 
 from django.core.cache import cache
-from django.db import IntegrityError
+from django.db import IntegrityError, transaction
+from django.utils import timezone
 
 from core.authentication.account_status import ensure_account_can_authenticate
 from core.authentication.otp_service import OTPService
@@ -265,17 +266,145 @@ class AuthService:
         }
 
     @staticmethod
-    def delete_account(user_id: str) -> bool:
-        """Permanently delete a user account and all associated data."""
-        try:
-            user = User.objects.get(id=user_id)
-            email = user.email
-            user.delete()
-            logger.info("Account permanently deleted: user_id=%s email=%s", user_id, email)
-            return True
-        except User.DoesNotExist as e:
+    def _verify_account_action_reauthentication(
+        user: User,
+        *,
+        password: str | None = None,
+        otp: str | None = None,
+        otp_purpose: str,
+    ) -> None:
+        """Require a fresh credential before sensitive account actions."""
+        password = (password or "").strip()
+        otp = (otp or "").strip()
+
+        if password:
+            if not user.has_usable_password():
+                raise AuthenticationError(
+                    "Password authentication is not available for this account. Use OTP instead.",
+                    code="PASSWORD_AUTH_UNAVAILABLE",
+                )
+            if not user.check_password(password):
+                raise AuthenticationError(
+                    "Invalid password.",
+                    code="INVALID_CREDENTIALS",
+                )
+            return
+
+        if otp:
+            OTPService.verify_account_action_otp(
+                email=user.email,
+                user_id=str(user.id),
+                code=otp,
+                purpose=otp_purpose,
+            )
+            return
+
+        raise AuthenticationError(
+            "Password or OTP is required for this account action.",
+            code="REAUTHENTICATION_REQUIRED",
+        )
+
+    @staticmethod
+    @transaction.atomic
+    def deactivate_account(
+        user_id: str,
+        *,
+        password: str | None = None,
+        otp: str | None = None,
+        ip_address: str | None = None,
+    ) -> bool:
+        """Deactivate a user account without deleting user data."""
+        user = (
+            User.all_objects.select_for_update().filter(id=user_id, deleted_at__isnull=True).first()
+        )
+        if not user:
+            raise AuthenticationError("User not found", "USER_NOT_FOUND")
+
+        ensure_account_can_authenticate(user)
+        AuthService._verify_account_action_reauthentication(
+            user,
+            password=password,
+            otp=otp,
+            otp_purpose="account_deactivation",
+        )
+
+        from core.users.account_lifecycle import revoke_user_sessions
+
+        revoke_user_sessions(user.id, delete_device_tokens=False)
+        user.is_active = False
+        user.save(update_fields=["is_active", "updated_at"])
+        cache.delete(f"user_me_data_{user.id}")
+
+        logger.info("Account deactivated: user_id=%s", user.id)
+        log_security_event(
+            "auth.account_deactivated",
+            user_id=str(user.id),
+            ip_address=ip_address,
+            metadata={"email": mask_email(user.email)},
+        )
+        return True
+
+    @staticmethod
+    @transaction.atomic
+    def delete_account(
+        user_id: str,
+        *,
+        password: str | None = None,
+        otp: str | None = None,
+        acknowledge_permanent_deletion: bool = False,
+        ip_address: str | None = None,
+    ) -> bool:
+        """Permanently disable, anonymize, and hide a user account."""
+        if not acknowledge_permanent_deletion:
+            raise AuthenticationError(
+                "You must acknowledge that account deletion is permanent.",
+                code="DELETION_ACKNOWLEDGEMENT_REQUIRED",
+            )
+
+        user = (
+            User.all_objects.select_for_update().filter(id=user_id, deleted_at__isnull=True).first()
+        )
+        if not user:
             logger.error("Delete account failed: user not found id=%s", user_id)
-            raise AuthenticationError("User not found", "USER_NOT_FOUND") from e
+            raise AuthenticationError("User not found", "USER_NOT_FOUND")
+
+        ensure_account_can_authenticate(user)
+        email_for_audit = mask_email(user.email)
+        AuthService._verify_account_action_reauthentication(
+            user,
+            password=password,
+            otp=otp,
+            otp_purpose="account_deletion",
+        )
+
+        from core.users.account_lifecycle import (
+            anonymize_user_for_permanent_delete,
+            remove_or_hide_user_data,
+            revoke_user_sessions,
+        )
+
+        now = timezone.now()
+        revoke_user_sessions(user.id, delete_device_tokens=True)
+        remove_or_hide_user_data(user, now)
+
+        try:
+            from core.admin_dashboard.models import ModerationAction
+
+            ModerationAction.objects.filter(user=user).delete()
+        except Exception:
+            logger.debug("Failed to delete moderation history during self-delete", exc_info=True)
+
+        anonymize_user_for_permanent_delete(user, now)
+        cache.delete(f"user_me_data_{user.id}")
+
+        logger.info("Account permanently deleted: user_id=%s", user_id)
+        log_security_event(
+            "auth.account_deleted",
+            user_id=str(user_id),
+            ip_address=ip_address,
+            metadata={"email": email_for_audit, "identity_anonymized": True},
+        )
+        return True
 
     @staticmethod
     def suggest_usernames(email: str, date_of_birth: str | None = None) -> list[str]:

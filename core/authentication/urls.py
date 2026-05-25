@@ -12,6 +12,8 @@ from core.authentication.otp_views import (
 )
 from core.authentication.views import (
     CheckEmailView,
+    DeactivateAccountView,
+    DeleteAccountView,
     FinalizeUsernameView,
     GoogleOAuthView,
     LoginView,
@@ -46,6 +48,8 @@ urlpatterns = [
     ),
     path("google", GoogleOAuthView.as_view(), name="google-oauth"),
     path("me", MeView.as_view(), name="me"),
+    path("deactivate", DeactivateAccountView.as_view(), name="deactivate-account"),
+    path("delete-account", DeleteAccountView.as_view(), name="delete-account"),
     path("check-email", CheckEmailView.as_view(), name="check-email"),
     path("finalize-username", FinalizeUsernameView.as_view(), name="finalize_username"),
 ]

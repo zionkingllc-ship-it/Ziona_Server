@@ -290,8 +290,36 @@ class TestStandardizedResponseFormat:
 class TestDeleteAccountEndpoint:
     """Test DELETE /api/auth/me."""
 
+    def test_delete_account_requires_acknowledgement(self, api_client: Client, authenticated_user):
+        """Authenticated DELETE requires explicit permanent deletion acknowledgement."""
+        response = api_client.delete(
+            "/api/auth/me",
+            data=json.dumps({"password": "TestPass123!"}),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {authenticated_user['access_token']}",
+        )
+
+        assert response.status_code == 400
+        body = response.json()
+        assert body["success"] is False
+        assert body["error"]["code"] == "DELETION_ACKNOWLEDGEMENT_REQUIRED"
+
+    def test_delete_account_requires_reauthentication(self, api_client: Client, authenticated_user):
+        """Authenticated DELETE requires password or OTP."""
+        response = api_client.delete(
+            "/api/auth/me",
+            data=json.dumps({"acknowledgePermanentDeletion": True}),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {authenticated_user['access_token']}",
+        )
+
+        assert response.status_code == 400
+        body = response.json()
+        assert body["success"] is False
+        assert body["error"]["code"] == "REAUTHENTICATION_REQUIRED"
+
     def test_delete_account_success(self, api_client: Client, authenticated_user):
-        """Authenticated DELETE removes the user."""
+        """Authenticated DELETE anonymizes and soft-deletes the user."""
         from core.users.models import User
 
         user_id = authenticated_user["user"].id
@@ -300,6 +328,13 @@ class TestDeleteAccountEndpoint:
 
         response = api_client.delete(
             "/api/auth/me",
+            data=json.dumps(
+                {
+                    "password": "TestPass123!",
+                    "acknowledgePermanentDeletion": True,
+                }
+            ),
+            content_type="application/json",
             HTTP_AUTHORIZATION=f"Bearer {authenticated_user['access_token']}",
         )
 
@@ -308,8 +343,113 @@ class TestDeleteAccountEndpoint:
         assert "permanently deleted" in response.json()["data"]["message"]
 
         assert not User.objects.filter(id=user_id).exists()
+        tombstone = User.all_objects.get(id=user_id)
+        assert tombstone.deleted_at is not None
+        assert tombstone.is_active is False
+        assert tombstone.email.startswith("deleted-")
+        assert not User.all_objects.filter(email="test@example.com").exists()
 
     def test_delete_account_unauthorized(self, api_client: Client):
         """Unauthenticated DELETE returns 401."""
         response = api_client.delete("/api/auth/me")
         assert response.status_code == 401
+
+    def test_delete_account_with_otp(self, api_client: Client, authenticated_user):
+        """Account deletion can be protected by an account-deletion OTP."""
+        from django_redis import get_redis_connection
+
+        from core.users.models import User
+
+        user = authenticated_user["user"]
+        redis_conn = get_redis_connection("default")
+        redis_conn.setex(f"otp:account_deletion:{user.id}", 600, "123456")
+
+        response = api_client.post(
+            "/api/auth/delete-account",
+            data=json.dumps(
+                {
+                    "otp": "123456",
+                    "acknowledgePermanentDeletion": True,
+                }
+            ),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {authenticated_user['access_token']}",
+        )
+
+        assert response.status_code == 200
+        assert response.json()["success"] is True
+        assert not User.objects.filter(id=user.id).exists()
+
+
+class TestDeactivateAccountEndpoint:
+    """Test POST /api/auth/deactivate."""
+
+    def test_deactivate_requires_reauthentication(self, api_client: Client, authenticated_user):
+        """Deactivation requires password or OTP."""
+        response = api_client.post(
+            "/api/auth/deactivate",
+            data=json.dumps({}),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {authenticated_user['access_token']}",
+        )
+
+        assert response.status_code == 400
+        body = response.json()
+        assert body["success"] is False
+        assert body["error"]["code"] == "REAUTHENTICATION_REQUIRED"
+
+    def test_deactivate_with_password_blocks_future_login(
+        self, api_client: Client, authenticated_user
+    ):
+        """Deactivation keeps data but blocks subsequent authentication."""
+        from core.users.models import User
+
+        user = authenticated_user["user"]
+
+        response = api_client.post(
+            "/api/auth/deactivate",
+            data=json.dumps({"password": "TestPass123!"}),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {authenticated_user['access_token']}",
+        )
+
+        assert response.status_code == 200
+        assert response.json()["success"] is True
+
+        user.refresh_from_db()
+        assert user.is_active is False
+        assert user.deleted_at is None
+        assert User.objects.filter(id=user.id).exists()
+
+        login_response = api_client.post(
+            "/api/auth/login",
+            data=json.dumps(
+                {
+                    "email": user.email,
+                    "password": "TestPass123!",
+                }
+            ),
+            content_type="application/json",
+        )
+
+        assert login_response.status_code == 403
+        assert login_response.json()["error"]["code"] == "ACCOUNT_DEACTIVATED"
+
+    def test_deactivate_with_otp(self, api_client: Client, authenticated_user):
+        """Deactivation can be protected by an account-deactivation OTP."""
+        from django_redis import get_redis_connection
+
+        user = authenticated_user["user"]
+        redis_conn = get_redis_connection("default")
+        redis_conn.setex(f"otp:account_deactivation:{user.id}", 600, "654321")
+
+        response = api_client.post(
+            "/api/auth/deactivate",
+            data=json.dumps({"otp": "654321"}),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {authenticated_user['access_token']}",
+        )
+
+        assert response.status_code == 200
+        user.refresh_from_db()
+        assert user.is_active is False

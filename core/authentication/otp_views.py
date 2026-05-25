@@ -56,7 +56,8 @@ class UnifiedSendOTPView(BaseAuthView):
 
     POST /api/auth/otp/send
     Body: { email, purpose }
-    Purposes: "registration", "email_verification", "password_reset"
+    Purposes: "registration", "email_verification", "password_reset",
+    "account_deactivation", "account_deletion"
 
     Returns: { message, expiresIn, purpose, resendAfter }
     """
@@ -101,6 +102,7 @@ class UnifiedVerifyOTPView(BaseAuthView):
     Returns:
       registration/email_verification: { user, tokens, purpose }
       password_reset: { resetToken, expiresIn, purpose }
+      account_deactivation/account_deletion: { verified, purpose }
     """
 
     def post(self, request: HttpRequest) -> JsonResponse:
@@ -139,6 +141,13 @@ class UnifiedVerifyOTPView(BaseAuthView):
                     data={
                         "resetToken": result["reset_token"],
                         "expiresIn": result["expires_in"],
+                        "purpose": result["purpose"],
+                    },
+                )
+            if purpose in OTPService.ACCOUNT_ACTION_PURPOSES:
+                return success_response(
+                    data={
+                        "verified": result["verified"],
                         "purpose": result["purpose"],
                     },
                 )

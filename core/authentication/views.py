@@ -61,6 +61,9 @@ def _auth_error_response(e: AuthenticationError) -> JsonResponse:
         "INVALID_CREDENTIALS": 401,
         "ACCOUNT_SUSPENDED": 403,
         "ACCOUNT_DEACTIVATED": 403,
+        "REAUTHENTICATION_REQUIRED": 400,
+        "DELETION_ACKNOWLEDGEMENT_REQUIRED": 400,
+        "PASSWORD_AUTH_UNAVAILABLE": 400,
     }
     status_code = status_map.get(e.code, 400)
 
@@ -70,6 +73,38 @@ def _auth_error_response(e: AuthenticationError) -> JsonResponse:
         details=e.details if e.details else None,
         status=status_code,
     )
+
+
+def _authenticated_user_id_from_request(request: HttpRequest) -> str:
+    """Validate a Bearer token and return its user_id."""
+    auth_header = request.META.get("HTTP_AUTHORIZATION", "")
+    access_token = auth_header[7:] if auth_header.startswith("Bearer ") else ""
+
+    if not access_token:
+        raise AuthenticationError("Authentication required", "UNAUTHENTICATED")
+
+    from core.authentication.tokens import TokenError, TokenService
+
+    try:
+        payload = TokenService.validate_access_token(access_token)
+    except TokenError:
+        raise AuthenticationError("Invalid or expired token", "INVALID_TOKEN") from None
+
+    user_id = payload.get("user_id")
+    if not user_id:
+        raise AuthenticationError("Invalid token payload", "INVALID_TOKEN")
+    return user_id
+
+
+def _account_action_payload(data: dict) -> dict[str, object]:
+    """Normalize account lifecycle body fields from mobile/web clients."""
+    return {
+        "password": data.get("password") or "",
+        "otp": data.get("otp") or data.get("code") or "",
+        "acknowledge_permanent_deletion": bool(
+            data.get("acknowledge_permanent_deletion") or data.get("acknowledgePermanentDeletion")
+        ),
+    }
 
 
 class BaseAuthView(View):
@@ -520,7 +555,7 @@ class GoogleOAuthView(BaseAuthView):
 
 @method_decorator(csrf_exempt, name="dispatch")
 class MeView(BaseAuthView):
-    """Authenticated user info and account deletion.
+    """Authenticated user info and protected account deletion.
 
     GET /api/auth/me
     DELETE /api/auth/me
@@ -562,36 +597,71 @@ class MeView(BaseAuthView):
             return _auth_error_response(e)
 
     def delete(self, request: HttpRequest) -> JsonResponse:
-        auth_header = request.META.get("HTTP_AUTHORIZATION", "")
-        access_token = ""
-        if auth_header.startswith("Bearer "):
-            access_token = auth_header[7:]
-
-        if not access_token:
-            return error_response(
-                message="Authentication required",
-                code="UNAUTHENTICATED",
-                status=401,
-            )
-
         try:
-            from core.authentication.tokens import TokenError, TokenService
-
-            try:
-                payload = TokenService.validate_access_token(access_token)
-            except TokenError:
-                raise AuthenticationError("Invalid or expired token", "INVALID_TOKEN") from None
-
-            user_id = payload.get("user_id")
-
-            if not user_id:
-                raise AuthenticationError("Invalid token payload", "INVALID_TOKEN")
-
-            AuthService.delete_account(user_id=user_id)
+            user_id = _authenticated_user_id_from_request(request)
+            payload = _account_action_payload(_parse_json_body(request))
+            AuthService.delete_account(
+                user_id=user_id,
+                password=payload["password"],
+                otp=payload["otp"],
+                acknowledge_permanent_deletion=bool(payload["acknowledge_permanent_deletion"]),
+                ip_address=_get_client_ip(request),
+            )
 
             return success_response(
                 data={"message": "Account permanently deleted."},
             )
+        except AuthenticationError as e:
+            logger.warning("Account deletion failed: code=%s", e.code)
+            return _auth_error_response(e)
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class DeactivateAccountView(BaseAuthView):
+    """Deactivate the authenticated user's account from Profile/Settings.
+
+    POST /api/auth/deactivate
+    Body: { password } or { otp/code }
+    Headers: Authorization: Bearer <token>
+    """
+
+    def post(self, request: HttpRequest) -> JsonResponse:
+        try:
+            user_id = _authenticated_user_id_from_request(request)
+            payload = _account_action_payload(_parse_json_body(request))
+            AuthService.deactivate_account(
+                user_id=user_id,
+                password=payload["password"],
+                otp=payload["otp"],
+                ip_address=_get_client_ip(request),
+            )
+            return success_response(data={"message": "Account deactivated successfully."})
+        except AuthenticationError as e:
+            logger.warning("Account deactivation failed: code=%s", e.code)
+            return _auth_error_response(e)
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class DeleteAccountView(BaseAuthView):
+    """Protected account deletion endpoint for Profile/Settings.
+
+    POST /api/auth/delete-account
+    Body: { password/otp, acknowledgePermanentDeletion: true }
+    Headers: Authorization: Bearer <token>
+    """
+
+    def post(self, request: HttpRequest) -> JsonResponse:
+        try:
+            user_id = _authenticated_user_id_from_request(request)
+            payload = _account_action_payload(_parse_json_body(request))
+            AuthService.delete_account(
+                user_id=user_id,
+                password=payload["password"],
+                otp=payload["otp"],
+                acknowledge_permanent_deletion=bool(payload["acknowledge_permanent_deletion"]),
+                ip_address=_get_client_ip(request),
+            )
+            return success_response(data={"message": "Account permanently deleted."})
         except AuthenticationError as e:
             logger.warning("Account deletion failed: code=%s", e.code)
             return _auth_error_response(e)
