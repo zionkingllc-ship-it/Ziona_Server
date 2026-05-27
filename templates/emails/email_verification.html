@@ -1,40 +1,33 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Verify Your Email - Ziona</title>
-  <style>
-    body { margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background-color: #f5f5f5; }
-    .container { max-width: 600px; margin: 0 auto; padding: 40px 20px; }
-    .card { background: #ffffff; border-radius: 12px; padding: 40px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
-    .logo { text-align: center; margin-bottom: 32px; font-size: 28px; font-weight: 700; color: #1a1a1a; }
-    .logo span { color: #6C5CE7; }
-    h1 { font-size: 22px; color: #1a1a1a; margin: 0 0 16px; }
-    p { font-size: 15px; color: #4a4a4a; line-height: 1.6; margin: 0 0 16px; }
-    .btn { display: inline-block; background: #6C5CE7; color: #ffffff !important; text-decoration: none; padding: 14px 32px; border-radius: 8px; font-size: 15px; font-weight: 600; margin: 8px 0 24px; }
-    .link { word-break: break-all; font-size: 13px; color: #888; }
-    .footer { text-align: center; margin-top: 32px; font-size: 13px; color: #999; }
-  </style>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Verify Your Email</title>
 </head>
-<body>
-  <div class="container">
-    <div class="card">
-      <div class="logo"><span>Z</span>iona</div>
-      <h1>Verify your email</h1>
-      <p>Hi {{ username }},</p>
-      <p>Welcome to Ziona! Please verify your email address by clicking the button below:</p>
-      <p style="text-align: center;">
-        <a href="{{ verification_url }}" class="btn">Verify Email</a>
-      </p>
-      <p>Or copy and paste this link into your browser:</p>
-      <p class="link">{{ verification_url }}</p>
-      <p>This link expires in <strong>24 hours</strong>.</p>
+<body style="margin:0;padding:0">
+<div style="margin:0;padding:32px 16px;background-color:#F5F2F8;font-family:Arial, Helvetica, sans-serif;color:#1C1820">
+  <div style="width:100%;max-width:600px;margin:0 auto;background-color:#FFFFFF;border-radius:24px;overflow:hidden;border:1px solid #E9DDF0">
+    <div style="padding:40px 32px">
+      <img src="{{ asset_base_url }}/assets/brand-logo.png" alt="Ziona logo" width="132" style="display:block;width:132px;height:auto;margin-bottom:24px"/>
+      <div style="display:inline-block;margin-bottom:16px;padding:6px 12px;border-radius:999px;background-color:#F3E8FF;color:#742092;font-size:12px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase">Email Verification</div>
+      <h1 style="margin:0 0 16px;font-size:28px;line-height:36px;font-weight:700;color:#1C1820">Hi {{ username }}, verify your email.</h1>
+      <p style="margin:0 0 16px;font-size:16px;line-height:26px;color:#4E4252">Please verify your email to complete account setup. Use the code below or open Ziona with the verification button to continue.</p>
+      <div style="text-align:center;margin-bottom:24px">
+        <img src="{{ asset_base_url }}/assets/warning-illustration.png" alt="Warning illustration" width="88" style="display:inline-block;width:88px;height:auto"/>
+      </div>
+      <div style="margin-top:24px;padding:20px;border-radius:16px;background-color:#F3E8FF;border:1px solid #E9DDF0;text-align:center">
+        <p style="margin:0 0 8px;font-size:12px;line-height:18px;font-weight:700;color:#742092;letter-spacing:0.06em;text-transform:uppercase">Verification Code</p>
+        <p style="margin:0;font-size:32px;line-height:40px;font-weight:700;letter-spacing:0.18em;color:#531769">{{ verification_code }}</p>
+      </div>
+      <a href="{{ verify_link }}" style="display:inline-block;margin-top:24px;padding:14px 24px;border-radius:999px;background-color:#742092;color:#FFFFFF;font-size:15px;font-weight:700;text-decoration:none">Verify Email</a>
+      <div style="margin-top:24px;padding:20px;border-radius:16px;background-color:#F9F5FC;border:1px solid #E9DDF0">
+        <p style="margin:0 0 16px;font-size:16px;line-height:26px;color:#4E4252">Verification link:</p>
+        <p style="margin:0;font-size:16px;line-height:26px;color:#4E4252;word-break:break-all">{{ verify_link }}</p>
+      </div>
     </div>
-    <div class="footer">
-      <p>&copy; {{ year }} Ziona. All rights reserved.</p>
-      <p>If you didn't create an account, you can safely ignore this email.</p>
-    </div>
+    <div style="padding:20px 32px 32px;font-size:13px;line-height:22px;color:#8D7D96">This verification code expires in {{ expiry_minutes }} minutes. If you did not request this email, you can ignore it safely.</div>
   </div>
+</div>
 </body>
 </html>

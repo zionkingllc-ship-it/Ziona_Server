@@ -1,0 +1,55 @@
+{
+  "assetBaseUrlSetting": "EMAIL_ASSET_BASE_URL",
+  "assetsDirectory": "assets",
+  "templates": {
+    "admin_announcement.html": [
+      "brandLogo",
+      "announcementHero"
+    ],
+    "notification_digest.html": [
+      "brandLogo"
+    ],
+    "support_donation.html": [
+      "brandLogo",
+      "successIllustration"
+    ],
+    "email_verification.html": [
+      "brandLogo",
+      "warningIllustration"
+    ],
+    "welcome.html": [
+      "brandLogo",
+      "welcomeHero"
+    ],
+    "password_reset.html": [
+      "brandLogo"
+    ]
+  },
+  "assets": {
+    "brandLogo": {
+      "outputPath": "assets/brand-logo.png",
+      "publicUrl": "{{ asset_base_url }}/assets/brand-logo.png",
+      "alt": "Ziona logo"
+    },
+    "announcementHero": {
+      "outputPath": "assets/announcement-hero.png",
+      "publicUrl": "{{ asset_base_url }}/assets/announcement-hero.png",
+      "alt": "Announcement illustration"
+    },
+    "successIllustration": {
+      "outputPath": "assets/success-illustration.png",
+      "publicUrl": "{{ asset_base_url }}/assets/success-illustration.png",
+      "alt": "Success illustration"
+    },
+    "warningIllustration": {
+      "outputPath": "assets/warning-illustration.png",
+      "publicUrl": "{{ asset_base_url }}/assets/warning-illustration.png",
+      "alt": "Warning illustration"
+    },
+    "welcomeHero": {
+      "outputPath": "assets/welcome-hero.png",
+      "publicUrl": "{{ asset_base_url }}/assets/welcome-hero.png",
+      "alt": "Welcome illustration"
+    }
+  }
+}

@@ -10,8 +10,6 @@ import secrets
 import string
 from typing import Any
 
-from django.conf import settings
-
 from core.authentication.account_status import ensure_account_can_authenticate
 from core.authentication.tokens import TokenService
 from core.authentication.validators import AuthenticationError, validate_password
@@ -62,14 +60,9 @@ class PasswordService:
                 code="OTP_STORAGE_FAILED",
             ) from e
 
-        from core.shared.tasks.email_tasks import send_email_async
+        from core.emails.services import EmailService
 
-        send_email_async.delay(
-            subject="Ziona - Password Reset Code",
-            message=f"Your password reset code is: {otp}\n\nThis code expires in 10 minutes.",
-            from_email=settings.DEFAULT_FROM_EMAIL,
-            recipient_list=[user.email],
-        )
+        EmailService.send_reset_password(user.username or user.full_name, user.email, otp)
 
         log_security_event(
             "auth.password_reset.requested",

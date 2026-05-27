@@ -264,6 +264,9 @@ class OTPService:
                 user_id=str(user.id),
                 ip_address=ip_address,
             )
+            from core.emails.services import EmailService
+
+            EmailService.send_welcome_email(user.username or user.full_name, user.email)
 
             return {
                 "user": user,
@@ -502,6 +505,9 @@ class OTPService:
             "auth.email_verified",
             user_id=str(user.id),
         )
+        from core.emails.services import EmailService
+
+        EmailService.send_welcome_email(user.username or user.full_name, user.email)
 
         return {
             "user": user,
@@ -578,23 +584,30 @@ class OTPService:
                 code="OTP_STORAGE_FAILED",
             ) from e
 
+        user_name = "Friend"
+        try:
+            user = User.all_objects.get(id=user_id)
+            user_name = user.username or user.full_name or "Friend"
+        except User.DoesNotExist:
+            logger.debug("Unable to resolve user name for OTP email", exc_info=True)
+
+        if purpose in ("verify", "registration", "email_verification"):
+            from core.emails.services import EmailService
+
+            EmailService.send_verify_email(user_name, email, otp)
+            return
+
+        if purpose == "password_reset":
+            from core.emails.services import EmailService
+
+            EmailService.send_reset_password(user_name, email, otp)
+            return
+
         from core.shared.tasks.email_tasks import send_email_async
 
-        if purpose == "verify":
-            subject = "Ziona - Email Verification Code"
-            message = (
-                f"Welcome to Ziona!\n\n"
-                f"Your email verification code is: {otp}\n\n"
-                f"This code expires in 10 minutes.\n\n"
-                f"- The Ziona Team"
-            )
-        else:
-            subject = f"Ziona - {purpose.replace('_', ' ').title()} Code"
-            message = f"Your code is: {otp}\n\nThis code expires in 10 minutes."
-
         send_email_async.delay(
-            subject=subject,
-            message=message,
+            subject=f"Ziona - {purpose.replace('_', ' ').title()} Code",
+            message=f"Your code is: {otp}\n\nThis code expires in 10 minutes.",
             from_email=settings.DEFAULT_FROM_EMAIL,
             recipient_list=[email],
         )

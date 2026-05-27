@@ -1,4 +1,5 @@
 import json
+from unittest.mock import patch
 
 from django.test import Client
 
@@ -254,6 +255,35 @@ class TestResendOTPEndpoint:
         data = response.json()
         assert data["success"] is True
         assert data["data"]["expiresIn"] == 600
+
+
+class TestPasswordResetEndpoint:
+    """Test POST /api/auth/password-reset."""
+
+    @patch("core.shared.tasks.email_tasks.send_email_async.delay")
+    def test_password_reset_request_queues_html_email(
+        self, mock_email, api_client: Client, create_user
+    ):
+        """Password reset request queues multipart HTML email with plain fallback."""
+        create_user(
+            email="reset@example.com",
+            username="resetuser",
+            password="SecureP@ss1",
+        )
+
+        response = api_client.post(
+            "/api/auth/password-reset",
+            data=json.dumps({"email": "reset@example.com"}),
+            content_type="application/json",
+        )
+
+        assert response.status_code == 200
+        assert mock_email.called
+        email_kwargs = mock_email.call_args.kwargs
+        assert email_kwargs["message"]
+        assert "html_message" in email_kwargs
+        assert "resetuser" in email_kwargs["html_message"]
+        assert "Reset Code" in email_kwargs["html_message"]
 
 
 class TestStandardizedResponseFormat:

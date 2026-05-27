@@ -266,6 +266,16 @@ ENSEND_API_KEY = env("ENSEND_API_KEY", default="")
 ENSEND_API_URL = env("ENSEND_API_URL", default="https://api.smtpexpress.com/send")
 ENSEND_SENDER_NAME = env("ENSEND_SENDER_NAME", default="Ziona Team")
 DEFAULT_FROM_EMAIL = env("DEFAULT_FROM_EMAIL", default="noreply@ziona.app")
+EMAIL_ASSET_BASE_URL = env(
+    "EMAIL_ASSET_BASE_URL",
+    default="https://storage.googleapis.com/ziona-media-dev/email-assets",
+)
+EMAIL_APP_BASE_URL = env("EMAIL_APP_BASE_URL", default="https://ziona.app")
+EMAIL_VERIFY_URL = env("EMAIL_VERIFY_URL", default=f"{EMAIL_APP_BASE_URL}/verify-email")
+EMAIL_PASSWORD_RESET_URL = env(
+    "EMAIL_PASSWORD_RESET_URL", default=f"{EMAIL_APP_BASE_URL}/reset-password"
+)
+EMAIL_UNSUBSCRIBE_URL = env("EMAIL_UNSUBSCRIBE_URL", default=f"{EMAIL_APP_BASE_URL}/unsubscribe")
 
 # Brand-specific support routing (used by EmailService.send_internal_contact_notification)
 ZIONA_SUPPORT_EMAIL = env("ZIONA_SUPPORT_EMAIL", default="support@ziona.app")

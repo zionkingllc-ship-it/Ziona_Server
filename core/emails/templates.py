@@ -12,6 +12,12 @@ Design: purple (#6B21A8) / gold (#F59E0B) Ziona branding, inline CSS only
 
 from __future__ import annotations
 
+from decimal import Decimal
+
+from django.conf import settings
+from django.template.loader import render_to_string
+from django.utils import timezone
+
 # ─────────────────────────────────────────────────────────────
 # Brand configuration
 # ─────────────────────────────────────────────────────────────
@@ -39,6 +45,28 @@ _BRAND_CONFIG: dict[str, dict] = {
 def _brand(brand_key: str) -> dict:
     """Return brand config, defaulting to ZIONA for unknown keys."""
     return _BRAND_CONFIG.get(brand_key.upper(), _BRAND_CONFIG["ZIONA"])
+
+
+def _display_name(user_name: str | None) -> str:
+    return (user_name or "").strip() or "Friend"
+
+
+def _base_context(**overrides) -> dict:
+    context = {
+        "asset_base_url": settings.EMAIL_ASSET_BASE_URL.rstrip("/"),
+        "app_link": settings.EMAIL_APP_BASE_URL,
+        "verify_link": settings.EMAIL_VERIFY_URL,
+        "reset_link": settings.EMAIL_PASSWORD_RESET_URL,
+        "notification_link": settings.EMAIL_APP_BASE_URL,
+        "unsubscribe_link": settings.EMAIL_UNSUBSCRIBE_URL,
+        "year": timezone.now().year,
+    }
+    context.update(overrides)
+    return context
+
+
+def _email_date() -> str:
+    return timezone.now().strftime("%b %d, %Y").replace(" 0", " ")
 
 
 # ─────────────────────────────────────────────────────────────
@@ -143,7 +171,7 @@ def render_verify_email(
     brand: str = "ZIONA",
 ) -> tuple[str, str, str]:
     """Render email verification template."""
-    name = user_name or "Friend"
+    name = _display_name(user_name)
     b = _brand(brand)
     subject = f"Verify your {b['name']} account"
     plain = (
@@ -152,14 +180,14 @@ def render_verify_email(
         f"This code expires in {expiry_minutes} minutes.\n\n"
         f"The {b['name']} Team"
     )
-    inner = (
-        _h2(f"Welcome to {b['name']}, {name}! 🙏")
-        + _p("You're one step away. Enter the code below to verify your email address.")
-        + _otp_box(otp_code)
-        + _expiry_note(expiry_minutes)
-        + _p("If you didn't create an account, you can safely ignore this email.")
+    html = render_to_string(
+        "emails/email_verification.html",
+        _base_context(
+            username=name,
+            verification_code=otp_code,
+            expiry_minutes=expiry_minutes,
+        ),
     )
-    html = _wrap_layout(brand, inner)
     return subject, plain, html
 
 
@@ -175,7 +203,7 @@ def render_reset_password(
     brand: str = "ZIONA",
 ) -> tuple[str, str, str]:
     """Render password reset OTP template."""
-    name = user_name or "Friend"
+    name = _display_name(user_name)
     b = _brand(brand)
     subject = f"Reset your {b['name']} password"
     plain = (
@@ -185,19 +213,14 @@ def render_reset_password(
         f"If you didn't request this, please ignore.\n\n"
         f"The {b['name']} Team"
     )
-    inner = (
-        _h2("Password Reset Request 🔐")
-        + _p(
-            f"Hi <strong style='color:#FFFFFF;'>{name}</strong>, we received a request to reset your password."
-        )
-        + _otp_box(otp_code)
-        + _expiry_note(expiry_minutes)
-        + _p(
-            "If you didn't request a password reset, you can safely ignore this email — "
-            "your password has not been changed."
-        )
+    html = render_to_string(
+        "emails/password_reset.html",
+        _base_context(
+            username=name,
+            reset_code=otp_code,
+            expiry_minutes=expiry_minutes,
+        ),
     )
-    html = _wrap_layout(brand, inner)
     return subject, plain, html
 
 
@@ -211,7 +234,7 @@ def render_welcome_email(
     brand: str = "ZIONA",
 ) -> tuple[str, str, str]:
     """Render post-verification welcome template."""
-    name = user_name or "Friend"
+    name = _display_name(user_name)
     b = _brand(brand)
     subject = f"Welcome to {b['name']} 🙏"
     plain = (
@@ -223,45 +246,10 @@ def render_welcome_email(
         f"  • Join a Circle\n\n"
         f"The {b['name']} Team"
     )
-    inner = (
-        _h2(f"You're in, {name}! 🎉")
-        + _p(
-            f"Your account is active. Here's how to get started on <strong style='color:#F59E0B;'>{b['name']}</strong>:"
-        )
-        + """<table width="100%" cellpadding="0" cellspacing="0" style="margin:24px 0;">
-  <tr>
-    <td style="padding:12px;background:rgba(107,33,168,0.15);border-radius:8px;
-               border-left:3px solid #6B21A8;margin-bottom:12px;">
-      <p style="margin:0;color:#FFFFFF;font-size:14px;">
-        <strong>✍️ Make a post</strong> — Share your faith journey with the community
-      </p>
-    </td>
-  </tr>
-  <tr><td style="height:8px;"></td></tr>
-  <tr>
-    <td style="padding:12px;background:rgba(107,33,168,0.15);border-radius:8px;
-               border-left:3px solid #F59E0B;">
-      <p style="margin:0;color:#FFFFFF;font-size:14px;">
-        <strong>🔍 Find creators</strong> — Follow believers who inspire you
-      </p>
-    </td>
-  </tr>
-  <tr><td style="height:8px;"></td></tr>
-  <tr>
-    <td style="padding:12px;background:rgba(107,33,168,0.15);border-radius:8px;
-               border-left:3px solid #6B21A8;">
-      <p style="margin:0;color:#FFFFFF;font-size:14px;">
-        <strong>⭕ Join a Circle</strong> — Connect in faith-based communities
-      </p>
-    </td>
-  </tr>
-</table>"""
-        + _cta_button("Open the App")
-        + _p(
-            '<em style="color:rgba(255,255,255,0.5);">God bless you on your journey. — The Ziona Team</em>'
-        )
+    html = render_to_string(
+        "emails/welcome.html",
+        _base_context(username=name),
     )
-    html = _wrap_layout(brand, inner)
     return subject, plain, html
 
 
@@ -280,61 +268,101 @@ def render_notification_digest(
     activities items: {type, actor_name, content, timestamp}
     Returns empty tuple ('','','') if no activities — caller must guard.
     """
-    name = user_name or "Friend"
+    name = _display_name(user_name)
     safe_activities = activities or []
     b = _brand(brand)
     subject = f"Your daily update from {b['name']} 📬"
 
-    # Plain text
     lines = [f"Hi {name},\n\nHere's what happened while you were away:\n"]
     for act in safe_activities:
         lines.append(f"  • {act.get('actor_name', 'Someone')}: {act.get('content', '')}")
     lines.append(f"\nOpen the app to see more.\n\nThe {b['name']} Team")
     plain = "\n".join(lines)
 
-    # Activity rows HTML
-    activity_rows = ""
-    for act in safe_activities:
+    notification_items = []
+    for index, act in enumerate(safe_activities[:3], start=1):
         actor = act.get("actor_name") or "Someone"
         content = act.get("content") or ""
-        ts = act.get("timestamp") or ""
-        avatar = act.get("actor_avatar") or ""
-        avatar_html = (
-            f'<img src="{avatar}" width="36" height="36" '
-            f'style="border-radius:50%;object-fit:cover;" alt="{actor}"/>'
-            if avatar
-            else f'<div style="width:36px;height:36px;border-radius:50%;background:#6B21A8;'
-            f"display:flex;align-items:center;justify-content:center;color:#FFF;"
-            f'font-weight:700;font-size:14px;">{actor[:1].upper()}</div>'
+        notification_items.append(
+            {
+                "title": act.get("title") or f"{actor} updated you",
+                "description": act.get("description") or content,
+                "time": act.get("timestamp") or act.get("time") or f"Item {index}",
+            }
         )
-        activity_rows += f"""
-<tr>
-  <td style="padding:12px 0;border-bottom:1px solid rgba(255,255,255,0.06);">
-    <table cellpadding="0" cellspacing="0" width="100%">
-      <tr>
-        <td width="44" valign="top">{avatar_html}</td>
-        <td style="padding-left:12px;">
-          <p style="margin:0;color:#FFFFFF;font-size:14px;">
-            <strong>{actor}</strong> {content}
-          </p>
-          <p style="margin:4px 0 0;color:rgba(255,255,255,0.4);font-size:12px;">{ts}</p>
-        </td>
-      </tr>
-    </table>
-  </td>
-</tr>"""
 
-    inner = (
-        _h2(f"Your daily update, {name} 📬")
-        + _p("Here's what happened in your community today:")
-        + f'<table width="100%" cellpadding="0" cellspacing="0">{activity_rows}</table>'
-        + _cta_button("See All Notifications")
-        + _p(
-            '<em style="color:rgba(255,255,255,0.5);font-size:12px;">You can manage digest '
-            "preferences in your account settings.</em>"
-        )
+    html = render_to_string(
+        "emails/notification_digest.html",
+        _base_context(username=name, notification_items=notification_items),
     )
-    html = _wrap_layout(brand, inner)
+    return subject, plain, html
+
+
+def render_admin_announcement(
+    user_name: str | None,
+    heading: str,
+    body: str,
+    circle_name: str = "Ziona",
+    published_at: str | None = None,
+    cta_label: str = "Open Ziona",
+    cta_link: str | None = None,
+    brand: str = "ZIONA",
+) -> tuple[str, str, str]:
+    """Render an admin announcement email."""
+    name = _display_name(user_name)
+    b = _brand(brand)
+    published = published_at or _email_date()
+    subject = f"{b['name']} Announcement: {heading}"
+    plain = (
+        f"Hello {name},\n\n"
+        f"{heading}\n\n"
+        f"{body}\n\n"
+        f"Circle: {circle_name}\n"
+        f"Published: {published}\n\n"
+        f"The {b['name']} Team"
+    )
+    html = render_to_string(
+        "emails/admin_announcement.html",
+        _base_context(
+            username=name,
+            announcement_heading=heading,
+            announcement_body=body,
+            circle_name=circle_name,
+            announcement_published_at=published,
+            announcement_cta_label=cta_label,
+            announcement_cta_link=cta_link or settings.EMAIL_APP_BASE_URL,
+        ),
+    )
+    return subject, plain, html
+
+
+def render_support_donation(
+    user_name: str | None,
+    support_amount: str | Decimal,
+    support_date: str | None = None,
+    brand: str = "ZIONA",
+) -> tuple[str, str, str]:
+    """Render donation/support confirmation email."""
+    name = _display_name(user_name)
+    b = _brand(brand)
+    amount = str(support_amount)
+    received_on = support_date or _email_date()
+    subject = "Thank you for your donation!"
+    plain = (
+        f"Hi {name},\n\n"
+        f"Thank you for your support. Your contribution of {amount} was received "
+        f"on {received_on}.\n\n"
+        f"We are grateful to have you on this journey with us.\n\n"
+        f"The {b['name']} Team"
+    )
+    html = render_to_string(
+        "emails/support_donation.html",
+        _base_context(
+            username=name,
+            support_amount=amount,
+            support_date=received_on,
+        ),
+    )
     return subject, plain, html
 
 

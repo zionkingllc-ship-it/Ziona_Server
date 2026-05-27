@@ -117,6 +117,78 @@ class EmailService:
         except Exception:  # noqa: BLE001
             logger.error("Failed to queue digest email", extra={"email": email}, exc_info=True)
 
+    @staticmethod
+    def send_admin_announcement(
+        user_name: str | None,
+        email: str,
+        heading: str,
+        body: str,
+        circle_name: str = "Ziona",
+        published_at: str | None = None,
+        cta_label: str = "Open Ziona",
+        cta_link: str | None = None,
+    ) -> None:
+        """Send an admin announcement email to one recipient."""
+        from core.emails.templates import render_admin_announcement
+        from core.shared.tasks.email_tasks import send_email_async
+
+        try:
+            subject, plain, html = render_admin_announcement(
+                user_name=user_name,
+                heading=heading,
+                body=body,
+                circle_name=circle_name,
+                published_at=published_at,
+                cta_label=cta_label,
+                cta_link=cta_link,
+            )
+            send_email_async.delay(
+                subject=subject,
+                message=plain,
+                from_email=settings.DEFAULT_FROM_EMAIL,
+                recipient_list=[email],
+                html_message=html,
+            )
+            logger.info("admin_announcement_email_queued", extra={"email": email})
+        except Exception:  # noqa: BLE001
+            logger.error(
+                "Failed to queue admin announcement email",
+                extra={"email": email},
+                exc_info=True,
+            )
+
+    @staticmethod
+    def send_support_donation_email(
+        user_name: str | None,
+        email: str,
+        support_amount: str,
+        support_date: str | None = None,
+    ) -> None:
+        """Send donation/support confirmation email."""
+        from core.emails.templates import render_support_donation
+        from core.shared.tasks.email_tasks import send_email_async
+
+        try:
+            subject, plain, html = render_support_donation(
+                user_name=user_name,
+                support_amount=support_amount,
+                support_date=support_date,
+            )
+            send_email_async.delay(
+                subject=subject,
+                message=plain,
+                from_email=settings.DEFAULT_FROM_EMAIL,
+                recipient_list=[email],
+                html_message=html,
+            )
+            logger.info("support_donation_email_queued", extra={"email": email})
+        except Exception:  # noqa: BLE001
+            logger.error(
+                "Failed to queue support donation email",
+                extra={"email": email},
+                exc_info=True,
+            )
+
     # ── Template 5 ────────────────────────────────────────────
     @staticmethod
     def send_waitlist_confirmation(email: str, brand: str = "ZIONA") -> None:

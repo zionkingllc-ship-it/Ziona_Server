@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Support Received</title>
+</head>
+<body style="margin:0;padding:0">
+<div style="margin:0;padding:32px 16px;background-color:#F5F2F8;font-family:Arial, Helvetica, sans-serif;color:#1C1820">
+  <div style="width:100%;max-width:600px;margin:0 auto;background-color:#FFFFFF;border-radius:24px;overflow:hidden;border:1px solid #E9DDF0">
+    <div style="padding:40px 32px">
+      <img src="{{ asset_base_url }}/assets/brand-logo.png" alt="Ziona logo" width="132" style="display:block;width:132px;height:auto;margin-bottom:24px"/>
+      <div style="display:inline-block;margin-bottom:16px;padding:6px 12px;border-radius:999px;background-color:#F3E8FF;color:#742092;font-size:12px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase">Support Received</div>
+      <h1 style="margin:0 0 16px;font-size:28px;line-height:36px;font-weight:700;color:#1C1820">Thank you for your support, {{ username }}.</h1>
+      <p style="margin:0 0 16px;font-size:16px;line-height:26px;color:#4E4252">Your support has been received and we are truly grateful. What you did today is more than a donation. It is a declaration that faith, community, and creativity matter.</p>
+      <div style="text-align:center;margin-bottom:24px">
+        <img src="{{ asset_base_url }}/assets/success-illustration.png" alt="Success illustration" width="96" style="display:inline-block;width:96px;height:auto"/>
+      </div>
+      <div style="margin-top:24px;padding:20px;border-radius:16px;background-color:#F9F5FC;border:1px solid #E9DDF0">
+        <p style="margin:0 0 8px;font-size:12px;line-height:18px;font-weight:700;color:#742092;letter-spacing:0.06em;text-transform:uppercase">Contribution Summary</p>
+        <p style="margin:0 0 8px;font-size:16px;line-height:26px;color:#4E4252">Amount: <strong>{{ support_amount }}</strong></p>
+        <p style="margin:0;font-size:16px;line-height:26px;color:#4E4252">Received on: <strong>{{ support_date }}</strong></p>
+      </div>
+      <div style="margin-top:24px;padding:20px;border-radius:16px;background-color:#F6EAFA;border:1px solid #E9DDF0;border-left:8px solid #9629BC">
+        <p style="margin:0;font-size:16px;line-height:26px;color:#4E4252">As a supporter, you'll receive early priority access to new features as we roll them out.</p>
+      </div>
+      <p style="margin:24px 0 0;font-size:16px;line-height:26px;color:#4E4252">We are grateful to have you on this journey with us.</p>
+    </div>
+    <div style="padding:20px 32px 32px;font-size:13px;line-height:22px;color:#8D7D96">Support received on {{ support_date }}. Your generosity helps us keep building faith-centered community experiences.</div>
+  </div>
+</div>
+</body>
+</html>

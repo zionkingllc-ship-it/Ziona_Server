@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Notification Digest</title>
+</head>
+<body style="margin:0;padding:0">
+<div style="margin:0;padding:32px 16px;background-color:#F5F2F8;font-family:Arial, Helvetica, sans-serif;color:#1C1820">
+  <div style="width:100%;max-width:600px;margin:0 auto;background-color:#FFFFFF;border-radius:24px;overflow:hidden;border:1px solid #E9DDF0">
+    <div style="padding:40px 32px">
+      <img src="{{ asset_base_url }}/assets/brand-logo.png" alt="Ziona logo" width="132" style="display:block;width:132px;height:auto;margin-bottom:24px"/>
+      <div style="display:inline-block;margin-bottom:16px;padding:6px 12px;border-radius:999px;background-color:#F3E8FF;color:#742092;font-size:12px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase">Notifications</div>
+      <h1 style="margin:0 0 16px;font-size:28px;line-height:36px;font-weight:700;color:#1C1820">Hi {{ username }}, here is your latest activity digest.</h1>
+      <p style="margin:0 0 16px;font-size:16px;line-height:26px;color:#4E4252">A few updates are waiting for you. Review the latest items below and open the app for full details.</p>
+      <div style="margin-top:24px;padding:20px;border-radius:16px;background-color:#F9F5FC;border:1px solid #E9DDF0">
+        <p style="margin:0 0 16px;font-size:12px;line-height:18px;font-weight:700;color:#742092;letter-spacing:0.06em;text-transform:uppercase">Today's Activity</p>
+        {% for item in notification_items %}
+          <div style="padding:16px;border-radius:16px;border:1px solid #E9DDF0;background-color:#FFFFFF;margin-bottom:16px">
+            <p style="margin:0 0 6px;font-size:16px;line-height:26px;color:#1C1820;font-weight:700">{{ item.title }}</p>
+            <p style="margin:0 0 8px;font-size:14px;line-height:22px;color:#4E4252">{{ item.description }}</p>
+            <p style="margin:0;font-size:13px;line-height:22px;color:#742092;font-weight:700">{{ item.time }}</p>
+          </div>
+        {% endfor %}
+      </div>
+      <a href="{{ notification_link }}" style="display:inline-block;margin-top:24px;padding:14px 24px;border-radius:999px;background-color:#742092;color:#FFFFFF;font-size:15px;font-weight:700;text-decoration:none">See More</a>
+    </div>
+    <div style="padding:20px 32px 32px;font-size:13px;line-height:22px;color:#8D7D96">You are receiving this because notifications are enabled for your account. Update your email settings if you want a different delivery preference.</div>
+  </div>
+</div>
+</body>
+</html>

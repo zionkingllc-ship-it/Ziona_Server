@@ -98,21 +98,13 @@ def _handle_payment_succeeded(payment_intent: dict) -> None:
 
     # Queue confirmation email (non-blocking)
     try:
-        from core.shared.tasks.email_tasks import send_email_async
+        from core.emails.services import EmailService
 
-        subject = "Thank you for your donation! 🙏"
-        plain = (
-            f"Hi {donation.donor_name},\n\n"
-            f"Thank you for your generous donation of ${donation.amount / 100:.2f}. "
-            f"Your support means everything to us.\n\n"
-            f"Transaction ID: {donation.id}\n\n"
-            f"God bless you,\nThe Ziona Team"
-        )
-        send_email_async.delay(
-            subject=subject,
-            message=plain,
-            from_email=settings.DEFAULT_FROM_EMAIL,
-            recipient_list=[donation.donor_email],
+        EmailService.send_support_donation_email(
+            user_name=donation.donor_name,
+            email=donation.donor_email,
+            support_amount=f"${donation.amount / 100:.2f}",
+            support_date=timezone.now().strftime("%b %d, %Y").replace(" 0", " "),
         )
     except Exception:  # noqa: BLE001
         logger.error("donation_confirmation_email_failed", exc_info=True)

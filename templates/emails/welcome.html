@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Welcome to Ziona</title>
+</head>
+<body style="margin:0;padding:0">
+<div style="margin:0;padding:32px 16px;background-color:#F5F2F8;font-family:Arial, Helvetica, sans-serif;color:#1C1820">
+  <div style="width:100%;max-width:600px;margin:0 auto;background-color:#FFFFFF;border-radius:24px;overflow:hidden;border:1px solid #E9DDF0">
+    <div style="padding:40px 32px">
+      <img src="{{ asset_base_url }}/assets/brand-logo.png" alt="Ziona logo" width="132" style="display:block;width:132px;height:auto;margin-bottom:24px"/>
+      <div style="display:inline-block;margin-bottom:16px;padding:6px 12px;border-radius:999px;background-color:#F3E8FF;color:#742092;font-size:12px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase">Welcome to Ziona</div>
+      <h1 style="margin:0 0 16px;font-size:28px;line-height:36px;font-weight:700;color:#1C1820">Hi {{ username }}, welcome aboard.</h1>
+      <p style="margin:0 0 16px;font-size:16px;line-height:26px;color:#4E4252">We are glad to have you join the Ziona community. Your account is ready, and you can finish setting things up using the action below.</p>
+      <div style="margin-top:24px;padding:20px;border-radius:16px;background-color:#F9F5FC;border:1px solid #E9DDF0">
+        <img src="{{ asset_base_url }}/assets/welcome-hero.png" alt="Welcome illustration" width="520" style="display:block;width:100%;height:auto;border-radius:12px"/>
+      </div>
+      <a href="{{ app_link }}" style="display:inline-block;margin-top:24px;padding:14px 24px;border-radius:999px;background-color:#742092;color:#FFFFFF;font-size:15px;font-weight:700;text-decoration:none">Complete Setup</a>
+      <div style="margin-top:24px;padding:20px;border-radius:16px;background-color:#F9F5FC;border:1px solid #E9DDF0">
+        <p style="margin:0 0 16px;font-size:16px;line-height:26px;color:#4E4252">If the button above does not work, copy and paste this link into your browser:</p>
+        <p style="margin:0;font-size:16px;line-height:26px;color:#4E4252;word-break:break-all">{{ app_link }}</p>
+      </div>
+    </div>
+    <div style="padding:20px 32px 32px;font-size:13px;line-height:22px;color:#8D7D96">This email was generated for {{ username }}. If you did not expect this message, you can safely ignore it.</div>
+  </div>
+</div>
+</body>
+</html>
