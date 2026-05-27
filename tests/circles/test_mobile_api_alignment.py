@@ -195,7 +195,10 @@ class TestMobileGraphQLAlignment(TestCase):
                 name
                 title
                 coverImage
+                suggestionCardImage
                 image
+                bannerImage
+                profileImage
                 memberCount
                 members
                 avatars
@@ -221,7 +224,11 @@ class TestMobileGraphQLAlignment(TestCase):
 
         circle = data["circle"]
         self.assertEqual(circle["title"], "Faith, Work & Purpose")
+        self.assertEqual(circle["coverImage"], "https://example.com/cover.jpg")
+        self.assertEqual(circle["suggestionCardImage"], "https://example.com/cover.jpg")
         self.assertEqual(circle["image"], "https://example.com/cover.jpg")
+        self.assertEqual(circle["bannerImage"], "https://example.com/banner.jpg")
+        self.assertEqual(circle["profileImage"], "https://example.com/profile.jpg")
         self.assertEqual(circle["members"], 1)
         self.assertEqual(circle["avatars"], ["https://example.com/avatar.jpg"])
         self.assertFalse(circle["isJoined"])
@@ -289,6 +296,8 @@ class TestMobileGraphQLAlignment(TestCase):
               circleFeedData(circleId: $circleId) {
                 bannerImage
                 profileImage
+                coverImage
+                suggestionCardImage
                 name
                 description
                 memberCount
@@ -313,6 +322,8 @@ class TestMobileGraphQLAlignment(TestCase):
         feed_data = data["circleFeedData"]
         self.assertEqual(feed_data["bannerImage"], "https://example.com/banner.jpg")
         self.assertEqual(feed_data["profileImage"], "https://example.com/profile.jpg")
+        self.assertEqual(feed_data["coverImage"], "https://example.com/cover.jpg")
+        self.assertEqual(feed_data["suggestionCardImage"], "https://example.com/cover.jpg")
         self.assertEqual(feed_data["memberCount"], 1247)
         self.assertFalse(feed_data["isJoined"])
         self.assertEqual(feed_data["memberAvatars"], ["https://example.com/avatar.jpg"])
@@ -324,6 +335,28 @@ class TestMobileGraphQLAlignment(TestCase):
         )
         self.assertEqual(feed_data["posts"][0]["savedCount"], 0)
         self.assertEqual(feed_data["posts"][0]["sharedCount"], 0)
+
+    def test_circle_feed_data_banner_falls_back_to_cover_image(self):
+        self.circle.banner_image = ""
+        self.circle.save(update_fields=["banner_image"])
+
+        data = _graphql(
+            """
+            query FeedData($circleId: String!) {
+              circleFeedData(circleId: $circleId) {
+                bannerImage
+                coverImage
+                suggestionCardImage
+              }
+            }
+            """,
+            {"circleId": str(self.circle.id)},
+        )
+
+        feed_data = data["circleFeedData"]
+        self.assertEqual(feed_data["bannerImage"], "https://example.com/cover.jpg")
+        self.assertEqual(feed_data["coverImage"], "https://example.com/cover.jpg")
+        self.assertEqual(feed_data["suggestionCardImage"], "https://example.com/cover.jpg")
 
     def test_anchor_history_include_active_false_returns_only_past_anchors(self):
         data = _graphql(

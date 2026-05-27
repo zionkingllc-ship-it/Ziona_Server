@@ -197,6 +197,7 @@ class AdminCircleType:
     description: str
     cover_image: str = strawberry.field(name="coverImage")
     profile_image_url: str = strawberry.field(name="profileImageUrl")
+    banner_image: str = strawberry.field(name="bannerImage")
     status: str
     is_active: bool = strawberry.field(name="isActive")
     member_count: int = strawberry.field(name="memberCount")
@@ -510,6 +511,7 @@ def _map_circle(data: dict) -> AdminCircleType:
         description=data["description"],
         cover_image=data["cover_image"],
         profile_image_url=data.get("profile_image_url", ""),
+        banner_image=data.get("banner_image", ""),
         status=data["status"],
         is_active=data["is_active"],
         member_count=data["member_count"],
@@ -1094,6 +1096,7 @@ class AdminDashboardMutations:
         description: str,
         cover_image: str,
         profile_image_url: str = "",
+        banner_image: str = "",
     ) -> AdminCirclePayload:
         from core.admin_dashboard.circle_services import CircleManagementService
         from core.shared.exceptions import AdminError
@@ -1107,6 +1110,7 @@ class AdminDashboardMutations:
                 description=description,
                 cover_image=cover_image,
                 profile_image_url=profile_image_url,
+                banner_image=banner_image,
                 admin_user=admin_user,
                 ip_address=ip,
             )
@@ -1130,6 +1134,7 @@ class AdminDashboardMutations:
         description: str | None = None,
         cover_image: str | None = None,
         profile_image_url: str | None = None,
+        banner_image: str | None = None,
     ) -> AdminCirclePayload:
         from core.admin_dashboard.circle_services import CircleManagementService
         from core.shared.exceptions import AdminError
@@ -1146,6 +1151,7 @@ class AdminDashboardMutations:
                 description=description,
                 cover_image=cover_image,
                 profile_image_url=profile_image_url,
+                banner_image=banner_image,
             )
             return AdminCirclePayload(success=True, circle=_map_circle(result))
         except AdminError as e:

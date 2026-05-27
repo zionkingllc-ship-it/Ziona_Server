@@ -316,12 +316,21 @@ class CircleType:
     name: str
     description: str
 
+    def _banner_image_url(self) -> str | None:
+        return (
+            self._dto.banner_image or self._dto.cover_image or self._dto.profile_image_url or None
+        )
+
     @strawberry.field
     def title(self) -> str:
         return self._dto.name
 
     @strawberry.field(name="coverImage")
     def cover_image(self) -> str:
+        return self._dto.cover_image
+
+    @strawberry.field(name="suggestionCardImage")
+    def suggestion_card_image(self) -> str:
         return self._dto.cover_image
 
     @strawberry.field
@@ -388,7 +397,7 @@ class CircleType:
 
     @strawberry.field(name="bannerImage")
     def banner_image(self) -> str | None:
-        return self._dto.banner_image or None
+        return self._banner_image_url()
 
     @strawberry.field(name="profileImage")
     def profile_image(self) -> str | None:
@@ -515,6 +524,8 @@ class CircleFeedResponse:
 class CircleFeedDataType:
     banner_image: str | None = strawberry.field(name="bannerImage")
     profile_image: str | None = strawberry.field(name="profileImage")
+    cover_image: str | None = strawberry.field(name="coverImage")
+    suggestion_card_image: str | None = strawberry.field(name="suggestionCardImage")
     name: str
     description: str
     member_count: int = strawberry.field(name="memberCount")
@@ -787,8 +798,10 @@ class CircleQueries:
         )
         circle_type = CircleType.from_db_model(circle)
         return CircleFeedDataType(
-            banner_image=circle.banner_image or None,
+            banner_image=circle_type.banner_image(),
             profile_image=circle.profile_image_url or None,
+            cover_image=circle.cover_image or None,
+            suggestion_card_image=circle.cover_image or None,
             name=circle.name,
             description=circle.description,
             member_count=circle.display_member_count

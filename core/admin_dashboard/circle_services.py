@@ -188,6 +188,7 @@ class CircleManagementService:
         description: str,
         cover_image: str,
         profile_image_url: str = "",
+        banner_image: str = "",
         admin_user=None,
         ip_address: str = "",
     ) -> dict:
@@ -198,6 +199,7 @@ class CircleManagementService:
             description: Circle description.
             cover_image: URL to cover image.
             profile_image_url: URL to profile image.
+            banner_image: URL to wide feed/detail banner image.
             admin_user: Admin performing the action.
             ip_address: Admin's IP for audit.
 
@@ -221,6 +223,7 @@ class CircleManagementService:
             description=description,
             cover_image=cover_image,
             profile_image_url=profile_image_url,
+            banner_image=banner_image,
             created_by=admin_user,
             is_active=True,
             status="active",
@@ -361,10 +364,17 @@ class CircleManagementService:
             "description": circle.description,
             "cover_image": circle.cover_image,
             "profile_image_url": circle.profile_image_url,
+            "banner_image": circle.banner_image,
         }
 
         # Apply allowed updates
-        allowed_fields = {"name", "description", "cover_image", "profile_image_url"}
+        allowed_fields = {
+            "name",
+            "description",
+            "cover_image",
+            "profile_image_url",
+            "banner_image",
+        }
         update_fields = ["updated_at", "last_edited_at"]
 
         for field, value in updates.items():
@@ -380,6 +390,7 @@ class CircleManagementService:
             "description": circle.description,
             "cover_image": circle.cover_image,
             "profile_image_url": circle.profile_image_url,
+            "banner_image": circle.banner_image,
         }
 
         log_admin_action(
@@ -533,6 +544,7 @@ def _circle_to_dict(circle) -> dict:
         "description": circle.description,
         "cover_image": circle.cover_image,
         "profile_image_url": circle.profile_image_url,
+        "banner_image": circle.banner_image,
         "status": circle.status,
         "is_active": circle.is_active,
         "member_count": member_count,

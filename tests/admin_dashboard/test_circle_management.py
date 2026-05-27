@@ -15,10 +15,12 @@ def test_create_circle(authenticated_admin):
         description="Test description",
         cover_image="http://example.com/cover.jpg",
         profile_image_url="http://example.com/profile.jpg",
+        banner_image="http://example.com/banner.jpg",
         admin_user=authenticated_admin["user"],
     )
     assert circle["name"] == "Test Circle"
     assert circle["status"] == "active"
+    assert circle["banner_image"] == "http://example.com/banner.jpg"
 
 
 @pytest.mark.django_db
@@ -55,7 +57,8 @@ def test_admin_create_circle_mutation(api_client, authenticated_admin):
             name: "GraphQL Test Circle",
             description: "A circle created via GraphQL mutation",
             coverImage: "http://example.com/graphql-cover.jpg",
-            profileImageUrl: "http://example.com/graphql-profile.jpg"
+            profileImageUrl: "http://example.com/graphql-profile.jpg",
+            bannerImage: "http://example.com/graphql-banner.jpg"
         ) {
             success
             circle {
@@ -64,6 +67,7 @@ def test_admin_create_circle_mutation(api_client, authenticated_admin):
                 description
                 coverImage
                 profileImageUrl
+                bannerImage
                 status
                 isActive
             }
@@ -83,6 +87,7 @@ def test_admin_create_circle_mutation(api_client, authenticated_admin):
     result = data["data"]["adminCreateCircle"]
     assert result["success"] is True
     assert result["circle"]["name"] == "GraphQL Test Circle"
+    assert result["circle"]["bannerImage"] == "http://example.com/graphql-banner.jpg"
     assert result["circle"]["status"] == "active"
     assert result["circle"]["isActive"] is True
 
