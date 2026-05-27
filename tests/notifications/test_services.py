@@ -129,6 +129,39 @@ def test_register_device_token_limit(db, user):
     assert DeviceToken.objects.filter(token="token_6").exists()
 
 
+def test_register_device_token_is_idempotent_for_same_user(db, user):
+    register_device_token(user.id, "ExponentPushToken[same-device]", "ios")
+    register_device_token(user.id, "ExponentPushToken[same-device]", "android")
+
+    token = DeviceToken.objects.get(token="ExponentPushToken[same-device]")
+    assert token.user == user
+    assert token.platform == "android"
+    assert token.is_active is True
+    assert DeviceToken.objects.filter(token="ExponentPushToken[same-device]").count() == 1
+
+
+def test_register_device_token_transfers_same_device_to_new_user(db, user, other_user):
+    register_device_token(user.id, "ExponentPushToken[shared-device]", "ios")
+    register_device_token(other_user.id, "ExponentPushToken[shared-device]", "ios")
+
+    token = DeviceToken.objects.get(token="ExponentPushToken[shared-device]")
+    assert token.user == other_user
+    assert token.is_active is True
+    assert DeviceToken.objects.filter(user=user).count() == 0
+
+
+def test_register_device_token_keeps_transferred_token_when_enforcing_limit(db, user, other_user):
+    register_device_token(other_user.id, "ExponentPushToken[shared-device]", "ios")
+    for i in range(5):
+        register_device_token(user.id, f"ExponentPushToken[user-device-{i}]", "ios")
+
+    register_device_token(user.id, "ExponentPushToken[shared-device]", "ios")
+
+    assert DeviceToken.objects.filter(user=user).count() == 5
+    assert DeviceToken.objects.filter(user=user, token="ExponentPushToken[shared-device]").exists()
+    assert not DeviceToken.objects.filter(user=other_user).exists()
+
+
 def test_batch_like_notifications(db, user, other_user):
     post_id = uuid.uuid4()
 

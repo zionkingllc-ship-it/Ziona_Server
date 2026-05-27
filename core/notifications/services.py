@@ -183,25 +183,53 @@ def update_preferences(user_id: int, preferences_dict: dict[str, bool]) -> Notif
 
 
 def register_device_token(user_id: int, token: str, platform: str) -> str:
-    """Register a new device token, enforcing a 5 device limit."""
-    with transaction.atomic():
-        # Enforce max 5 devices rule before creating
-        active_tokens = DeviceToken.objects.filter(user_id=user_id)
-        if active_tokens.count() >= 5 and not active_tokens.filter(token=token).exists():
-            inactive_tokens = active_tokens.filter(is_active=False).order_by("created_at")
-            if inactive_tokens.exists():
-                inactive_tokens.first().delete()
-            else:
-                # All slots taken by active tokens, replace oldest
-                oldest_token = active_tokens.order_by("created_at").first()
-                if oldest_token:
-                    oldest_token.delete()
+    """Register or transfer a device token to the current user.
 
-        # Now create or update the token
-        obj, created = DeviceToken.objects.update_or_create(
-            user_id=user_id, token=token, defaults={"platform": platform, "is_active": True}
+    Push provider tokens identify a concrete app install, not an account. If a
+    tester logs out and another user signs in on the same phone, the same token
+    must move to the new user instead of creating a duplicate row. Keeping token
+    ownership singular also prevents notifications for one account leaking to a
+    previous account on the same device.
+    """
+    token = token.strip()
+    platform = platform.strip().lower()
+
+    if not token:
+        raise ValueError("DEVICE_TOKEN_REQUIRED")
+    if not platform:
+        raise ValueError("DEVICE_PLATFORM_REQUIRED")
+
+    with transaction.atomic():
+        DeviceToken.objects.update_or_create(
+            token=token,
+            defaults={
+                "user_id": user_id,
+                "platform": platform,
+                "is_active": True,
+            },
         )
+
+        _enforce_device_token_limit(user_id=user_id, keep_token=token)
+
         return "Success"
+
+
+def _enforce_device_token_limit(user_id: int, keep_token: str, max_tokens: int = 5) -> None:
+    """Keep at most ``max_tokens`` active device tokens for a user."""
+    user_tokens = list(
+        DeviceToken.objects.select_for_update()
+        .filter(user_id=user_id)
+        .order_by("is_active", "created_at")
+    )
+    excess_count = len(user_tokens) - max_tokens
+    if excess_count <= 0:
+        return
+
+    removable_ids = [token_obj.id for token_obj in user_tokens if token_obj.token != keep_token][
+        :excess_count
+    ]
+    if removable_ids:
+        DeviceToken.objects.filter(id__in=removable_ids).delete()
 
 
 def batch_like_notifications(
