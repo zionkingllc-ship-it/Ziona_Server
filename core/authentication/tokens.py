@@ -1,26 +1,28 @@
-"""
-JWT Token service for Ziona Server.
+"""JWT Token service for Ziona Server.
 
 Handles access token and refresh token generation, validation,
 and rotation. Refresh tokens are stored in Redis with TTL.
 
 Security model:
-- Access tokens:  1 hour expiry, HS256 signed, CPU-validated only.
+- Access tokens:  24 hour expiry, HS256 signed, CPU-validated only.
 - Refresh tokens: 30-day expiry, stored in Redis, rotated on every use.
+- Refresh rotation keeps a brief replay grace value so duplicate mobile
+  refresh requests return the same rotated token pair instead of failing.
 - On logout: refresh token is immediately revoked in Redis (no new tokens
   issued), and the access token is blacklisted with its remaining TTL.
-  Since access tokens live only 1 hour, the blacklist entry is at
-  most 1 hour wide — after which the token is independently expired.
+  Since access tokens live 24 hours, the blacklist entry may be up to
+  24 hours wide — after which the token is independently expired.
 
 WHY WE DO NOT CHECK THE BLACKLIST ON EVERY REQUEST:
   Checking Redis on every authenticated call costs 1 command/request and
-  contributed to exhausting our Upstash request budget. With a 1-hour
+  contributed to exhausting our Upstash request budget. With a 24-hour
   access token TTL this check is unnecessary: the worst-case exposure
-  window after a logout/compromise is 1 hour, which is the same
+  window after a logout/compromise is 24 hours, which is the
   tradeoff OAuth 2.0 RFC 6749 accepts by design. The refresh token is
   revoked immediately, preventing any new access tokens from being issued.
 """
 
+import json
 import logging
 import uuid
 from datetime import datetime, timezone
@@ -209,12 +211,42 @@ class TokenService:
             from django_redis import get_redis_connection
 
             redis_conn = get_redis_connection("default")
-            redis_conn.delete(f"refresh:{user_id}:{old_jti}")
+            old_key = f"refresh:{user_id}:{old_jti}"
+            existing_value = redis_conn.get(old_key)
+            cached_rotation = _decode_rotation_value(existing_value)
+            if cached_rotation:
+                logger.info(
+                    "Refresh token replay grace used",
+                    extra={"user_id": user_id, "old_jti": old_jti},
+                )
+                return cached_rotation
         except Exception as e:
-            logger.warning(f"Failed to revoke old refresh token: {e}")
+            logger.warning(f"Failed to inspect old refresh token: {e}")
 
         access_token = TokenService.generate_access_token(user_id, role)
         refresh_token, new_jti = TokenService.generate_refresh_token(user_id)
+
+        try:
+            from django_redis import get_redis_connection
+
+            redis_conn = get_redis_connection("default")
+            old_key = f"refresh:{user_id}:{old_jti}"
+            grace_seconds = max(int(settings.JWT_REFRESH_ROTATION_GRACE_SECONDS), 0)
+            if grace_seconds > 0:
+                redis_conn.setex(
+                    old_key,
+                    grace_seconds,
+                    json.dumps(
+                        {
+                            "access_token": access_token,
+                            "refresh_token": refresh_token,
+                        }
+                    ),
+                )
+            else:
+                redis_conn.delete(old_key)
+        except Exception as e:
+            logger.warning(f"Failed to store refresh rotation grace: {e}")
 
         logger.info(
             "Token rotated",
@@ -321,3 +353,23 @@ class TokenService:
             logger.info("Access token blacklisted", extra={"jti": jti})
         except Exception as e:
             logger.warning(f"Failed to blacklist access token: {e}")
+
+
+def _decode_rotation_value(value) -> dict | None:
+    """Return cached rotated token pair when a refresh token is replayed briefly."""
+    if not value:
+        return None
+    if isinstance(value, bytes):
+        value = value.decode("utf-8")
+    if value == "valid":
+        return None
+    try:
+        data = json.loads(value)
+    except (TypeError, ValueError):
+        return None
+    if data.get("access_token") and data.get("refresh_token"):
+        return {
+            "access_token": data["access_token"],
+            "refresh_token": data["refresh_token"],
+        }
+    return None

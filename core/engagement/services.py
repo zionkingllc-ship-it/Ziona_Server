@@ -73,17 +73,29 @@ class EngagementService:
         check_engagement_spam(user_id, post_id, action="like")
 
         try:
-            Like.objects.create(user_id=user_id, post_id=post_id)
+            _like, created = Like.objects.get_or_create(user_id=user_id, post_id=post_id)
+            if not created:
+                return LikeResponseDTO(success=True, liked=True, likes_count=post.likes.count())
             logger.info(
                 "post_liked",
                 extra={"user_id": user_id, "post_id": post_id},
             )
-            return LikeResponseDTO(success=True, liked=True)
-        except IntegrityError as e:
-            raise EngagementError(
-                message="You have already liked this post.",
-                code=ErrorCode.ALREADY_LIKED,
-            ) from e
+            return LikeResponseDTO(success=True, liked=True, likes_count=post.likes.count())
+        except IntegrityError:
+            logger.info(
+                "post_like_already_exists",
+                extra={"user_id": user_id, "post_id": post_id},
+            )
+            return LikeResponseDTO(success=True, liked=True, likes_count=post.likes.count())
+
+    @staticmethod
+    def ensure_post_liked(user_id: str, post_id: str) -> LikeResponseDTO:
+        """Idempotently ensure a post is liked.
+
+        Intended for double-tap UI gestures where repeated calls should never
+        toggle the like off or return an already-liked error.
+        """
+        return EngagementService.like_post(user_id, post_id)
 
     @staticmethod
     @rate_limit(max_requests=30, window_seconds=60)

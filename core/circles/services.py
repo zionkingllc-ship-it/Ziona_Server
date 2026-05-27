@@ -315,6 +315,27 @@ def like_circle_post(user_id: str, post_id: str) -> dict:
 
 
 @transaction.atomic
+def ensure_circle_post_liked(user_id: str, post_id: str) -> dict:
+    """Idempotently ensure a CirclePost has a like from the viewer."""
+    try:
+        post = CirclePost.objects.select_for_update().get(id=post_id, deleted_at__isnull=True)
+    except CirclePost.DoesNotExist:
+        raise ZionaError(message="Post not found", code=CIRCLE_POST_NOT_FOUND) from None
+
+    _engagement, created = CirclePostEngagement.objects.get_or_create(
+        post=post,
+        user_id=user_id,
+        engagement_type="like",
+    )
+
+    if created:
+        CirclePost.objects.filter(id=post_id).update(likes_count=F("likes_count") + 1)
+        post.refresh_from_db(fields=["likes_count"])
+
+    return {"liked": True, "likes_count": max(post.likes_count, 0)}
+
+
+@transaction.atomic
 def create_circle_post(
     user_id: str,
     circle_id: str,

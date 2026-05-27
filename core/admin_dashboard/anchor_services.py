@@ -69,6 +69,9 @@ class AnchorManagementService:
         scripture_translation: str = "KJV",
         scripture_text: str = "",
         media_url: str = "",
+        anchor_image: str = "",
+        anchor_video: str = "",
+        anchor_thumbnail: str = "",
         style_data: dict | None = None,
         admin_user=None,
         ip_address: str = "",
@@ -77,7 +80,7 @@ class AnchorManagementService:
 
         Validates content by type:
         - TEXT/devotional: requires title + content
-        - MEDIA (image/video): requires media_url
+        - MEDIA (image/video): requires at least one media URL
         - BIBLE (bible_verse): requires scripture fields
 
         Returns:
@@ -103,16 +106,28 @@ class AnchorManagementService:
                 code=ErrorCode.VALIDATION_ERROR,
             )
 
-        if anchor_type in ("image", "video") and not media_url:
+        media_fields = _normalise_media_fields(
+            anchor_type=anchor_type,
+            media_url=media_url,
+            anchor_image=anchor_image,
+            anchor_video=anchor_video,
+            anchor_thumbnail=anchor_thumbnail,
+        )
+
+        if anchor_type in ("image", "video") and not (
+            media_fields["media_url"]
+            or media_fields["anchor_image"]
+            or media_fields["anchor_video"]
+            or media_fields["anchor_thumbnail"]
+        ):
             raise AdminError(
-                message="Media URL is required for image/video anchor type.",
+                message="At least one media URL is required for media anchor types.",
                 code=ErrorCode.VALIDATION_ERROR,
             )
 
         # Use a far-future placeholder for published_at/expires_at on drafts
         # These get overwritten when the anchor is actually posted
         placeholder_time = datetime.now(timezone.utc)
-        typed_media = _typed_media_fields(anchor_type, media_url)
 
         anchor = Anchor.objects.create(
             circle=circle,
@@ -126,9 +141,10 @@ class AnchorManagementService:
             scripture_verse_end=scripture_verse_end,
             scripture_translation=scripture_translation,
             scripture_text=scripture_text,
-            media_url=media_url,
-            anchor_image=typed_media["anchor_image"],
-            anchor_video=typed_media["anchor_video"],
+            media_url=media_fields["media_url"],
+            anchor_image=media_fields["anchor_image"],
+            anchor_video=media_fields["anchor_video"],
+            anchor_thumbnail=media_fields["anchor_thumbnail"],
             style_data=style_data or {},
             anchor_status="draft",
             published_at=placeholder_time,
@@ -349,6 +365,9 @@ class AnchorManagementService:
             "scripture_translation",
             "scripture_text",
             "media_url",
+            "anchor_image",
+            "anchor_video",
+            "anchor_thumbnail",
             "style_data",
         }
         update_fields = ["updated_at"]
@@ -358,10 +377,16 @@ class AnchorManagementService:
                 setattr(anchor, field, value)
                 update_fields.append(field)
 
-        media_url = updates.get("media_url")
-        if media_url is not None:
-            typed_media = _typed_media_fields(anchor.anchor_type, media_url)
-            for field, value in typed_media.items():
+        media_keys = {"media_url", "anchor_image", "anchor_video", "anchor_thumbnail"}
+        if media_keys & {field for field, value in updates.items() if value is not None}:
+            media_fields = _normalise_media_fields(
+                anchor_type=anchor.anchor_type,
+                media_url=updates.get("media_url", anchor.media_url),
+                anchor_image=updates.get("anchor_image", anchor.anchor_image),
+                anchor_video=updates.get("anchor_video", anchor.anchor_video),
+                anchor_thumbnail=updates.get("anchor_thumbnail", anchor.anchor_thumbnail),
+            )
+            for field, value in media_fields.items():
                 setattr(anchor, field, value)
                 if field not in update_fields:
                     update_fields.append(field)
@@ -451,6 +476,44 @@ def _typed_media_fields(anchor_type: str, media_url: str) -> dict[str, str]:
     return {"anchor_image": "", "anchor_video": ""}
 
 
+def _normalise_media_fields(
+    *,
+    anchor_type: str,
+    media_url: str = "",
+    anchor_image: str = "",
+    anchor_video: str = "",
+    anchor_thumbnail: str = "",
+) -> dict[str, str]:
+    """Resolve legacy mediaUrl and typed media fields without losing either asset.
+
+    `media_url` is kept for older clients that only understand one URL. The typed
+    fields are canonical for new admin/mobile rendering and may contain both an
+    image and a video on the same anchor.
+    """
+    media_url = (media_url or "").strip()
+    anchor_image = (anchor_image or "").strip()
+    anchor_video = (anchor_video or "").strip()
+    anchor_thumbnail = (anchor_thumbnail or "").strip()
+
+    if media_url:
+        legacy_fields = _typed_media_fields(anchor_type, media_url)
+        anchor_image = anchor_image or legacy_fields["anchor_image"]
+        anchor_video = anchor_video or legacy_fields["anchor_video"]
+
+    if not media_url:
+        if anchor_type == "video":
+            media_url = anchor_video or anchor_image or anchor_thumbnail
+        else:
+            media_url = anchor_image or anchor_video or anchor_thumbnail
+
+    return {
+        "media_url": media_url,
+        "anchor_image": anchor_image,
+        "anchor_video": anchor_video,
+        "anchor_thumbnail": anchor_thumbnail,
+    }
+
+
 def _notify_circle_members(anchor):
     """Send push notifications to all circle members about a new anchor.
 
@@ -497,6 +560,9 @@ def _anchor_to_dict(anchor) -> dict:
         "anchor_type": anchor.anchor_type,
         "anchor_status": anchor.anchor_status,
         "media_url": anchor.media_url or "",
+        "anchor_image": anchor.anchor_image or "",
+        "anchor_video": anchor.anchor_video or "",
+        "anchor_thumbnail": anchor.anchor_thumbnail or "",
         "preview_url": anchor.preview_url or None,
         "scripture_book": anchor.scripture_book or "",
         "scripture_chapter": anchor.scripture_chapter,

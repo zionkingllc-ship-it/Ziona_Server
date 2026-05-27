@@ -42,9 +42,20 @@ class TestLikePost:
     def test_like_post_already_liked(self, mock_spam, user_b, post):
         EngagementService.like_post(str(user_b.id), str(post.id))
 
-        with pytest.raises(EngagementError) as exc:
-            EngagementService.like_post(str(user_b.id), str(post.id))
-        assert exc.value.code == "ALREADY_LIKED"
+        result = EngagementService.like_post(str(user_b.id), str(post.id))
+        assert result.success is True
+        assert result.liked is True
+
+    @patch("core.engagement.services.check_engagement_spam")
+    def test_ensure_post_liked_is_idempotent(self, mock_spam, user_b, post):
+        first = EngagementService.ensure_post_liked(str(user_b.id), str(post.id))
+        second = EngagementService.ensure_post_liked(str(user_b.id), str(post.id))
+
+        assert first.success is True
+        assert second.success is True
+        assert first.liked is True
+        assert second.liked is True
+        assert post.likes.count() == 1
 
     @patch("core.engagement.services.check_engagement_spam")
     def test_like_nonexistent_post(self, mock_spam, user_b):

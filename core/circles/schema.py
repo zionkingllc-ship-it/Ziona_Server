@@ -9,6 +9,7 @@ from strawberry.types import Info
 
 from core.circles.services import (
     create_circle_post,
+    ensure_circle_post_liked,
     get_all_circles,
     get_circle_feed,
     get_circle_post,
@@ -1307,6 +1308,29 @@ class CircleMutations:
             )
         try:
             result = like_circle_post(user_id=viewer_id, post_id=post_id)
+            return LikeCirclePostPayload(
+                success=True,
+                liked=result["liked"],
+                likes_count=result["likes_count"],
+            )
+        except ZionaError as e:
+            return LikeCirclePostPayload(
+                success=False, error=ErrorType(code=e.code, message=e.message)
+            )
+
+    @strawberry.mutation(
+        name="ensureCirclePostLiked",
+        description="Idempotently like a CirclePost. Repeated calls keep it liked.",
+    )
+    def ensure_circle_post_liked(self, info: Info, post_id: str) -> LikeCirclePostPayload:
+        viewer_id = _get_authenticated_user_id(info)
+        if not viewer_id:
+            return LikeCirclePostPayload(
+                success=False,
+                error=ErrorType(code="UNAUTHORIZED", message="Login required"),
+            )
+        try:
+            result = ensure_circle_post_liked(user_id=viewer_id, post_id=post_id)
             return LikeCirclePostPayload(
                 success=True,
                 liked=result["liked"],

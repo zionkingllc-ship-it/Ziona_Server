@@ -51,7 +51,7 @@ services:
       - key: ENSEND_API_URL
         value: https://api.smtpexpress.com/send
       - key: DEFAULT_FROM_EMAIL
-        value: zionking--llc-61791b@ensend.me
+        value: noreply@ziona.app
       - key: ENSEND_SENDER_NAME
         value: Ziona Team
 

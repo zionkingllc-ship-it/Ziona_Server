@@ -281,7 +281,7 @@ class FollowService:
         Returns:
             List of dicts with user info and follower_count.
         """
-        from core.users.models import User, UserInterest
+        from core.users.models import User, UserInterest, UserRole
 
         user_interests = list(
             UserInterest.objects.filter(user_id=user_id).values_list("interest", flat=True)
@@ -294,13 +294,15 @@ class FollowService:
 
         qs = (
             User.objects.filter(deleted_at__isnull=True)
+            .filter(is_active=True, role=UserRole.USER, status__in=["active", "warned"])
+            .exclude(username__isnull=True)
+            .exclude(username="")
             .exclude(id__in=following_ids)
             .annotate(
                 followers_count=Count("follower_set", distinct=True),
                 posts_count=Count("posts", distinct=True),
             )
-            .filter(posts_count__gt=0)
-            .order_by("-followers_count")
+            .order_by("-followers_count", "-posts_count", "-created_at")
         )
 
         if user_interests:
@@ -311,7 +313,12 @@ class FollowService:
                         interest__in=user_interests,
                     )
                 )
-            ).order_by("-has_matching_interest", "-followers_count")
+            ).order_by(
+                "-has_matching_interest",
+                "-followers_count",
+                "-posts_count",
+                "-created_at",
+            )
 
         suggestions = []
         for user in qs[:limit]:

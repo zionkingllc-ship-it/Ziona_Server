@@ -275,6 +275,43 @@ class EngagementMutations:
                 error=ErrorType(code=e.code, message=e.message),
             )
 
+    @strawberry.mutation(
+        name="ensurePostLiked",
+        description="Idempotently like a post. Repeated calls keep it liked.",
+    )
+    def ensure_post_liked(self, info: strawberry.types.Info, post_id: str) -> LikePayload:
+        """Like a post without toggling or failing when it is already liked."""
+        from core.engagement.services import EngagementService
+        from core.shared.exceptions import EngagementError
+
+        user_id = _get_authenticated_user_id(info)
+        if not user_id:
+            return LikePayload(
+                success=False,
+                message="Authentication required",
+                error_code="UNAUTHORIZED",
+            )
+
+        try:
+            result = EngagementService.ensure_post_liked(user_id, post_id)
+            from core.posts.services import PostService
+
+            p = PostService.get_post(post_id, user_id)
+            stats = PostStats(
+                likes_count=p.stats.likes_count,
+                comments_count=p.stats.comments_count,
+                shares_count=p.stats.shares_count,
+                saves_count=p.stats.saves_count,
+            )
+            return LikePayload(success=True, liked=result.liked, stats=stats)
+        except EngagementError as e:
+            return LikePayload(
+                success=False,
+                message=e.message,
+                error_code=e.code,
+                error=ErrorType(code=e.code, message=e.message),
+            )
+
     @strawberry.mutation(description="Unlike a post")
     def unlike_post(self, info: strawberry.types.Info, post_id: str) -> LikePayload:
         """Unlike a post."""

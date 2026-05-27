@@ -12,6 +12,7 @@ from django.test import TestCase
 from core.circles.models import Circle, CircleMembership
 from core.circles.services import (
     create_circle,
+    ensure_circle_post_liked,
     get_all_circles,
     get_my_circles,
     get_suggested_circles,
@@ -158,6 +159,47 @@ class TestCircleMembership(TestCase):
         with self.assertRaises(ZionaError) as ctx:
             leave_circle(str(self.admin_user.id), str(self.circle.id))
         self.assertEqual(ctx.exception.code, "CANNOT_LEAVE_LAST_ADMIN")
+
+
+@pytest.mark.django_db
+class TestCirclePostEngagement(TestCase):
+    """Tests for circle post engagement helpers."""
+
+    def setUp(self):
+        from core.circles.models import CirclePost
+
+        self.user = _make_user("post-liker@test.com", "postliker")
+        self.author = _make_user("post-author@test.com", "postauthor")
+        self.circle = Circle.objects.create(
+            name="Circle Post Engagement",
+            description="A circle for post engagement",
+            cover_image="https://example.com/cover.jpg",
+            created_by=self.author,
+        )
+        self.post = CirclePost.objects.create(
+            circle=self.circle,
+            user=self.author,
+            text="A circle post",
+        )
+
+    def test_ensure_circle_post_liked_is_idempotent(self):
+        from core.circles.models import CirclePostEngagement
+
+        first = ensure_circle_post_liked(str(self.user.id), str(self.post.id))
+        second = ensure_circle_post_liked(str(self.user.id), str(self.post.id))
+
+        self.assertTrue(first["liked"])
+        self.assertTrue(second["liked"])
+        self.assertEqual(first["likes_count"], 1)
+        self.assertEqual(second["likes_count"], 1)
+        self.assertEqual(
+            CirclePostEngagement.objects.filter(
+                post=self.post,
+                user=self.user,
+                engagement_type="like",
+            ).count(),
+            1,
+        )
 
 
 @pytest.mark.django_db

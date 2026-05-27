@@ -50,6 +50,27 @@ def test_edit_circle_cooldown(authenticated_admin):
 
 
 @pytest.mark.django_db
+def test_delete_circle_soft_deletes(authenticated_admin):
+    circle = Circle.objects.create(
+        name="Delete Me",
+        description="Soft delete this circle",
+        cover_image="https://example.com/cover.jpg",
+        created_by=authenticated_admin["user"],
+    )
+
+    result = CircleManagementService.delete_circle(
+        str(circle.id),
+        admin_user=authenticated_admin["user"],
+    )
+
+    circle.refresh_from_db()
+    assert result["status"] == "inactive"
+    assert result["is_active"] is False
+    assert circle.deleted_at is not None
+    assert Circle.objects.filter(id=circle.id, deleted_at__isnull=True).exists() is False
+
+
+@pytest.mark.django_db
 def test_admin_create_circle_mutation(api_client, authenticated_admin):
     mutation = """
     mutation {
@@ -101,6 +122,47 @@ def test_admin_create_circle_mutation(api_client, authenticated_admin):
     assert result_dup["success"] is False
     assert result_dup["circle"] is None
     assert result_dup["error"]["code"] == "DUPLICATE_NAME"
+
+
+@pytest.mark.django_db
+def test_admin_delete_circle_mutation(api_client, authenticated_admin):
+    circle = Circle.objects.create(
+        name="GraphQL Delete Circle",
+        description="Delete via mutation",
+        cover_image="https://example.com/cover.jpg",
+        created_by=authenticated_admin["user"],
+    )
+
+    mutation = f"""
+    mutation {{
+        adminDeleteCircle(circleId: "{circle.id}") {{
+            success
+            circle {{
+                id
+                status
+                isActive
+            }}
+            error {{
+                code
+                message
+            }}
+        }}
+    }}
+    """
+    headers = {"HTTP_AUTHORIZATION": f"Bearer {authenticated_admin['access_token']}"}
+    response = api_client.post(
+        "/graphql/", {"query": mutation}, content_type="application/json", **headers
+    )
+    data = response.json()
+
+    assert "errors" not in data, data.get("errors")
+    result = data["data"]["adminDeleteCircle"]
+    assert result["success"] is True
+    assert result["circle"]["status"] == "inactive"
+    assert result["circle"]["isActive"] is False
+
+    circle.refresh_from_db()
+    assert circle.deleted_at is not None
 
 
 @pytest.mark.django_db

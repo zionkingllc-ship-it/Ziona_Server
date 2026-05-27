@@ -192,12 +192,14 @@ GCS_CORS_ALLOWED_ORIGINS = env.list(
 
 
 JWT_SECRET_KEY = env("JWT_SECRET_KEY", default=SECRET_KEY)
-# 1-hour access tokens eliminate the need for a per-request Redis blacklist
-# check. On logout the refresh token is invalidated immediately (no new tokens
-# can be issued), and the short-lived access token expires naturally within
-# 1 hour — matching the OAuth 2.0 RFC 6749 security model.
-JWT_ACCESS_TOKEN_LIFETIME = timedelta(hours=1)
+# 24-hour access tokens reduce surprise mobile logouts while still keeping
+# refresh tokens revocable and rotated. This means a stolen access token may
+# remain usable until expiry unless the account itself is suspended/deleted.
+# On logout the refresh token is invalidated immediately, preventing new token
+# issuance while the access token expires naturally within 24 hours.
+JWT_ACCESS_TOKEN_LIFETIME = timedelta(days=1)
 JWT_REFRESH_TOKEN_LIFETIME = timedelta(days=30)
+JWT_REFRESH_ROTATION_GRACE_SECONDS = env.int("JWT_REFRESH_ROTATION_GRACE_SECONDS", default=30)
 JWT_ALGORITHM = "HS256"
 
 

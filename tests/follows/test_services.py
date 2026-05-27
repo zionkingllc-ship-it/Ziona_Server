@@ -85,3 +85,8 @@ class TestSuggestedCreators:
         suggestions = FollowService.get_suggested_creators(str(user_a.id))
         suggestion_ids = [s["user"].id for s in suggestions]
         assert str(user_a.id) not in suggestion_ids
+
+    def test_suggests_creators_without_posts_for_new_users(self, user_a, user_b):
+        suggestions = FollowService.get_suggested_creators(str(user_a.id))
+        suggestion_ids = [s["user"].id for s in suggestions]
+        assert str(user_b.id) in suggestion_ids

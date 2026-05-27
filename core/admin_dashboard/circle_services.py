@@ -464,6 +464,40 @@ class CircleManagementService:
         return _circle_to_dict(circle)
 
     @staticmethod
+    @transaction.atomic
+    def delete_circle(circle_id: str, admin_user, ip_address: str = "") -> dict:
+        """Soft-delete a circle and hide it from all active circle surfaces."""
+        from core.circles.models import Circle
+
+        circle = (
+            Circle.objects.select_for_update().filter(id=circle_id, deleted_at__isnull=True).first()
+        )
+
+        if not circle:
+            raise AdminError(message="Circle not found.", code=ErrorCode.CIRCLE_NOT_FOUND)
+
+        circle.status = "inactive"
+        circle.is_active = False
+        circle.deleted_at = datetime.now(timezone.utc)
+        circle.save(update_fields=["status", "is_active", "deleted_at", "updated_at"])
+
+        log_admin_action(
+            admin_user=admin_user,
+            action="CIRCLE_DELETED",
+            target_type="Circle",
+            target_id=str(circle.id),
+            details={"name": circle.name},
+            ip_address=ip_address,
+        )
+
+        logger.info(
+            "circle_deleted",
+            extra={"circle_id": circle_id, "admin_id": str(admin_user.id)},
+        )
+
+        return _circle_to_dict(circle)
+
+    @staticmethod
     def list_circle_members(
         circle_id: str,
         page: int = 1,

@@ -274,6 +274,9 @@ class AdminAnchorType:
     anchor_type: str = strawberry.field(name="anchorType")
     anchor_status: str = strawberry.field(name="anchorStatus")
     media_url: str = strawberry.field(name="mediaUrl")
+    anchor_image: str = strawberry.field(name="anchorImage", default="")
+    anchor_video: str = strawberry.field(name="anchorVideo", default="")
+    anchor_thumbnail: str = strawberry.field(name="anchorThumbnail", default="")
     preview_url: str | None = strawberry.field(name="previewUrl", default=None)
     scripture_book: str = strawberry.field(name="scriptureBook", default="")
     scripture_chapter: int | None = strawberry.field(name="scriptureChapter", default=None)
@@ -532,6 +535,9 @@ def _map_anchor(data: dict) -> AdminAnchorType:
         anchor_type=data["anchor_type"],
         anchor_status=data["anchor_status"],
         media_url=data.get("media_url", ""),
+        anchor_image=data.get("anchor_image", ""),
+        anchor_video=data.get("anchor_video", ""),
+        anchor_thumbnail=data.get("anchor_thumbnail", ""),
         preview_url=data.get("preview_url"),
         scripture_book=data.get("scripture_book", ""),
         scripture_chapter=data.get("scripture_chapter"),
@@ -1204,6 +1210,28 @@ class AdminDashboardMutations:
                 error=ErrorType(code=e.code, message=e.message),
             )
 
+    @strawberry.mutation(name="adminDeleteCircle", description="Soft-delete a circle.")
+    @admin_required
+    def admin_delete_circle(self, info: Info, circle_id: str) -> AdminCirclePayload:
+        from core.admin_dashboard.circle_services import CircleManagementService
+        from core.shared.exceptions import AdminError
+
+        admin_user = info.context.admin_user
+        ip = getattr(info.context, "admin_ip", "")
+
+        try:
+            result = CircleManagementService.delete_circle(
+                circle_id=circle_id,
+                admin_user=admin_user,
+                ip_address=ip,
+            )
+            return AdminCirclePayload(success=True, circle=_map_circle(result))
+        except AdminError as e:
+            return AdminCirclePayload(
+                success=False,
+                error=ErrorType(code=e.code, message=e.message),
+            )
+
     # ── Anchor Management ──
 
     @strawberry.mutation(name="adminCreateAnchor", description="Create a draft anchor.")
@@ -1222,6 +1250,9 @@ class AdminDashboardMutations:
         scripture_translation: str = "KJV",
         scripture_text: str = "",
         media_url: str = "",
+        anchor_image: str = "",
+        anchor_video: str = "",
+        anchor_thumbnail: str = "",
         style_data: strawberry.scalars.JSON | None = None,
     ) -> AdminAnchorPayload:
         from core.admin_dashboard.anchor_services import AnchorManagementService
@@ -1243,6 +1274,9 @@ class AdminDashboardMutations:
                 scripture_translation=scripture_translation,
                 scripture_text=scripture_text,
                 media_url=media_url,
+                anchor_image=anchor_image,
+                anchor_video=anchor_video,
+                anchor_thumbnail=anchor_thumbnail,
                 style_data=style_data,
                 admin_user=admin_user,
                 ip_address=ip,
@@ -1324,6 +1358,9 @@ class AdminDashboardMutations:
         title: str | None = None,
         content: str | None = None,
         media_url: str | None = None,
+        anchor_image: str | None = None,
+        anchor_video: str | None = None,
+        anchor_thumbnail: str | None = None,
         scripture_book: str | None = None,
         scripture_chapter: int | None = None,
         scripture_verse_start: int | None = None,
@@ -1345,6 +1382,9 @@ class AdminDashboardMutations:
                 title=title,
                 content=content,
                 media_url=media_url,
+                anchor_image=anchor_image,
+                anchor_video=anchor_video,
+                anchor_thumbnail=anchor_thumbnail,
                 scripture_book=scripture_book,
                 scripture_chapter=scripture_chapter,
                 scripture_verse_start=scripture_verse_start,

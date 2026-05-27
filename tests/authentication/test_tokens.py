@@ -1,4 +1,5 @@
 import pytest
+from django.conf import settings
 
 from core.authentication.tokens import TokenError, TokenService
 
@@ -13,6 +14,16 @@ class TestAccessToken:
 
         assert isinstance(token, str)
         assert len(token) > 0
+
+    def test_access_token_lifetime_is_one_day(self, create_user):
+        """Access tokens should last 24 hours."""
+        user = create_user()
+        token = TokenService.generate_access_token(str(user.id), user.role)
+        payload = TokenService.validate_access_token(token)
+
+        assert payload["exp"] - payload["iat"] == int(
+            settings.JWT_ACCESS_TOKEN_LIFETIME.total_seconds()
+        )
 
     def test_validate_access_token(self, create_user):
         """Valid access token should decode with correct payload."""
@@ -63,6 +74,16 @@ class TestRefreshToken:
         assert result["access_token"] != old_token
         assert result["refresh_token"] != old_token
 
+    def test_rotate_refresh_token_replay_uses_grace_result(self, create_user):
+        """Duplicate mobile refresh requests should receive the same rotated pair."""
+        user = create_user()
+        old_token, _ = TokenService.generate_refresh_token(str(user.id))
+
+        first = TokenService.rotate_refresh_token(old_token, user.role)
+        second = TokenService.rotate_refresh_token(old_token, user.role)
+
+        assert second == first
+
 
 class TestTokenBlacklist:
     """Test token blacklisting (logout)."""
@@ -73,9 +94,9 @@ class TestTokenBlacklist:
 
         Design note: validate_access_token is intentionally CPU-only and does
         NOT check the Redis blacklist on every request (see tokens.py docstring).
-        The 15-minute access token TTL makes the blacklist window short enough
-        that a per-request Redis check is unnecessary. The refresh token is
-        revoked immediately, so no new access tokens can be issued post-logout.
+        The access token TTL keeps the blacklist window bounded. The refresh
+        token is revoked immediately, so no new access tokens can be issued
+        post-logout.
         """
         from django_redis import get_redis_connection
 
@@ -86,7 +107,6 @@ class TestTokenBlacklist:
 
         TokenService.blacklist_access_token(token)
 
-        # Verify the blacklist entry was written to Redis
         redis_conn = get_redis_connection("default")
         assert redis_conn.exists(
             f"blacklist:{jti}"
