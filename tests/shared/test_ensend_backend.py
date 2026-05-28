@@ -218,6 +218,21 @@ class TestEdgeCases:
         assert "b@test.com" in payload["recipients"]
 
     @patch("core.shared.email_backends.ensend.requests.Session")
+    def test_short_subject_is_normalized(self, mock_session_cls, backend):
+        """Direct send_mail callers should also get provider-safe subjects."""
+        mock_session = MagicMock()
+        mock_response = MagicMock(ok=True, status_code=200)
+        mock_session.post.return_value = mock_response
+        mock_session_cls.return_value = mock_session
+
+        msg = EmailMessage(subject="OTP", body="body", to=["user@test.com"])
+        backend.send_messages([msg])
+
+        call_kwargs = mock_session.post.call_args
+        payload = call_kwargs.kwargs.get("json") or call_kwargs[1].get("json")
+        assert payload["subject"] == "OTP - Ziona"
+
+    @patch("core.shared.email_backends.ensend.requests.Session")
     def test_session_reuse(self, mock_session_cls, backend):
         """Session should be created once and reused across messages."""
         mock_session = MagicMock()

@@ -12,6 +12,9 @@ from django.core.mail import send_mail
 
 logger = logging.getLogger(__name__)
 
+_DEFAULT_EMAIL_SUBJECT = "Ziona Update"
+_MIN_PROVIDER_SUBJECT_LENGTH = 5
+
 
 @shared_task(
     bind=True,
@@ -51,14 +54,26 @@ def send_email_async(
     Returns:
         dict with 'success' and 'message' keys.
     """
+    safe_subject = _normalise_subject(subject)
+
     try:
         sender = from_email or settings.DEFAULT_FROM_EMAIL
+        if safe_subject != subject:
+            logger.warning(
+                "email_subject_normalized",
+                extra={
+                    "original_subject": subject,
+                    "subject": safe_subject,
+                    "recipients": recipient_list,
+                    "task_id": self.request.id,
+                },
+            )
 
         if html_message:
             from django.core.mail import EmailMultiAlternatives
 
             msg = EmailMultiAlternatives(
-                subject=subject,
+                subject=safe_subject,
                 body=message,
                 from_email=sender,
                 to=recipient_list,
@@ -67,7 +82,7 @@ def send_email_async(
             sent_count = msg.send(fail_silently=False)
         else:
             sent_count = send_mail(
-                subject=subject,
+                subject=safe_subject,
                 message=message,
                 from_email=sender,
                 recipient_list=recipient_list,
@@ -80,7 +95,7 @@ def send_email_async(
         logger.info(
             "email_sent",
             extra={
-                "subject": subject,
+                "subject": safe_subject,
                 "recipients": recipient_list,
                 "html": bool(html_message),
                 "sent_count": sent_count,
@@ -93,7 +108,7 @@ def send_email_async(
         logger.warning(
             f"Email send failed (attempt {self.request.retries + 1}/3): {exc}",
             extra={
-                "subject": subject,
+                "subject": safe_subject,
                 "recipients": recipient_list,
                 "task_id": self.request.id,
                 "error": str(exc),
@@ -104,9 +119,9 @@ def send_email_async(
             raise self.retry(exc=exc)
         except self.MaxRetriesExceededError:
             logger.error(
-                f"Email failed after 3 retries: {subject}",
+                f"Email failed after 3 retries: {safe_subject}",
                 extra={
-                    "subject": subject,
+                    "subject": safe_subject,
                     "recipients": recipient_list,
                     "task_id": self.request.id,
                     "error": str(exc),
@@ -114,3 +129,17 @@ def send_email_async(
                 exc_info=True,
             )
             return {"success": False, "message": f"Failed after retries: {exc}"}
+
+
+def _normalise_subject(subject: str | None) -> str:
+    """Return a provider-safe subject for Ensend/SMTPexpress.
+
+    Ensend rejects subjects shorter than five characters. Normalising here keeps
+    one-off callers and old queued tasks from causing repeated Celery retries.
+    """
+    cleaned = (subject or "").strip()
+    if len(cleaned) >= _MIN_PROVIDER_SUBJECT_LENGTH:
+        return cleaned
+    if cleaned:
+        return f"{cleaned} - Ziona"
+    return _DEFAULT_EMAIL_SUBJECT

@@ -10,6 +10,8 @@ logger = logging.getLogger("core.shared.email")
 
 _DEFAULT_API_URL = "https://api.smtpexpress.com/send"
 _DEFAULT_TIMEOUT = 10
+_DEFAULT_EMAIL_SUBJECT = "Ziona Update"
+_MIN_PROVIDER_SUBJECT_LENGTH = 5
 
 
 class EnsendEmailBackend(BaseEmailBackend):
@@ -120,8 +122,10 @@ class EnsendEmailBackend(BaseEmailBackend):
 
         from_email = message.from_email or self.sender_email
 
+        subject = _normalise_subject(message.subject)
+
         payload = {
-            "subject": message.subject,
+            "subject": subject,
             "message": body_content,
             "sender": {
                 "name": self.sender_name,
@@ -141,7 +145,7 @@ class EnsendEmailBackend(BaseEmailBackend):
             logger.warning(
                 "Ensend rate limit hit (HTTP 429). Email not sent — will not retry automatically.",
                 extra={
-                    "subject": message.subject,
+                    "subject": subject,
                     "recipients": message.to,
                 },
             )
@@ -159,7 +163,7 @@ class EnsendEmailBackend(BaseEmailBackend):
         logger.info(
             "Email sent via Ensend",
             extra={
-                "subject": message.subject,
+                "subject": subject,
                 "recipients": message.to,
                 "status_code": response.status_code,
             },
@@ -182,3 +186,13 @@ class EnsendEmailBackend(BaseEmailBackend):
                 if mimetype == "text/html":
                     return content
         return None
+
+
+def _normalise_subject(subject: str | None) -> str:
+    """Return a subject accepted by Ensend/SMTPexpress."""
+    cleaned = (subject or "").strip()
+    if len(cleaned) >= _MIN_PROVIDER_SUBJECT_LENGTH:
+        return cleaned
+    if cleaned:
+        return f"{cleaned} - Ziona"
+    return _DEFAULT_EMAIL_SUBJECT

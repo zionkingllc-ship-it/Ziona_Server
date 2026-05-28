@@ -124,3 +124,35 @@ class TestEmailTasks:
         mock_send_mail.assert_called_once()
         call_args = mock_send_mail.call_args
         assert call_args[1]["from_email"] == settings.DEFAULT_FROM_EMAIL
+
+    @patch("core.shared.tasks.email_tasks.send_mail")
+    def test_short_subject_is_normalized_before_send(self, mock_send_mail):
+        """Provider-invalid short subjects should be expanded before dispatch."""
+        mock_send_mail.return_value = 1
+
+        result = send_email_async(
+            subject="OTP",
+            message="Body",
+            from_email="test@ziona.app",
+            recipient_list=["user@example.com"],
+        )
+
+        assert result["success"] is True
+        mock_send_mail.assert_called_once()
+        assert mock_send_mail.call_args.kwargs["subject"] == "OTP - Ziona"
+
+    @patch("core.shared.tasks.email_tasks.send_mail")
+    def test_empty_subject_uses_default_subject(self, mock_send_mail):
+        """Empty subjects should never reach Ensend."""
+        mock_send_mail.return_value = 1
+
+        result = send_email_async(
+            subject="",
+            message="Body",
+            from_email="test@ziona.app",
+            recipient_list=["user@example.com"],
+        )
+
+        assert result["success"] is True
+        mock_send_mail.assert_called_once()
+        assert mock_send_mail.call_args.kwargs["subject"] == "Ziona Update"
