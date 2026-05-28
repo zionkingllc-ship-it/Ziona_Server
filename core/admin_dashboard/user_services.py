@@ -38,19 +38,15 @@ class UserManagementService:
 
         Returns:
             Dict with users list, total_count, page, page_size, total_pages,
-            and summary counts (total, active, warned, suspended).
+            and summary counts (total, active, warned, suspended, inactive, deleted).
         """
         from core.users.models import User, UserStatus
 
         page_size = min(page_size, 50)
         offset = (page - 1) * page_size
 
-        qs = (
-            User.objects.filter(deleted_at__isnull=True)
-            .annotate(
-                posts_count=Count("posts", filter=Q(posts__deleted_at__isnull=True)),
-            )
-            .select_related()
+        qs = User.all_objects.annotate(
+            posts_count=Count("posts", filter=Q(posts__deleted_at__isnull=True)),
         )
 
         if search:
@@ -61,17 +57,34 @@ class UserManagementService:
             )
 
         if status_filter:
-            qs = qs.filter(status=status_filter)
+            normalized_status = status_filter.strip().lower()
+            if normalized_status == "deleted":
+                qs = qs.filter(deleted_at__isnull=False)
+            elif normalized_status == "inactive":
+                qs = qs.filter(deleted_at__isnull=True, is_active=False)
+            else:
+                qs = qs.filter(status=normalized_status, deleted_at__isnull=True)
 
         total_count = qs.count()
         users = list(qs.order_by("-created_at")[offset : offset + page_size])
 
         # Summary counts (single query with conditional aggregation)
-        summary = User.objects.filter(deleted_at__isnull=True).aggregate(
+        summary = User.all_objects.aggregate(
             total=Count("id"),
-            active=Count("id", filter=Q(status=UserStatus.ACTIVE)),
-            warned=Count("id", filter=Q(status=UserStatus.WARNED)),
-            suspended=Count("id", filter=Q(status=UserStatus.SUSPENDED)),
+            active=Count(
+                "id",
+                filter=Q(deleted_at__isnull=True, is_active=True, status=UserStatus.ACTIVE),
+            ),
+            warned=Count(
+                "id",
+                filter=Q(deleted_at__isnull=True, is_active=True, status=UserStatus.WARNED),
+            ),
+            suspended=Count(
+                "id",
+                filter=Q(deleted_at__isnull=True, status=UserStatus.SUSPENDED),
+            ),
+            inactive=Count("id", filter=Q(deleted_at__isnull=True, is_active=False)),
+            deleted=Count("id", filter=Q(deleted_at__isnull=False)),
         )
 
         return {
@@ -544,6 +557,9 @@ def _user_to_dict(user) -> dict:
         "status": user.status,
         "role": user.role,
         "is_email_verified": user.is_email_verified,
+        "is_active": user.is_active,
+        "deleted_at": user.deleted_at.isoformat() if user.deleted_at else None,
+        "account_state": _account_state(user),
         "posts_count": posts_count,
         "warned_at": user.warned_at.isoformat() if user.warned_at else None,
         "suspended_at": user.suspended_at.isoformat() if user.suspended_at else None,
@@ -590,6 +606,8 @@ def _available_actions(user) -> list[str]:
 
     if getattr(user, "is_admin", False):
         return []
+    if getattr(user, "deleted_at", None):
+        return []
     if not getattr(user, "is_active", True):
         return ["reactivate", "delete"]
     if user.status == UserStatus.SUSPENDED:
@@ -597,6 +615,20 @@ def _available_actions(user) -> list[str]:
     if user.status == UserStatus.WARNED:
         return ["suspend", "delete"]
     return ["warn", "suspend", "delete"]
+
+
+def _account_state(user) -> str:
+    from core.users.models import UserStatus
+
+    if getattr(user, "deleted_at", None):
+        return "deleted"
+    if not getattr(user, "is_active", True):
+        return "inactive"
+    if user.status == UserStatus.SUSPENDED:
+        return "suspended"
+    if user.status == UserStatus.WARNED:
+        return "warned"
+    return "active"
 
 
 def _ensure_action_available(user, action: str) -> None:

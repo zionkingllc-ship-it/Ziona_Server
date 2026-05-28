@@ -299,7 +299,7 @@ class TokenRefreshView(BaseAuthView):
             )
 
         try:
-            result = AuthService.refresh_tokens(refresh_token)
+            result = AuthService.refresh_tokens(refresh_token, ip_address=_get_client_ip(request))
             return success_response(
                 data={
                     "tokens": build_tokens_dict(

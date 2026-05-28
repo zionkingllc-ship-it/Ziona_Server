@@ -39,14 +39,20 @@ class AdminModerationService:
         page_size = min(page_size, 50)
         offset = (page - 1) * page_size
 
-        qs = Report.objects.select_related(
-            "reporter",
-            "post",
-            "post__user",  # Eliminates N+1: _report_to_dict reads post.user.username
-            "comment",
-            "comment__user",  # Eliminates N+1: _report_to_dict reads comment.user.username
-            "reviewed_by",
-        ).order_by("-created_at")
+        qs = (
+            Report.objects.select_related(
+                "reporter",
+                "post",
+                "post__user",  # Eliminates N+1: _report_to_dict reads post.user.username
+                "comment",
+                "comment__user",  # Eliminates N+1: _report_to_dict reads comment.user.username
+                "comment__post",
+                "comment__post__user",
+                "reviewed_by",
+            )
+            .prefetch_related("post__post_media", "comment__post__post_media")
+            .order_by("-created_at")
+        )
 
         if status_filter:
             qs = qs.filter(status=status_filter)
@@ -262,14 +268,20 @@ def _report_to_dict(report) -> dict:
 
     content_preview = ""
     content_owner = ""
+    preview_post = None
     if report.post:
+        preview_post = report.post
         content_preview = (report.post.caption or "")[:200]
         if hasattr(report.post, "user") and report.post.user:
             content_owner = report.post.user.username
     elif report.comment:
+        preview_post = getattr(report.comment, "post", None)
         content_preview = (report.comment.text or "")[:200]
         if hasattr(report.comment, "user") and report.comment.user:
             content_owner = report.comment.user.username
+
+    content_media = _report_media_preview(preview_post)
+    first_media = content_media[0] if content_media else {}
 
     reviewed_by_name = ""
     if report.reviewed_by:
@@ -289,7 +301,33 @@ def _report_to_dict(report) -> dict:
         "internal_notes": report.internal_notes or "",
         "content_preview": content_preview,
         "content_owner": content_owner,
+        "content_media_url": first_media.get("url", ""),
+        "content_media_type": first_media.get("media_type", ""),
+        "content_thumbnail_url": first_media.get("thumbnail_url", ""),
+        "content_media": content_media,
         "reviewed_by_name": reviewed_by_name,
         "reviewed_at": report.reviewed_at.isoformat() if report.reviewed_at else None,
         "created_at": report.created_at.isoformat(),
     }
+
+
+def _report_media_preview(post) -> list[dict]:
+    """Return ordered media previews for a reported post/comment context."""
+    if not post:
+        return []
+
+    media_items = []
+    for media in post.post_media.all():
+        thumbnail_url = media.thumbnail_url or ""
+        if media.media_type == "image" and not thumbnail_url:
+            thumbnail_url = media.media_url
+        media_items.append(
+            {
+                "url": media.media_url,
+                "media_type": media.media_type or post.post_type,
+                "thumbnail_url": thumbnail_url,
+                "order": media.order,
+            }
+        )
+
+    return media_items

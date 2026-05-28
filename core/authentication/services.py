@@ -20,6 +20,7 @@ from django.db import IntegrityError, transaction
 from django.utils import timezone
 
 from core.authentication.account_status import ensure_account_can_authenticate
+from core.authentication.activity import record_successful_auth
 from core.authentication.otp_service import OTPService
 from core.authentication.tokens import TokenError, TokenService
 from core.authentication.validators import (
@@ -245,8 +246,7 @@ class AuthService:
                 "requires_verification": True,
             }
 
-        user.last_login_ip = ip_address
-        user.save(update_fields=["last_login_ip", "updated_at"])
+        record_successful_auth(user, ip_address)
 
         access_token = TokenService.generate_access_token(str(user.id), user.role)
         refresh_token, _ = TokenService.generate_refresh_token(str(user.id))
@@ -466,7 +466,10 @@ class AuthService:
         return suggestions[:4]
 
     @staticmethod
-    def refresh_tokens(refresh_token: str) -> dict[str, str]:
+    def refresh_tokens(
+        refresh_token: str,
+        ip_address: str | None = None,
+    ) -> dict[str, str]:
         """Rotate a refresh token for a new access/refresh token pair."""
         try:
             payload = TokenService.validate_refresh_token(refresh_token)
@@ -478,7 +481,9 @@ class AuthService:
             except User.DoesNotExist:
                 raise TokenError("User not found") from None
             try:
-                return TokenService.rotate_refresh_token(refresh_token, role)
+                result = TokenService.rotate_refresh_token(refresh_token, role)
+                record_successful_auth(user, ip_address)
+                return result
             except TokenError as e:
                 raise AuthenticationError(str(e), code="INVALID_REFRESH_TOKEN") from e
         except AuthenticationError:

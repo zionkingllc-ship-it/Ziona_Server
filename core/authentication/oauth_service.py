@@ -12,6 +12,7 @@ from google.auth.transport import requests as google_requests
 from google.oauth2 import id_token as google_id_token
 
 from core.authentication.account_status import ensure_account_can_authenticate
+from core.authentication.activity import record_successful_auth
 from core.authentication.tokens import TokenService
 from core.authentication.validators import AuthenticationError
 from core.shared.logging import log_security_event
@@ -132,8 +133,7 @@ class OAuthService:
             user.save()
             is_new_user = True
 
-        user.last_login_ip = ip_address
-        user.save(update_fields=["last_login_ip", "updated_at"])
+        record_successful_auth(user, ip_address)
 
         access_token = TokenService.generate_access_token(str(user.id), user.role)
         refresh_token, _ = TokenService.generate_refresh_token(str(user.id))
@@ -247,8 +247,7 @@ class OAuthService:
                 user.save()
                 is_new_user = True
 
-        user.last_login_ip = ip_address
-        user.save(update_fields=["last_login_ip", "updated_at"])
+        record_successful_auth(user, ip_address)
 
         access_token = TokenService.generate_access_token(str(user.id), user.role)
         refresh_token, _ = TokenService.generate_refresh_token(str(user.id))

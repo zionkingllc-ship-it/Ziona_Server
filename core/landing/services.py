@@ -116,6 +116,17 @@ class ContactService:
             )
 
             if not is_spam:
+                from core.admin_dashboard.models import ContactMessage
+
+                ContactMessage.objects.create(
+                    name=name,
+                    email=email,
+                    message=message,
+                    source="landing_page",
+                    brand=submission.brand,
+                    ip_address=ip_address or None,
+                )
+
                 submission_brand = submission.brand
 
                 def _send_emails() -> None:

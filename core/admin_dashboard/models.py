@@ -172,6 +172,8 @@ class ContactMessage(models.Model):
         name: Sender's name.
         email: Sender's email for replies.
         message: The support message body.
+        source: Origin of the ticket (mobile_app, landing_page, admin_dashboard).
+        brand: Optional brand/app context for routed submissions.
         status: Current ticket status.
         replied_at: Timestamp of the first admin reply.
     """
@@ -180,6 +182,9 @@ class ContactMessage(models.Model):
     name = models.CharField(max_length=255)
     email = models.EmailField()
     message = models.TextField()
+    source = models.CharField(max_length=50, default="mobile_app", db_index=True)
+    brand = models.CharField(max_length=50, blank=True, default="")
+    ip_address = models.GenericIPAddressField(null=True, blank=True)
     status = models.CharField(
         max_length=20,
         choices=ContactStatus.choices,
@@ -194,6 +199,7 @@ class ContactMessage(models.Model):
         ordering = ["-created_at"]
         indexes = [
             models.Index(fields=["status", "-created_at"], name="idx_contact_status_created"),
+            models.Index(fields=["source", "-created_at"], name="idx_contact_source_created"),
         ]
 
     def __str__(self) -> str:

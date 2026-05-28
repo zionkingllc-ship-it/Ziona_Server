@@ -384,7 +384,11 @@ class AuthMutations:
         from core.authentication.services import AuthenticationError, AuthService
 
         try:
-            result = AuthService.refresh_tokens(refresh_token)
+            request = info.context.request
+            result = AuthService.refresh_tokens(
+                refresh_token,
+                ip_address=request.META.get("REMOTE_ADDR", "unknown"),
+            )
             return AuthPayload(
                 success=True,
                 access_token=result["access_token"],

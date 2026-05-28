@@ -11,6 +11,7 @@ import string
 from typing import Any
 
 from core.authentication.account_status import ensure_account_can_authenticate
+from core.authentication.activity import record_successful_auth
 from core.authentication.tokens import TokenService
 from core.authentication.validators import AuthenticationError, validate_password
 from core.shared.logging import log_security_event, mask_email
@@ -214,6 +215,7 @@ class PasswordService:
         user.save(update_fields=["password", "updated_at"])
 
         TokenService.revoke_all_user_tokens(str(user.id))
+        record_successful_auth(user, ip_address)
 
         access_token = TokenService.generate_access_token(str(user.id), user.role)
         refresh_token, _ = TokenService.generate_refresh_token(str(user.id))

@@ -246,10 +246,10 @@ class AnalyticsService:
         days = _time_range_to_days(time_range)
         from django.utils import timezone
 
-        start_date = timezone.now().date() - timedelta(days=days)
+        start_date = timezone.now().date() - timedelta(days=days - 1)
 
         entries = (
-            DailyAnalytics.objects.filter(date__gte=start_date)
+            DailyAnalytics.objects.filter(date__gte=start_date, date__lte=timezone.now().date())
             .order_by("date")
             .values("date", "total_users", "new_users")
         )
@@ -291,10 +291,10 @@ class AnalyticsService:
         days = _time_range_to_days(time_range)
         from django.utils import timezone
 
-        start_date = timezone.now().date() - timedelta(days=days)
+        start_date = timezone.now().date() - timedelta(days=days - 1)
 
         entries = (
-            DailyAnalytics.objects.filter(date__gte=start_date)
+            DailyAnalytics.objects.filter(date__gte=start_date, date__lte=timezone.now().date())
             .order_by("date")
             .values("date", "posts_count", "comments_count")
         )
@@ -329,10 +329,10 @@ class AnalyticsService:
         days = _time_range_to_days(time_range)
         from django.utils import timezone
 
-        start_date = timezone.now().date() - timedelta(days=days)
+        start_date = timezone.now().date() - timedelta(days=days - 1)
 
         entries = (
-            DailyAnalytics.objects.filter(date__gte=start_date)
+            DailyAnalytics.objects.filter(date__gte=start_date, date__lte=timezone.now().date())
             .order_by("date")
             .values("date", "reports_received", "reports_resolved", "avg_resolution_minutes")
         )
@@ -379,6 +379,7 @@ def _calc_percentage_change(old: int | float, new: int | float) -> float:
 
 def _time_range_to_days(time_range: str) -> int:
     """Convert time range string to number of days."""
+    time_range = (time_range or "").lower()
     mapping = {
         "today": 1,
         "last_week": 7,
@@ -386,6 +387,91 @@ def _time_range_to_days(time_range: str) -> int:
         "last_quarter": 90,
     }
     return mapping.get(time_range, 30)
+
+
+def _daily_analytics_snapshot(day) -> dict:
+    """Compute a single day's analytics directly from source tables."""
+    from core.engagement.models import Comment
+    from core.moderation.models import Report, ReportStatus
+    from core.posts.models import Post
+    from core.users.models import User
+
+    day_start = datetime.combine(day, datetime.min.time()).replace(tzinfo=timezone.utc)
+    day_end = day_start + timedelta(days=1)
+
+    total_users = User.objects.filter(
+        deleted_at__isnull=True,
+        created_at__lt=day_end,
+    ).count()
+    new_users = User.objects.filter(
+        deleted_at__isnull=True,
+        created_at__gte=day_start,
+        created_at__lt=day_end,
+    ).count()
+
+    week_start = day_start - timedelta(days=6)
+    month_start = day_start - timedelta(days=29)
+
+    dau = User.objects.filter(
+        deleted_at__isnull=True,
+        last_login__gte=day_start,
+        last_login__lt=day_end,
+    ).count()
+    wau = User.objects.filter(
+        deleted_at__isnull=True,
+        last_login__gte=week_start,
+        last_login__lt=day_end,
+    ).count()
+    mau = User.objects.filter(
+        deleted_at__isnull=True,
+        last_login__gte=month_start,
+        last_login__lt=day_end,
+    ).count()
+
+    posts_count = Post.objects.filter(
+        deleted_at__isnull=True,
+        created_at__gte=day_start,
+        created_at__lt=day_end,
+    ).count()
+    comments_count = Comment.objects.filter(
+        deleted_at__isnull=True,
+        created_at__gte=day_start,
+        created_at__lt=day_end,
+    ).count()
+    reports_received = Report.objects.filter(
+        created_at__gte=day_start,
+        created_at__lt=day_end,
+    ).count()
+    reports_resolved = Report.objects.filter(
+        reviewed_at__gte=day_start,
+        reviewed_at__lt=day_end,
+        status__in=[ReportStatus.REVIEWED, ReportStatus.ACTIONED, ReportStatus.DISMISSED],
+    ).count()
+
+    resolved_reports = Report.objects.filter(
+        reviewed_at__gte=day_start,
+        reviewed_at__lt=day_end,
+        reviewed_at__isnull=False,
+    ).values_list("created_at", "reviewed_at")
+    avg_resolution = 0.0
+    if resolved_reports.exists():
+        deltas = [
+            (reviewed - created).total_seconds() / 60 for created, reviewed in resolved_reports
+        ]
+        avg_resolution = round(sum(deltas) / len(deltas), 1) if deltas else 0.0
+
+    return {
+        "total_users": total_users,
+        "new_users": new_users,
+        "dau": dau,
+        "wau": wau,
+        "mau": mau,
+        "posts_count": posts_count,
+        "comments_count": comments_count,
+        "reports_received": reports_received,
+        "reports_resolved": reports_resolved,
+        "avg_resolution_minutes": avg_resolution,
+    }
 
 
 def _fill_date_gaps(days: int, db_entries, date_fields: list[str]) -> dict:
@@ -408,10 +494,13 @@ def _fill_date_gaps(days: int, db_entries, date_fields: list[str]) -> dict:
     baseline: dict = {}
     today = timezone.now().date()
 
-    # Seed every day in the window with zeros (oldest → newest)
-    for i in range(days, 0, -1):
+    # Seed every day in the window with live source values (oldest → newest).
+    # This keeps the analytics page useful before the nightly Celery aggregate
+    # has run or when a historical row is missing.
+    for i in range(days - 1, -1, -1):
         day = today - timedelta(days=i)
-        baseline[day] = {field: 0 for field in date_fields}
+        live_values = _daily_analytics_snapshot(day)
+        baseline[day] = {field: live_values.get(field, 0) for field in date_fields}
 
     # Merge real DB values where rows exist
     for entry in db_entries:

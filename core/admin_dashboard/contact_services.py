@@ -46,6 +46,8 @@ class ContactService:
                 Q(name__icontains=search)
                 | Q(email__icontains=search)
                 | Q(message__icontains=search)
+                | Q(source__icontains=search)
+                | Q(brand__icontains=search)
             )
 
         total_count = qs.count()
@@ -176,7 +178,14 @@ class ContactService:
         return {"success": True, "contact": _contact_to_dict(contact)}
 
     @staticmethod
-    def submit_message(name: str, email: str, message: str, ip_address: str = "") -> dict:
+    def submit_message(
+        name: str,
+        email: str,
+        message: str,
+        ip_address: str = "",
+        source: str = "mobile_app",
+        brand: str = "",
+    ) -> dict:
         """Public endpoint: submit a contact/support message.
 
         Rate-limited to 5 submissions per IP per 10-minute rolling window to
@@ -224,9 +233,12 @@ class ContactService:
             )
 
         contact = ContactMessage.objects.create(
-            name=name,
-            email=email,
-            message=message,
+            name=name.strip(),
+            email=email.strip().lower(),
+            message=message.strip(),
+            source=(source or "mobile_app").strip()[:50],
+            brand=(brand or "").strip()[:50],
+            ip_address=ip_address or None,
         )
 
         logger.info(
@@ -268,6 +280,8 @@ def _contact_to_dict(contact) -> dict:
         "name": contact.name,
         "email": contact.email,
         "message": contact.message,
+        "source": contact.source,
+        "brand": contact.brand,
         "status": contact.status,
         "replies": replies,
         "replied_at": contact.replied_at.isoformat() if contact.replied_at else None,

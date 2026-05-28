@@ -141,8 +141,11 @@ class AdminUserType:
     avatar_url: str = strawberry.field(name="avatarUrl")
     bio: str
     status: str
+    account_state: str = strawberry.field(name="accountState")
     role: str
     is_email_verified: bool = strawberry.field(name="isEmailVerified")
+    is_active: bool = strawberry.field(name="isActive")
+    deleted_at: str | None = strawberry.field(name="deletedAt", default=None)
     posts_count: int = strawberry.field(name="postsCount")
     warned_at: str | None = strawberry.field(name="warnedAt", default=None)
     suspended_at: str | None = strawberry.field(name="suspendedAt", default=None)
@@ -160,6 +163,8 @@ class UserSummaryType:
     active: int
     warned: int
     suspended: int
+    inactive: int = 0
+    deleted: int = 0
 
 
 @strawberry.type
@@ -328,6 +333,16 @@ class ReporterType:
 
 
 @strawberry.type
+class AdminReportMediaType:
+    """Media preview item for reported content."""
+
+    url: str
+    media_type: str = strawberry.field(name="mediaType")
+    thumbnail_url: str = strawberry.field(name="thumbnailUrl", default="")
+    order: int
+
+
+@strawberry.type
 class AdminReportType:
     """Admin-facing report representation."""
 
@@ -344,6 +359,12 @@ class AdminReportType:
     internal_notes: str = strawberry.field(name="internalNotes")
     content_preview: str = strawberry.field(name="contentPreview")
     content_owner: str = strawberry.field(name="contentOwner")
+    content_media_url: str = strawberry.field(name="contentMediaUrl", default="")
+    content_media_type: str = strawberry.field(name="contentMediaType", default="")
+    content_thumbnail_url: str = strawberry.field(name="contentThumbnailUrl", default="")
+    content_media: list[AdminReportMediaType] = strawberry.field(
+        name="contentMedia", default_factory=list
+    )
     reviewed_by_name: str = strawberry.field(name="reviewedByName")
     reviewed_at: str | None = strawberry.field(name="reviewedAt", default=None)
     created_at: str = strawberry.field(name="createdAt")
@@ -404,6 +425,8 @@ class AdminContactType:
     name: str
     email: str
     message: str
+    source: str
+    brand: str
     status: str
     replies: list[ContactReplyType]
     replied_at: str | None = strawberry.field(name="repliedAt", default=None)
@@ -495,8 +518,11 @@ def _map_user(data: dict) -> AdminUserType:
         avatar_url=data["avatar_url"],
         bio=data["bio"],
         status=data["status"],
+        account_state=data.get("account_state", data["status"]),
         role=data["role"],
         is_email_verified=data["is_email_verified"],
+        is_active=data.get("is_active", True),
+        deleted_at=data.get("deleted_at"),
         posts_count=data["posts_count"],
         warned_at=data.get("warned_at"),
         suspended_at=data.get("suspended_at"),
@@ -578,6 +604,18 @@ def _map_report(data: dict) -> AdminReportType:
         internal_notes=data.get("internal_notes", ""),
         content_preview=data.get("content_preview", ""),
         content_owner=data.get("content_owner", ""),
+        content_media_url=data.get("content_media_url", ""),
+        content_media_type=data.get("content_media_type", ""),
+        content_thumbnail_url=data.get("content_thumbnail_url", ""),
+        content_media=[
+            AdminReportMediaType(
+                url=item["url"],
+                media_type=item["media_type"],
+                thumbnail_url=item.get("thumbnail_url", ""),
+                order=item.get("order", 0),
+            )
+            for item in data.get("content_media", [])
+        ],
         reviewed_by_name=data.get("reviewed_by_name", ""),
         reviewed_at=data.get("reviewed_at"),
         created_at=data["created_at"],
@@ -600,6 +638,8 @@ def _map_contact(data: dict) -> AdminContactType:
         name=data["name"],
         email=data["email"],
         message=data["message"],
+        source=data.get("source", ""),
+        brand=data.get("brand", ""),
         status=data["status"],
         replies=replies,
         replied_at=data.get("replied_at"),
