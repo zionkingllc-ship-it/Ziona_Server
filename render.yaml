@@ -46,6 +46,8 @@ services:
         sync: false
       - key: GOOGLE_CLIENT_IDS
         sync: false
+      - key: APPLE_BUNDLE_ID
+        value: com.zionking.ziona
       - key: APPLE_CLIENT_IDS
         sync: false
       - key: ENSEND_API_KEY

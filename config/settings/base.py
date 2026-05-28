@@ -336,6 +336,7 @@ APPLE_PUBLIC_KEYS_CACHE_TIMEOUT = env.int("APPLE_PUBLIC_KEYS_CACHE_TIMEOUT", def
 APPLE_PUBLIC_KEYS_REQUEST_TIMEOUT = env.int("APPLE_PUBLIC_KEYS_REQUEST_TIMEOUT", default=5)
 APPLE_NONCE_TTL_SECONDS = env.int("APPLE_NONCE_TTL_SECONDS", default=10 * 60)
 APPLE_REQUIRE_SERVER_NONCE = env.bool("APPLE_REQUIRE_SERVER_NONCE", default=True)
+APPLE_DEFAULT_CLIENT_IDS = ["com.zionking.ziona"]
 APPLE_CLIENT_ID = env(
     "APPLE_CLIENT_ID",
     default=env("APPLE_SERVICE_ID", default=env("APPLE_BUNDLE_ID", default="")),
@@ -346,6 +347,7 @@ def _apple_client_ids() -> list[str]:
     """Return the allowlist of first-party Apple audiences accepted by the backend."""
     configured_ids = env.list("APPLE_CLIENT_IDS", default=[])
     legacy_ids = [
+        *APPLE_DEFAULT_CLIENT_IDS,
         APPLE_CLIENT_ID,
         env("APPLE_SERVICE_ID", default=""),
         env("APPLE_BUNDLE_ID", default=""),

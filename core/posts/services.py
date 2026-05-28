@@ -573,6 +573,13 @@ class PostService:
                 is_owner=is_owner if is_owner is not None else (user_id_str == viewer_id),
             )
 
+            # Contract invariant for mobile: if the viewer has liked the post,
+            # the visible count must include that like. This protects clients
+            # from stale annotations or privacy/fallback paths that would
+            # otherwise produce viewerState.liked=true with likesCount=0.
+            if is_liked and stats.likes_count < 1:
+                stats.likes_count = 1
+
         scripture = None
         if post.scripture_book and post.scripture_chapter and post.scripture_verse_start:
             from core.scripture.services import ScriptureService
