@@ -110,7 +110,7 @@ class User(AbstractBaseUser, PermissionsMixin):
 
     auth_provider = models.CharField(
         max_length=20,
-        choices=[("email", "Email"), ("google", "Google")],
+        choices=[("email", "Email"), ("google", "Google"), ("apple", "Apple")],
         default="email",
     )
     firebase_uid = models.CharField(
@@ -133,6 +133,13 @@ class User(AbstractBaseUser, PermissionsMixin):
         help_text="How the user originally registered. Null = email/password",
     )
     google_id = models.CharField(max_length=255, null=True, blank=True, unique=True)
+    apple_sub = models.CharField(
+        max_length=255,
+        null=True,
+        blank=True,
+        unique=True,
+        help_text="Stable Sign in with Apple subject claim for this developer team.",
+    )
 
     objects = UserManager()
     all_objects = AllObjectsManager()

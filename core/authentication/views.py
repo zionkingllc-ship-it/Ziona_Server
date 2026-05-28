@@ -64,6 +64,11 @@ def _auth_error_response(e: AuthenticationError) -> JsonResponse:
         "REAUTHENTICATION_REQUIRED": 400,
         "DELETION_ACKNOWLEDGEMENT_REQUIRED": 400,
         "PASSWORD_AUTH_UNAVAILABLE": 400,
+        "APPLE_KEYS_TIMEOUT": 503,
+        "APPLE_KEYS_UNAVAILABLE": 503,
+        "APPLE_KEYS_INVALID": 503,
+        "OAUTH_NOT_CONFIGURED": 503,
+        "APPLE_TOKEN_EXPIRED": 401,
     }
     status_code = status_map.get(e.code, 400)
 
@@ -550,6 +555,74 @@ class GoogleOAuthView(BaseAuthView):
             return success_response(data=response_data)
         except AuthenticationError as e:
             logger.warning("Google OAuth failed: code=%s", e.code)
+            return _auth_error_response(e)
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class AppleNonceView(BaseAuthView):
+    """Issue a short-lived nonce challenge for Sign in with Apple.
+
+    POST /api/auth/apple/nonce
+    Returns: { rawNonce, nonce, expiresIn }
+    """
+
+    def post(self, request: HttpRequest) -> JsonResponse:
+        from core.authentication.apple_oauth import create_apple_nonce
+
+        return success_response(data=create_apple_nonce())
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class AppleOAuthView(BaseAuthView):
+    """Sign in with Apple endpoint.
+
+    POST /api/auth/apple
+    Body: { identityToken, rawNonce, nonce?, user? }
+    Returns tokens and user info with isNewUser flag.
+    """
+
+    def post(self, request: HttpRequest) -> JsonResponse:
+        data = _parse_json_body(request)
+        identity_token = data.get("identity_token") or data.get("identityToken") or ""
+        raw_nonce = data.get("raw_nonce") or data.get("rawNonce")
+        nonce = data.get("nonce")
+        apple_user = data.get("user") or {}
+
+        if not identity_token:
+            return error_response(
+                message="Apple identity token is required",
+                code="MISSING_FIELDS",
+            )
+
+        try:
+            result = AuthService.apple_oauth_login(
+                identity_token=identity_token,
+                nonce=nonce,
+                raw_nonce=raw_nonce,
+                apple_user=apple_user,
+                ip_address=_get_client_ip(request),
+            )
+
+            response_data = {
+                "user": {
+                    "id": str(result["user"].id),
+                    "email": result["user"].email,
+                    "username": result["user"].username,
+                    "role": result["user"].role,
+                    "isEmailVerified": result["user"].is_email_verified,
+                    "needsUsernameSelection": getattr(
+                        result["user"], "needs_username_selection", False
+                    ),
+                },
+                "tokens": build_tokens_dict(
+                    result["access_token"],
+                    result["refresh_token"],
+                ),
+                "isNewUser": result["is_new_user"],
+            }
+            return success_response(data=response_data)
+        except AuthenticationError as e:
+            logger.warning("Apple OAuth failed: code=%s", e.code)
             return _auth_error_response(e)
 
 

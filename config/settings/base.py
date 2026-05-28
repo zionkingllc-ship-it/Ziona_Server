@@ -326,6 +326,44 @@ def _google_client_ids() -> list[str]:
 
 GOOGLE_CLIENT_IDS = _google_client_ids()
 
+APPLE_ID_TOKEN_ISSUER = "https://appleid.apple.com"
+APPLE_PUBLIC_KEYS_URL = env(
+    "APPLE_PUBLIC_KEYS_URL",
+    default="https://appleid.apple.com/auth/keys",
+)
+APPLE_PUBLIC_KEYS_CACHE_KEY = "apple_signin_public_keys"
+APPLE_PUBLIC_KEYS_CACHE_TIMEOUT = env.int("APPLE_PUBLIC_KEYS_CACHE_TIMEOUT", default=24 * 60 * 60)
+APPLE_PUBLIC_KEYS_REQUEST_TIMEOUT = env.int("APPLE_PUBLIC_KEYS_REQUEST_TIMEOUT", default=5)
+APPLE_NONCE_TTL_SECONDS = env.int("APPLE_NONCE_TTL_SECONDS", default=10 * 60)
+APPLE_REQUIRE_SERVER_NONCE = env.bool("APPLE_REQUIRE_SERVER_NONCE", default=True)
+APPLE_CLIENT_ID = env(
+    "APPLE_CLIENT_ID",
+    default=env("APPLE_SERVICE_ID", default=env("APPLE_BUNDLE_ID", default="")),
+)
+
+
+def _apple_client_ids() -> list[str]:
+    """Return the allowlist of first-party Apple audiences accepted by the backend."""
+    configured_ids = env.list("APPLE_CLIENT_IDS", default=[])
+    legacy_ids = [
+        APPLE_CLIENT_ID,
+        env("APPLE_SERVICE_ID", default=""),
+        env("APPLE_BUNDLE_ID", default=""),
+        env("APPLE_IOS_CLIENT_ID", default=""),
+    ]
+
+    seen = set()
+    result = []
+    for client_id in [*legacy_ids, *configured_ids]:
+        normalized = client_id.strip()
+        if normalized and normalized not in seen:
+            seen.add(normalized)
+            result.append(normalized)
+    return result
+
+
+APPLE_CLIENT_IDS = _apple_client_ids()
+
 
 BCRYPT_COST_FACTOR = env.int("BCRYPT_COST_FACTOR", default=12)
 

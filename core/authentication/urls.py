@@ -11,6 +11,8 @@ from core.authentication.otp_views import (
     UnifiedVerifyOTPView,
 )
 from core.authentication.views import (
+    AppleNonceView,
+    AppleOAuthView,
     CheckEmailView,
     DeactivateAccountView,
     DeleteAccountView,
@@ -47,6 +49,8 @@ urlpatterns = [
         name="password-reset-confirm",
     ),
     path("google", GoogleOAuthView.as_view(), name="google-oauth"),
+    path("apple/nonce", AppleNonceView.as_view(), name="apple-nonce"),
+    path("apple", AppleOAuthView.as_view(), name="apple-oauth"),
     path("me", MeView.as_view(), name="me"),
     path("deactivate", DeactivateAccountView.as_view(), name="deactivate-account"),
     path("delete-account", DeleteAccountView.as_view(), name="delete-account"),

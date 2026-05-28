@@ -552,3 +552,21 @@ class AuthService:
         from core.authentication.oauth_service import OAuthService
 
         return OAuthService.google_oauth_login(id_token, ip_address)
+
+    @staticmethod
+    def apple_oauth_login(
+        identity_token,
+        nonce=None,
+        raw_nonce=None,
+        apple_user=None,
+        ip_address=None,
+    ):
+        from core.authentication.oauth_service import OAuthService
+
+        return OAuthService.apple_oauth_login(
+            identity_token=identity_token,
+            nonce=nonce,
+            raw_nonce=raw_nonce,
+            apple_user=apple_user,
+            ip_address=ip_address,
+        )

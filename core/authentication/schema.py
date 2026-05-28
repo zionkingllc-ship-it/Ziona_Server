@@ -588,6 +588,44 @@ class AuthMutations:
             )
 
     @strawberry.mutation(
+        description="Authenticate user via Sign in with Apple. Requires a verified identityToken and nonce."
+    )
+    def apple_oauth(
+        self,
+        info: strawberry.types.Info,
+        identity_token: str,
+        raw_nonce: str | None = None,
+        nonce: str | None = None,
+        user: strawberry.scalars.JSON | None = None,
+    ) -> GoogleOAuthPayload:
+        """Authenticate user via Sign in with Apple."""
+        from core.authentication.oauth_service import OAuthService
+        from core.authentication.validators import AuthenticationError
+
+        request = info.context.request
+        try:
+            result = OAuthService.apple_oauth_login(
+                identity_token=identity_token,
+                raw_nonce=raw_nonce,
+                nonce=nonce,
+                apple_user=user or {},
+                ip_address=request.META.get("REMOTE_ADDR", "unknown"),
+            )
+            return GoogleOAuthPayload(
+                success=True,
+                user=UserType.from_model(result["user"]),
+                access_token=result["access_token"],
+                refresh_token=result["refresh_token"],
+                is_new_user=result["is_new_user"],
+            )
+        except AuthenticationError as e:
+            return GoogleOAuthPayload(
+                success=False,
+                message=e.message,
+                error_code=e.code,
+            )
+
+    @strawberry.mutation(
         description="Send one-time password code via email. Supports three purposes: registration, email_verification, password_reset. Rate-limited to 3 requests per 10 minutes."
     )
     def send_otp(
