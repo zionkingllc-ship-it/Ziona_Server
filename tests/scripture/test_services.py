@@ -5,6 +5,7 @@ from django.core.cache import cache
 
 from core.posts.models import PostType
 from core.posts.services import PostService
+from core.scripture.constants import get_translation_id, normalize_translation
 from core.scripture.exceptions import ScriptureError
 from core.scripture.providers.jsdelivr import JSDelivrScriptureService
 from core.scripture.services import ScriptureService
@@ -20,6 +21,13 @@ MOCK_MANIFEST = [
         "scope": "Bible with Deuterocanon",
     },
     {
+        "id": "th-kjv",
+        "version": "Thai KJV",
+        "language": {"name": "Thai", "code": "tha"},
+        "localVersionAbbreviation": "Thai KJV",
+        "scope": "Bible",
+    },
+    {
         "id": "en-asv",
         "version": "American Standard Version",
         "language": {"name": "English", "code": "eng"},
@@ -32,6 +40,13 @@ MOCK_MANIFEST = [
         "language": {"name": "English", "code": "eng"},
         "localVersionAbbreviation": "WEB",
         "scope": "Bible with Deuterocanon",
+    },
+    {
+        "id": "en-rv",
+        "version": "Revised Version 1885",
+        "language": {"name": "English", "code": "eng"},
+        "localVersionAbbreviation": "RV",
+        "scope": "Bible",
     },
     {
         "id": "es-rv09",
@@ -136,6 +151,21 @@ class TestScriptureService:
         result = ScriptureService.fetch_verse("Genesis", 1, 1, version="web")
         assert result["version"] == "WEB"
 
+    @pytest.mark.parametrize("alias", ["rv", "RV 1885", "RV1885", "Revised Version 1885"])
+    @patch("core.scripture.providers.jsdelivr.requests.get")
+    def test_fetch_verse_accepts_rv_aliases(self, mock_get, alias):
+        """4b. RV aliases resolve to the RV provider and return RV 1885."""
+        mock_response = MagicMock()
+        mock_response.json.return_value = {"text": "RV text"}
+        mock_response.raise_for_status.return_value = None
+        mock_get.return_value = mock_response
+
+        result = ScriptureService.fetch_verse("John", 1, 1, version=alias)
+
+        assert result["text"] == "RV text"
+        assert result["version"] == "RV 1885"
+        assert "/en-rv/books/john/" in mock_get.call_args.args[0]
+
     def test_unknown_version_raises_scripture_error(self):
         """5. Unknown version raises ScriptureError."""
         with pytest.raises(ScriptureError) as exc_info:
@@ -210,22 +240,25 @@ class TestScriptureService:
 
         assert exc_info.value.code == "CAPTION_TOO_LONG"
 
-    def test_available_versions_returns_all_manifest_versions(self):
-        """10. get_available_versions returns all versions from manifest (filtered by FREE_BIBLE_VERSIONS)."""
-        # Patch where it's imported in services.py
-        with patch(
-            "core.scripture.services.FREE_BIBLE_VERSIONS", ["kjv", "asv", "web", "rv09", "t4t"]
-        ):
-            versions = ScriptureService.get_available_versions()
-            assert len(versions) == len(MOCK_MANIFEST)
-            assert all(v["free"] for v in versions)
+    def test_available_versions_returns_exact_supported_english_versions(self):
+        """10. get_available_versions returns only the exact English launch versions."""
+        versions = ScriptureService.get_available_versions()
 
-            for v in versions:
-                assert "code" in v
-                assert "name" in v
-                assert "abbreviation" in v
-                assert "language" in v
-                assert "scope" in v
+        assert [v["code"] for v in versions] == ["kjv", "asv", "web", "rv"]
+        assert [v["abbreviation"] for v in versions] == ["KJV", "ASV", "WEB", "RV 1885"]
+        assert all(v["free"] for v in versions)
+
+        for v in versions:
+            assert "code" in v
+            assert "name" in v
+            assert "abbreviation" in v
+            assert "language" in v
+            assert "scope" in v
+
+        names = {v["name"] for v in versions}
+        assert "Thai KJV" not in names
+        assert "Reina Valera 1909" not in names
+        assert "Translation for Translators" not in names
 
     def test_scope_normalization(self):
         """11. Scope values are normalized correctly."""
@@ -249,8 +282,34 @@ class TestScriptureService:
         assert JSDelivrScriptureService._resolve_version_id("kjv") == "en-kjv"
         assert JSDelivrScriptureService._resolve_version_id("asv") == "en-asv"
         assert JSDelivrScriptureService._resolve_version_id("web") == "en-web"
+        assert JSDelivrScriptureService._resolve_version_id("rv") == "en-rv"
         assert JSDelivrScriptureService._resolve_version_id("en-kjv") == "en-kjv"
         assert JSDelivrScriptureService._resolve_version_id("es-rv09") == "es-rv09"
+
+    def test_translation_aliases_are_mobile_friendly(self):
+        """13b. Display aliases normalize to shortcodes and provider IDs."""
+        assert (
+            normalize_translation(
+                "King James Version [eng] without Strong's numbers, 1769 standardized text"
+            )
+            == "KJV"
+        )
+        assert normalize_translation("Revised Version 1885") == "RV 1885"
+        assert normalize_translation("World English Bible (American Edition)") == "WEB"
+        assert normalize_translation("American Standard Version of 1901 [eng] ASV") == "ASV"
+        assert normalize_translation("RV1885") == "RV 1885"
+        assert normalize_translation("rv") == "RV 1885"
+        assert (
+            get_translation_id(
+                "King James Version [eng] without Strong's numbers, 1769 standardized text"
+            )
+            == "kjv"
+        )
+        assert get_translation_id("Revised Version 1885") == "rv"
+        assert get_translation_id("RV 1885") == "rv"
+        assert get_translation_id("rv1885") == "rv"
+        assert get_translation_id("World English Bible (American Edition)") == "web"
+        assert get_translation_id("American Standard Version of 1901 [eng] ASV") == "asv"
 
     def test_books_list_old_testament(self):
         """14. test_books_list_old_testament"""

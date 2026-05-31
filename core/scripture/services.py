@@ -6,7 +6,12 @@ Dynamically routes to JSDelivr CDN for 200+ free Bible translations.
 import logging
 import re
 
-from core.scripture.constants import FREE_BIBLE_VERSIONS, get_translation_id
+from core.scripture.constants import (
+    FREE_BIBLE_VERSION_PROVIDER_IDS,
+    FREE_BIBLE_VERSIONS,
+    get_translation_id,
+    normalize_translation,
+)
 from core.scripture.exceptions import ScriptureError, VersionNotAvailableError
 from core.scripture.providers.jsdelivr import JSDelivrScriptureService
 
@@ -171,7 +176,7 @@ class ScriptureService:
 
         from django.core.cache import cache
 
-        from core.scripture.models import BibleTranslation, BibleVerse
+        from core.scripture.models import BibleVerse
 
         start_time = time.time()
 
@@ -212,17 +217,11 @@ class ScriptureService:
                     ref_end = f"-{verse_end}" if verse_end and verse_end > verse_start else ""
                     book_display = db_verses[0].book_name if db_verses else book
 
-                    try:
-                        trans_obj = BibleTranslation.objects.filter(code=version_lower).first()
-                        version_display = trans_obj.name if trans_obj else version_lower.upper()
-                    except Exception:
-                        version_display = version_lower.upper()
-
                     result = {
                         "text": text,
                         "verses": [{"number": v.verse, "text": v.text} for v in db_verses],
                         "reference": f"{book_display} {chapter}:{verse_start}{ref_end}",
-                        "version": version_display,
+                        "version": normalize_translation(version_lower),
                         "book": book_display,
                         "chapter": chapter,
                         "verse_start": verse_start,
@@ -264,7 +263,7 @@ class ScriptureService:
                         "verse_count": len(cached_verse.get("verses", [])),
                     },
                 )
-                return cached_verse
+                return ScriptureService._with_canonical_version(cached_verse, version)
 
             lock_key = f"lock:cdn_verse:{version_id}:{book_slug}:{chapter}:{verse_start}"
             if verse_end:
@@ -288,7 +287,7 @@ class ScriptureService:
                                 "verse_count": len(cached.get("verses", [])),
                             },
                         )
-                        return cached
+                        return ScriptureService._with_canonical_version(cached, version)
 
             logger.warning(
                 "scripture_fallback_triggered",
@@ -329,7 +328,7 @@ class ScriptureService:
                     "verse_count": len(verses_result.get("verses", [])),
                 },
             )
-            return verses_result
+            return ScriptureService._with_canonical_version(verses_result, version)
 
         except (ScriptureError, VersionNotAvailableError):
             raise
@@ -338,6 +337,15 @@ class ScriptureService:
             return {}
 
     # ── Validation helpers ───────────────────────────────────────────
+
+    @staticmethod
+    def _with_canonical_version(result: dict, requested_version: str) -> dict:
+        """Return scripture result with client-facing translation shortcode."""
+        if not isinstance(result, dict):
+            return result
+
+        version = result.get("version") or requested_version
+        return {**result, "version": normalize_translation(version)}
 
     @staticmethod
     def _validate_version(version: str) -> str:
@@ -554,17 +562,16 @@ class ScriptureService:
         try:
             manifest = JSDelivrScriptureService.get_versions_manifest()
             for v in manifest:
-                # Extract short code (e.g., 'kjv' from 'en-kjv')
-                short_code = v["id"].split("-")[-1].lower()
+                provider_id = v.get("id", "").lower()
+                version_meta = FREE_BIBLE_VERSION_PROVIDER_IDS.get(provider_id)
 
-                if short_code in FREE_BIBLE_VERSIONS:
-                    abbrev = v.get("localVersionAbbreviation", "") or short_code.upper()
+                if version_meta:
                     language = v.get("language", {})
                     versions.append(
                         {
-                            "code": short_code,  # Use short code for consistency
-                            "name": v.get("version", short_code.upper()),
-                            "abbreviation": abbrev,
+                            "code": version_meta["code"],
+                            "name": v.get("version", version_meta["abbreviation"]),
+                            "abbreviation": version_meta["abbreviation"],
                             "language": language.get("name", "Unknown"),
                             "scope": JSDelivrScriptureService.normalize_scope(
                                 v.get("scope", "Bible")

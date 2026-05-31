@@ -11,6 +11,13 @@ FREE_BIBLE_VERSIONS = [
     "web",  # World English Bible
 ]
 
+FREE_BIBLE_VERSION_PROVIDER_IDS = {
+    "en-kjv": {"code": "kjv", "abbreviation": "KJV"},
+    "en-asv": {"code": "asv", "abbreviation": "ASV"},
+    "en-web": {"code": "web", "abbreviation": "WEB"},
+    "en-rv": {"code": "rv", "abbreviation": "RV 1885"},
+}
+
 # Premium versions for future Pro features (via API.Bible or other sources)
 PREMIUM_BIBLE_VERSIONS = [
     "niv",  # New International Version
@@ -19,7 +26,9 @@ PREMIUM_BIBLE_VERSIONS = [
     "nasb",  # New American Standard Bible
 ]
 
-# JSDelivr API returns long names, map to abbreviations for mobile dropdowns
+# JSDelivr API returns long names, map to short display codes for mobile dropdowns.
+# Keep provider/storage codes separate from display codes: the backend accepts
+# aliases like "Revised Version 1885", but returns "RV 1885" to clients.
 TRANSLATION_MAPPING = {
     # King James versions — CDN may return any of these variants
     "King James Version [eng] without Strong's numbers, 1769 standardized text": "KJV",
@@ -29,8 +38,8 @@ TRANSLATION_MAPPING = {
     "kjv translation": "KJV",
     "Thai KJV": "KJV",
     # Revised versions
-    "Revised Version 1885": "RV1885",
-    "Revised Version": "RV1885",
+    "Revised Version 1885": "RV 1885",
+    "Revised Version": "RV 1885",
     # World English Bible
     "World English Bible (American Edition)": "WEB",
     "World English Bible": "WEB",
@@ -46,6 +55,52 @@ TRANSLATION_MAPPING = {
     # New American Standard
     "New American Standard Bible": "NASB",
 }
+
+SHORT_TRANSLATION_CODES = {
+    "KJV": "KJV",
+    "EN KJV": "KJV",
+    "ASV": "ASV",
+    "EN ASV": "ASV",
+    "WEB": "WEB",
+    "EN WEB": "WEB",
+    "RV": "RV 1885",
+    "RV1885": "RV 1885",
+    "RV 1885": "RV 1885",
+    "EN RV": "RV 1885",
+    "NIV": "NIV",
+    "ESV": "ESV",
+    "NLT": "NLT",
+    "NASB": "NASB",
+}
+
+TRANSLATION_ID_ALIASES = {
+    "KJV": "kjv",
+    "EN KJV": "kjv",
+    "KING JAMES VERSION": "kjv",
+    "KJV TRANSLATION": "kjv",
+    "THAI KJV": "kjv",
+    "ASV": "asv",
+    "EN ASV": "asv",
+    "AMERICAN STANDARD VERSION": "asv",
+    "AMERICAN STANDARD VERSION OF 1901 [ENG] ASV": "asv",
+    "WEB": "web",
+    "EN WEB": "web",
+    "WORLD ENGLISH BIBLE": "web",
+    "WORLD ENGLISH BIBLE (AMERICAN EDITION)": "web",
+    "RV": "rv",
+    "EN RV": "rv",
+    "RV1885": "rv",
+    "RV 1885": "rv",
+    "REVISED VERSION": "rv",
+    "REVISED VERSION 1885": "rv",
+}
+
+
+def _translation_key(value: str) -> str:
+    return " ".join(str(value).replace("-", " ").replace("_", " ").strip().split()).upper()
+
+
+NORMALIZED_TRANSLATION_MAPPING = {_translation_key(k): v for k, v in TRANSLATION_MAPPING.items()}
 
 
 def normalize_translation(raw_translation: str) -> str:
@@ -64,19 +119,22 @@ def normalize_translation(raw_translation: str) -> str:
     if not raw_translation:
         return "KJV"
 
-    # Handle already-short canonical codes (case-insensitive)
-    upper = raw_translation.strip().upper()
-    if upper in ["KJV", "ASV", "RV", "WEB", "RV1885", "NIV", "ESV", "NLT", "NASB"]:
-        return upper
+    key = _translation_key(raw_translation)
+    if key in SHORT_TRANSLATION_CODES:
+        return SHORT_TRANSLATION_CODES[key]
 
     # Check the explicit mapping table first (exact match)
     mapped = TRANSLATION_MAPPING.get(raw_translation)
     if mapped:
         return mapped
 
+    mapped = NORMALIZED_TRANSLATION_MAPPING.get(key)
+    if mapped:
+        return mapped
+
     # Broad KJV catch-all: any string containing 'KJV' that slipped through
     # (e.g. "KJV Translation", "KJV 1769") — never store these raw.
-    if "KJV" in upper:
+    if "KJV" in key:
         return "KJV"
 
     # Last resort: truncate to 10 chars to avoid DB overflow, but log it
@@ -101,23 +159,15 @@ def get_translation_id(abbreviation: str) -> str:
     if not abbreviation:
         return "kjv"
 
-    abbr_upper = abbreviation.upper()
+    key = _translation_key(abbreviation)
 
     # Map back to internal short codes acceptable by _resolve_version_id natively
-    reverse_codes = {
-        "KJV": "kjv",
-        "ASV": "asv",
-        "WEB": "web",
-        "RV1885": "rv",
-        "RV": "rv",
-    }
+    if key in TRANSLATION_ID_ALIASES:
+        return TRANSLATION_ID_ALIASES[key]
 
-    if abbr_upper in reverse_codes:
-        return reverse_codes[abbr_upper]
-
-    for _, abbrev in TRANSLATION_MAPPING.items():
-        if abbrev == abbreviation:
-            return abbreviation.lower()
+    mapped = NORMALIZED_TRANSLATION_MAPPING.get(key)
+    if mapped:
+        return TRANSLATION_ID_ALIASES.get(_translation_key(mapped), mapped.lower())
 
     # Pass through unknown versions (lowered) so downstream validation can reject them
     return abbreviation.lower().strip()

@@ -98,6 +98,13 @@ class JSDelivrScriptureService:
             "localVersionAbbreviation": "WEB",
             "scope": "Bible with Deuterocanon",
         },
+        {
+            "id": "en-rv",
+            "version": "Revised Version 1885",
+            "language": {"name": "English", "code": "eng"},
+            "localVersionAbbreviation": "RV",
+            "scope": "Bible",
+        },
     ]
 
     BOOK_SLUGS = {
