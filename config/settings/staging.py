@@ -49,6 +49,7 @@ CORS_ALLOWED_ORIGINS = env.list(  # noqa: F405
     default=[
         "http://localhost:3000",
         "http://localhost:19006",
+        "http://localhost:8080",
         "https://ziona-app-staging.netlify.app",
         "https://studio.apollographql.com",
     ],

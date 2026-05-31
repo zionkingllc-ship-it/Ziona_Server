@@ -112,6 +112,8 @@ class DashboardService:
         if cached:
             return cached
 
+        from django.db.models import Avg, DurationField, ExpressionWrapper, F
+
         from core.moderation.models import Report, ReportStatus
         from core.users.models import User
 
@@ -138,19 +140,21 @@ class DashboardService:
             last_login__gte=month_ago,
         ).count()
 
-        # Avg resolution time for reports resolved in last 30 days
-        resolved_reports = Report.objects.filter(
+        # Avg resolution time for reports resolved in last 30 days.
+        # Keep this in the database so the dashboard card stays O(1) as reports grow.
+        avg_duration = Report.objects.filter(
             status__in=[ReportStatus.REVIEWED, ReportStatus.ACTIONED],
             reviewed_at__isnull=False,
             reviewed_at__gte=month_ago,
-        ).values_list("created_at", "reviewed_at")
-
-        avg_resolution = 0.0
-        if resolved_reports.exists():
-            deltas = [
-                (reviewed - created).total_seconds() / 60 for created, reviewed in resolved_reports
-            ]
-            avg_resolution = round(sum(deltas) / len(deltas), 1) if deltas else 0.0
+        ).aggregate(
+            avg_duration=Avg(
+                ExpressionWrapper(
+                    F("reviewed_at") - F("created_at"),
+                    output_field=DurationField(),
+                )
+            )
+        )["avg_duration"]
+        avg_resolution = round(avg_duration.total_seconds() / 60, 1) if avg_duration else 0.0
 
         result = {
             "dau": dau,
@@ -243,6 +247,11 @@ class AnalyticsService:
         """
         from core.admin_dashboard.models import DailyAnalytics
 
+        cache_key = f"admin:analytics:user_growth:{(time_range or 'last_month').lower()}"
+        cached = cache.get(cache_key)
+        if cached is not None:
+            return cached
+
         days = _time_range_to_days(time_range)
         from django.utils import timezone
 
@@ -267,7 +276,7 @@ class AnalyticsService:
             total_data.append(vals["total_users"])
             new_data.append(vals["new_users"])
 
-        return {
+        result = {
             "labels": labels,
             "datasets": [
                 {"label": "Total Users", "data": total_data},
@@ -282,11 +291,18 @@ class AnalyticsService:
                 ),
             },
         }
+        cache.set(cache_key, result, CACHE_TTL_ANALYTICS)
+        return result
 
     @staticmethod
     def get_engagement_metrics(time_range: str) -> dict:
         """Return engagement chart data (posts + comments over time)."""
         from core.admin_dashboard.models import DailyAnalytics
+
+        cache_key = f"admin:analytics:engagement:{(time_range or 'last_month').lower()}"
+        cached = cache.get(cache_key)
+        if cached is not None:
+            return cached
 
         days = _time_range_to_days(time_range)
         from django.utils import timezone
@@ -309,7 +325,7 @@ class AnalyticsService:
             posts_data.append(vals["posts_count"])
             comments_data.append(vals["comments_count"])
 
-        return {
+        result = {
             "labels": labels,
             "datasets": [
                 {"label": "Posts", "data": posts_data},
@@ -320,11 +336,18 @@ class AnalyticsService:
                 "total_comments": sum(comments_data),
             },
         }
+        cache.set(cache_key, result, CACHE_TTL_ANALYTICS)
+        return result
 
     @staticmethod
     def get_content_health(time_range: str) -> dict:
         """Return content health chart (reports received vs resolved)."""
         from core.admin_dashboard.models import DailyAnalytics
+
+        cache_key = f"admin:analytics:content_health:{(time_range or 'last_month').lower()}"
+        cached = cache.get(cache_key)
+        if cached is not None:
+            return cached
 
         days = _time_range_to_days(time_range)
         from django.utils import timezone
@@ -347,7 +370,7 @@ class AnalyticsService:
             received_data.append(vals["reports_received"])
             resolved_data.append(vals["reports_resolved"])
 
-        return {
+        result = {
             "labels": labels,
             "datasets": [
                 {"label": "Reports Received", "data": received_data},
@@ -363,6 +386,8 @@ class AnalyticsService:
                 ),
             },
         }
+        cache.set(cache_key, result, CACHE_TTL_ANALYTICS)
+        return result
 
 
 # ─────────────────────────────────────────
@@ -494,22 +519,116 @@ def _fill_date_gaps(days: int, db_entries, date_fields: list[str]) -> dict:
     baseline: dict = {}
     today = timezone.now().date()
 
-    # Seed every day in the window with live source values (oldest → newest).
-    # This keeps the analytics page useful before the nightly Celery aggregate
-    # has run or when a historical row is missing.
     for i in range(days - 1, -1, -1):
         day = today - timedelta(days=i)
-        live_values = _daily_analytics_snapshot(day)
-        baseline[day] = {field: live_values.get(field, 0) for field in date_fields}
+        baseline[day] = dict.fromkeys(date_fields, 0)
+
+    entries = list(db_entries)
+    db_days = {entry["date"] for entry in entries}
+    fallback_days = set(baseline) - db_days
+    if today in baseline:
+        fallback_days.add(today)
+
+    # Fill source-backed gaps with grouped aggregate queries. This keeps charts
+    # useful when DailyAnalytics rows are missing without recomputing each day
+    # individually.
+    source_values = _bulk_daily_analytics_snapshots(fallback_days, date_fields)
+    for day, vals in source_values.items():
+        if day in baseline:
+            for field in date_fields:
+                baseline[day][field] = vals.get(field, baseline[day][field])
 
     # Merge real DB values where rows exist
-    for entry in db_entries:
+    for entry in entries:
         day = entry["date"]
         if day in baseline:
             for field in date_fields:
                 baseline[day][field] = entry.get(field, 0)
 
+    if today in source_values:
+        for field in date_fields:
+            baseline[today][field] = source_values[today].get(field, baseline[today][field])
+
     return baseline
+
+
+def _bulk_daily_analytics_snapshots(days: set, date_fields: list[str]) -> dict:
+    """Compute missing analytics days with grouped source-table aggregates."""
+    if not days:
+        return {}
+
+    from django.db.models import Count
+    from django.db.models.functions import TruncDate
+
+    from core.engagement.models import Comment
+    from core.moderation.models import Report, ReportStatus
+    from core.posts.models import Post
+    from core.users.models import User
+
+    ordered_days = sorted(days)
+    start_date = ordered_days[0]
+    end_date = ordered_days[-1]
+    start_dt = datetime.combine(start_date, datetime.min.time()).replace(tzinfo=timezone.utc)
+    end_dt = datetime.combine(end_date + timedelta(days=1), datetime.min.time()).replace(
+        tzinfo=timezone.utc
+    )
+
+    result = {day: dict.fromkeys(date_fields, 0) for day in ordered_days}
+
+    def grouped_counts(model, date_field: str, **filters) -> dict:
+        rows = (
+            model.objects.filter(
+                **{
+                    f"{date_field}__gte": start_dt,
+                    f"{date_field}__lt": end_dt,
+                    **filters,
+                }
+            )
+            .annotate(day=TruncDate(date_field))
+            .values("day")
+            .annotate(count=Count("id"))
+        )
+        return {row["day"]: row["count"] for row in rows if row["day"] in result}
+
+    new_users_by_day: dict = {}
+    if "new_users" in date_fields or "total_users" in date_fields:
+        new_users_by_day = grouped_counts(User, "created_at", deleted_at__isnull=True)
+
+    if "new_users" in date_fields:
+        for day, count in new_users_by_day.items():
+            result[day]["new_users"] = count
+
+    if "total_users" in date_fields:
+        running_total = User.objects.filter(
+            deleted_at__isnull=True,
+            created_at__lt=start_dt,
+        ).count()
+        for day in ordered_days:
+            running_total += new_users_by_day.get(day, 0)
+            result[day]["total_users"] = running_total
+
+    if "posts_count" in date_fields:
+        for day, count in grouped_counts(Post, "created_at", deleted_at__isnull=True).items():
+            result[day]["posts_count"] = count
+
+    if "comments_count" in date_fields:
+        for day, count in grouped_counts(Comment, "created_at", deleted_at__isnull=True).items():
+            result[day]["comments_count"] = count
+
+    if "reports_received" in date_fields:
+        for day, count in grouped_counts(Report, "created_at").items():
+            result[day]["reports_received"] = count
+
+    if "reports_resolved" in date_fields:
+        for day, count in grouped_counts(
+            Report,
+            "reviewed_at",
+            reviewed_at__isnull=False,
+            status__in=[ReportStatus.REVIEWED, ReportStatus.ACTIONED, ReportStatus.DISMISSED],
+        ).items():
+            result[day]["reports_resolved"] = count
+
+    return result
 
 
 def _format_action_description(audit_entry) -> str:
