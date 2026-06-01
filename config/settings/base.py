@@ -273,6 +273,10 @@ EMAIL_ASSET_BASE_URL = env(
     "EMAIL_ASSET_BASE_URL",
     default="https://storage.googleapis.com/ziona-media-dev/email-assets",
 )
+LEGAL_DOCUMENT_BASE_URL = env(
+    "LEGAL_DOCUMENT_BASE_URL",
+    default="https://storage.googleapis.com/ziona-media-dev/legal-documents",
+)
 EMAIL_APP_BASE_URL = env("EMAIL_APP_BASE_URL", default="https://ziona.app")
 EMAIL_VERIFY_URL = env("EMAIL_VERIFY_URL", default=f"{EMAIL_APP_BASE_URL}/verify-email")
 EMAIL_PASSWORD_RESET_URL = env(

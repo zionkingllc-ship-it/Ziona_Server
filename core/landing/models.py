@@ -4,7 +4,7 @@ Landing page models for the Ziona platform.
 Covers:
   ContactSubmission  — dual-brand contact form submissions
   WaitlistEntry      — dual-brand waitlist with per-(brand, email) uniqueness
-  LegalDocument      — versioned Markdown legal docs (one active per type)
+  LegalDocument      — versioned legal docs with hosted file URLs
   LegalAcceptance    — user ToS acceptance audit trail
   AppStoreLink       — DB-managed iOS / Android store URLs
   CompanyStat        — key/value stats updated hourly by Celery
@@ -115,7 +115,7 @@ class LegalDocumentType(models.TextChoices):
 
 
 class LegalDocument(models.Model):
-    """Versioned Markdown legal document.
+    """Versioned legal document.
 
     Only ONE document per type may be active at a time. The partial unique
     index below enforces this at the database level.
@@ -129,7 +129,23 @@ class LegalDocument(models.Model):
         choices=LegalDocumentType.choices,
         db_index=True,
     )
-    content = models.TextField(help_text="Markdown content.")
+    content = models.TextField(
+        blank=True,
+        default="",
+        help_text="Optional text fallback. Mobile should render document_url.",
+    )
+    document_url = models.URLField(
+        max_length=500,
+        blank=True,
+        default="",
+        help_text="Public URL for the canonical legal document file.",
+    )
+    document_type = models.CharField(
+        max_length=100,
+        blank=True,
+        default="application/pdf",
+        help_text="MIME type for document_url, e.g. application/pdf.",
+    )
     version = models.CharField(max_length=20)
     published_at = models.DateTimeField(null=True, blank=True)
     is_active = models.BooleanField(default=False, db_index=True)

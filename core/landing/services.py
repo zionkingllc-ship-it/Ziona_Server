@@ -7,12 +7,16 @@ with the same key namespace as the existing RateLimitMiddleware.
 """
 
 import logging
+from typing import TYPE_CHECKING
 
 from django.db import transaction
 from django.utils import timezone
 
 from core.shared.exceptions import AdminError, ErrorCode
 from core.shared.redis_lua import LuaLimiter
+
+if TYPE_CHECKING:
+    from core.landing.models import LegalDocument
 
 logger = logging.getLogger("core.landing")
 
@@ -211,7 +215,7 @@ class LegalDocumentService:
     """Manages versioned legal documents."""
 
     @staticmethod
-    def get_active(doc_type: str) -> "LegalDocument":  # noqa: F821
+    def get_active(doc_type: str) -> "LegalDocument":
         """Return the currently active document for a given type.
 
         Raises AdminError(NOT_FOUND) if no active document exists.
@@ -224,13 +228,29 @@ class LegalDocumentService:
             raise AdminError(f"No active {doc_type} document found.", ErrorCode.NOT_FOUND) from None
 
     @staticmethod
-    def update(doc_type: str, content: str, version: str) -> "LegalDocument":  # noqa: F821
+    def update(
+        doc_type: str,
+        content: str,
+        version: str,
+        document_url: str = "",
+        document_type: str = "application/pdf",
+    ) -> "LegalDocument":
         """Publish a new version of a legal document.
 
         Deactivates the current active document (if any) and creates a new
         active one. Wrapped in a transaction so both steps are atomic.
         """
         from core.landing.models import LegalDocument
+
+        content = (content or "").strip()
+        document_url = (document_url or "").strip()
+        document_type = (document_type or "application/pdf").strip()
+
+        if not content and not document_url:
+            raise AdminError(
+                "Either content or document_url is required.",
+                ErrorCode.VALIDATION_ERROR,
+            )
 
         with transaction.atomic():
             # Deactivate current active version (if any)
@@ -239,6 +259,8 @@ class LegalDocumentService:
             doc = LegalDocument.objects.create(
                 type=doc_type,
                 content=content,
+                document_url=document_url,
+                document_type=document_type,
                 version=version,
                 published_at=timezone.now(),
                 is_active=True,

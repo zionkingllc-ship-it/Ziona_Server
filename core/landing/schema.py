@@ -70,6 +70,8 @@ class LegalDocumentType:
     """A versioned legal document."""
 
     content: str
+    document_url: str = strawberry.field(name="documentUrl")
+    document_type: str = strawberry.field(name="documentType")
     version: str
     last_updated: str = strawberry.field(name="lastUpdated")
 
@@ -120,7 +122,9 @@ def _get_ip(info: Info) -> str:
 
 def _map_legal_doc(doc) -> LegalDocumentType:
     return LegalDocumentType(
-        content=doc.content,
+        content=doc.content or "",
+        document_url=doc.document_url or "",
+        document_type=doc.document_type or "application/pdf",
         version=doc.version,
         last_updated=doc.published_at.isoformat()
         if doc.published_at
@@ -274,8 +278,10 @@ class LandingMutations:
         self,
         info: Info,
         type: LegalDocumentTypeEnum,
-        content: str,
         version: str,
+        content: str = "",
+        document_url: str = "",
+        document_type: str = "application/pdf",
     ) -> LegalDocumentPayload:
         # Inline admin guard — @admin_required is designed as a decorator;
         # for non-dashboard mutations we validate manually via get_admin_user.
@@ -294,6 +300,8 @@ class LandingMutations:
                 doc_type=type.value,
                 content=content,
                 version=version,
+                document_url=document_url,
+                document_type=document_type,
             )
             return LegalDocumentPayload(success=True, document=_map_legal_doc(doc))
         except AdminError as e:
