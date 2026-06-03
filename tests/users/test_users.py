@@ -1,6 +1,9 @@
 """Tests for user services — username and DOB."""
 
+import json
+
 import pytest
+from django.test import Client
 
 from core.users.selectors import check_username_availability, suggest_usernames
 from core.users.services import UserService, UserServiceError
@@ -161,3 +164,95 @@ class TestDateOfBirth:
         user = create_user()
         dob = UserService.get_date_of_birth(str(user.id))
         assert dob is None
+
+
+@pytest.mark.django_db
+class TestAccountDetailsGraphQL:
+    def _auth_client(self, authenticated_user):
+        client = Client()
+        client.defaults["HTTP_AUTHORIZATION"] = f'Bearer {authenticated_user["access_token"]}'
+        return client
+
+    def test_account_details_query_returns_settings_card_data(self, authenticated_user):
+        user = authenticated_user["user"]
+        user.location = "Lagos, Nigeria"
+        user.save(update_fields=["location", "updated_at"])
+
+        query = """
+        query AccountDetails {
+          accountDetails {
+            memberSince
+            memberSinceDate
+            location
+            accountStatus
+          }
+        }
+        """
+
+        response = self._auth_client(authenticated_user).post(
+            "/graphql/",
+            data=json.dumps({"query": query}),
+            content_type="application/json",
+        )
+        content = json.loads(response.content)
+        assert "errors" not in content, content.get("errors")
+
+        details = content["data"]["accountDetails"]
+        assert details["memberSince"] == user.created_at.strftime("%B %Y")
+        assert details["memberSinceDate"] == user.created_at.isoformat()
+        assert details["location"] == "Lagos, Nigeria"
+        assert details["accountStatus"] == "active"
+
+    def test_update_account_details_updates_only_location(self, authenticated_user):
+        user = authenticated_user["user"]
+
+        mutation = """
+        mutation UpdateAccountDetails($location: String!) {
+          updateAccountDetails(location: $location) {
+            success
+            accountDetails {
+              memberSince
+              memberSinceDate
+              location
+              accountStatus
+            }
+            error { code message field }
+          }
+        }
+        """
+
+        response = self._auth_client(authenticated_user).post(
+            "/graphql/",
+            data=json.dumps(
+                {
+                    "query": mutation,
+                    "variables": {"location": "Abuja, Nigeria"},
+                }
+            ),
+            content_type="application/json",
+        )
+        content = json.loads(response.content)
+        assert "errors" not in content, content.get("errors")
+
+        payload = content["data"]["updateAccountDetails"]
+        assert payload["success"] is True
+        assert payload["accountDetails"]["location"] == "Abuja, Nigeria"
+        assert payload["accountDetails"]["accountStatus"] == "active"
+
+        user.refresh_from_db()
+        assert user.location == "Abuja, Nigeria"
+
+    def test_rest_me_includes_account_details(self, api_client, authenticated_user):
+        user = authenticated_user["user"]
+        user.location = "Lagos, Nigeria"
+        user.save(update_fields=["location", "updated_at"])
+        api_client.defaults["HTTP_AUTHORIZATION"] = f'Bearer {authenticated_user["access_token"]}'
+
+        response = api_client.get("/api/auth/me")
+        data = response.json()["data"]
+
+        assert response.status_code == 200
+        assert data["accountDetails"]["memberSince"] == user.created_at.strftime("%B %Y")
+        assert data["accountDetails"]["memberSinceDate"] == user.created_at.isoformat()
+        assert data["accountDetails"]["location"] == "Lagos, Nigeria"
+        assert data["accountDetails"]["accountStatus"] == "active"

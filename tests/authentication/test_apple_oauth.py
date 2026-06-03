@@ -189,6 +189,37 @@ class TestAppleOAuth:
         assert data["success"] is False
         assert data["error"]["code"] == "APPLE_EMAIL_REQUIRED"
 
+    def test_password_account_conflict_returns_json_409(self, api_client, apple_private_key):
+        User.objects.create_user(
+            email="password.apple@example.com",
+            username="passwordapple",
+            password="SecurePass1!",
+            is_email_verified=True,
+        )
+        raw_nonce = "password-conflict-nonce"
+        _cache_nonce(raw_nonce)
+        token = _apple_token(
+            apple_private_key,
+            sub="apple-password-conflict-sub",
+            raw_nonce=raw_nonce,
+            email="password.apple@example.com",
+        )
+
+        response = api_client.post(
+            self.url,
+            data=json.dumps({"identityToken": token, "rawNonce": raw_nonce}),
+            content_type="application/json",
+        )
+
+        assert response.status_code == 409
+        data = response.json()
+        assert data["success"] is False
+        assert data["error"]["code"] == "EMAIL_REGISTERED_WITH_PASSWORD"
+        assert (
+            data["error"]["message"]
+            == "This email is already registered with a password. Please sign in with your password instead, or use 'Forgot Password' to reset it."
+        )
+
     def test_rejects_unconfigured_apple_audience(self, api_client, apple_private_key):
         raw_nonce = "bad-audience-nonce"
         _cache_nonce(raw_nonce)

@@ -454,6 +454,29 @@ class Post:
             avatar_url=self._dto.author.avatar_url,
         )
 
+    @strawberry.field(name="mediaUrl", description="Primary flat media URL for image/video posts.")
+    def media_url(self) -> str | None:
+        if not self._dto or not self._dto.media:
+            return None
+
+        raw_type = (self._raw_type or "").lower()
+        if raw_type == "video":
+            return getattr(self._dto.media, "url", None) or None
+        if raw_type == "image":
+            items = getattr(self._dto.media, "items", []) or []
+            first_image = next((item for item in items if getattr(item, "url", None)), None)
+            return first_image.url if first_image else None
+        return None
+
+    @strawberry.field(
+        name="mediaType", description="Primary flat media type: image, video, or null."
+    )
+    def media_type(self) -> str | None:
+        raw_type = (self._raw_type or "").lower()
+        if raw_type in ("image", "video"):
+            return raw_type
+        return None
+
     @strawberry.field(description="Media files array")
     def media(self) -> list[MediaFileType]:
         media_list = []

@@ -38,6 +38,8 @@ class TestSchemaAlignment:
             post {
               id
               caption
+              mediaUrl
+              mediaType
               media {
                 id
                 url
@@ -76,6 +78,89 @@ class TestSchemaAlignment:
         data = content["data"]["createPost"]
         assert data["success"] is True, f"createPost failed: {data.get('error')}"
         assert data["post"]["caption"] == "Test post alignment"
+        assert data["post"]["mediaType"] == "image"
+        assert data["post"]["mediaUrl"].endswith("/uploads/test/images/test.jpg")
+
+    def test_video_post_returns_flat_media_fields_in_mutation_and_feed(self, auth_client, user):
+        """Video posts expose mediaUrl/mediaType both after createPost and in feed."""
+        media = MediaFile.objects.create(
+            user=user,
+            file_name="clip.mp4",
+            file_type="video/mp4",
+            file_size=2048,
+            media_type="video",
+            storage_path="uploads/test/videos/clip.mp4",
+            thumbnail_path="uploads/test/videos/clip.jpg",
+            duration=70,
+            status="ready",
+        )
+
+        mutation = """
+        mutation CreateVideo($postType: PostType!, $caption: String, $mediaIds: [String!], $mediaType: MediaType) {
+          createPost(postType: $postType, caption: $caption, mediaIds: $mediaIds, mediaType: $mediaType) {
+            success
+            post {
+              id
+              mediaUrl
+              mediaType
+              media { url type thumbnailUrl duration }
+            }
+            error { code message }
+          }
+        }
+        """
+        create_response = auth_client.post(
+            "/graphql/",
+            data=json.dumps(
+                {
+                    "query": mutation,
+                    "variables": {
+                        "postType": "MEDIA",
+                        "caption": "Video alignment",
+                        "mediaIds": [str(media.id)],
+                        "mediaType": "VIDEO",
+                    },
+                }
+            ),
+            content_type="application/json",
+        )
+        create_content = json.loads(create_response.content)
+        if "errors" in create_content:
+            pytest.fail(f"GraphQL errors: {create_content['errors']}")
+
+        post = create_content["data"]["createPost"]["post"]
+        assert post["mediaType"] == "video"
+        assert post["mediaUrl"] == post["media"][0]["url"]
+        assert post["mediaUrl"].endswith("/uploads/test/videos/clip.mp4")
+
+        query = """
+        query Feed {
+          feed(limit: 20) {
+            posts {
+              id
+              mediaUrl
+              mediaType
+              video { url }
+              image { items { url } }
+            }
+          }
+        }
+        """
+        feed_response = auth_client.post(
+            "/graphql/",
+            data=json.dumps({"query": query}),
+            content_type="application/json",
+        )
+        feed_content = json.loads(feed_response.content)
+        if "errors" in feed_content:
+            pytest.fail(f"GraphQL errors: {feed_content['errors']}")
+
+        feed_post = next(
+            item for item in feed_content["data"]["feed"]["posts"] if item["id"] == post["id"]
+        )
+        assert feed_post["mediaType"] == "video"
+        assert feed_post["mediaUrl"] == feed_post["video"]["url"]
+        assert feed_post["image"] is None
 
     def test_feed_query_alignment(self, auth_client):
         """Verify feed query matches the mobile contract (PART 4)."""
@@ -84,6 +169,8 @@ class TestSchemaAlignment:
           feed(limit: $limit) {
             posts {
               id
+              mediaUrl
+              mediaType
               caption
               image { items { url } }
               video { url }

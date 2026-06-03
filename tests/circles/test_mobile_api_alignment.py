@@ -209,13 +209,17 @@ class TestMobileGraphQLAlignment(TestCase):
                   id
                   anchorType
                   type
+                  date
+                  anchorDate
                   bibleReference
                   bibleText
                   anchorText
                   backgroundColors
                   prayedCount
                   anchorLikedCount
+                  author { id username avatarUrl }
                 }
+                anchorDates
               }
             }
             """,
@@ -235,6 +239,14 @@ class TestMobileGraphQLAlignment(TestCase):
         self.assertEqual(circle["rules"][0]["id"], 1)
         self.assertEqual(circle["activeAnchor"]["anchorType"], "text")
         self.assertEqual(circle["activeAnchor"]["type"], "text")
+        expected_anchor_date = self.anchor.published_at.date().isoformat()
+        self.assertEqual(circle["activeAnchor"]["date"], expected_anchor_date)
+        self.assertEqual(circle["activeAnchor"]["anchorDate"], expected_anchor_date)
+        self.assertEqual(circle["activeAnchor"]["author"]["username"], "post_author")
+        self.assertEqual(
+            circle["activeAnchor"]["author"]["avatarUrl"], "https://example.com/avatar.jpg"
+        )
+        self.assertEqual(circle["anchorDates"][0], expected_anchor_date)
         self.assertEqual(circle["activeAnchor"]["bibleReference"], "Colossians 3:23")
         self.assertEqual(
             circle["activeAnchor"]["bibleText"],
@@ -304,14 +316,16 @@ class TestMobileGraphQLAlignment(TestCase):
                 isJoined
                 memberAvatars
                 rules { id title description }
+                anchorDates
                 activeAnchor {
                   type
+                  anchorDate
                   scripture
                   likedImage
                   anchorLikedCount
                   prayedCount
                 }
-                pastAnchors { title type }
+                pastAnchors { title type anchorDate }
                 posts { id likedImage savedCount sharedCount }
               }
             }
@@ -328,10 +342,21 @@ class TestMobileGraphQLAlignment(TestCase):
         self.assertFalse(feed_data["isJoined"])
         self.assertEqual(feed_data["memberAvatars"], ["https://example.com/avatar.jpg"])
         self.assertEqual(feed_data["activeAnchor"]["type"], "text")
+        active_date = self.anchor.published_at.date().isoformat()
+        past_date = self.past_anchor.published_at.date().isoformat()
+        self.assertEqual(feed_data["activeAnchor"]["anchorDate"], active_date)
+        self.assertEqual(feed_data["anchorDates"], [active_date, past_date])
         self.assertEqual(feed_data["activeAnchor"]["scripture"], "Colossians 3:23")
         self.assertEqual(feed_data["activeAnchor"]["likedImage"], 1)
         self.assertEqual(
-            feed_data["pastAnchors"], [{"title": "Yesterday's Prayer", "type": "image_text"}]
+            feed_data["pastAnchors"],
+            [
+                {
+                    "title": "Yesterday's Prayer",
+                    "type": "image_text",
+                    "anchorDate": past_date,
+                }
+            ],
         )
         self.assertEqual(feed_data["posts"][0]["savedCount"], 0)
         self.assertEqual(feed_data["posts"][0]["sharedCount"], 0)

@@ -49,7 +49,11 @@ def _parse_json_body(request: HttpRequest) -> dict:
         return {}
 
 
-def _auth_error_response(e: AuthenticationError) -> JsonResponse:
+def _auth_error_response(
+    e: AuthenticationError,
+    *,
+    oauth_conflict_as_409: bool = False,
+) -> JsonResponse:
     """Convert an AuthenticationError into a standardized error response."""
     status_map = {
         "UNAUTHENTICATED": 401,
@@ -69,8 +73,19 @@ def _auth_error_response(e: AuthenticationError) -> JsonResponse:
         "APPLE_KEYS_INVALID": 503,
         "OAUTH_NOT_CONFIGURED": 503,
         "APPLE_TOKEN_EXPIRED": 401,
+        "INVALID_OAUTH_TOKEN": 400,
+        "APPLE_NONCE_REQUIRED": 400,
+        "APPLE_NONCE_MISMATCH": 400,
+        "APPLE_NONCE_EXPIRED": 400,
+        "APPLE_PUBLIC_KEY_NOT_FOUND": 503,
     }
     status_code = status_map.get(e.code, 400)
+    if oauth_conflict_as_409 and e.code in {
+        "EMAIL_REGISTERED_WITH_PASSWORD",
+        "EMAIL_REGISTERED_WITH_DIFFERENT_PROVIDER",
+        "APPLE_ACCOUNT_MISMATCH",
+    }:
+        status_code = 409
 
     return error_response(
         message=e.message,
@@ -623,7 +638,7 @@ class AppleOAuthView(BaseAuthView):
             return success_response(data=response_data)
         except AuthenticationError as e:
             logger.warning("Apple OAuth failed: code=%s", e.code)
-            return _auth_error_response(e)
+            return _auth_error_response(e, oauth_conflict_as_409=True)
 
 
 @method_decorator(csrf_exempt, name="dispatch")

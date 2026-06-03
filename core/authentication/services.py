@@ -68,7 +68,7 @@ class AuthService:
         cache_key = f"user_me_data_{user_id}"
         cached_data = cache.get(cache_key)
 
-        if cached_data:
+        if cached_data and "accountDetails" in cached_data:
             return cached_data
 
         user = User.objects.filter(id=user_id, deleted_at__isnull=True).first()
@@ -106,6 +106,12 @@ class AuthService:
             if user.last_username_change
             else None,
             "createdAt": user.created_at.isoformat(),
+            "accountDetails": {
+                "memberSince": user.created_at.strftime("%B %Y"),
+                "memberSinceDate": user.created_at.isoformat(),
+                "location": user.location or "",
+                "accountStatus": user.status,
+            },
         }
 
         cache.set(cache_key, response_data, 300)

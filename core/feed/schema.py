@@ -177,6 +177,15 @@ class FeedPost:
 
     _media_list: strawberry.Private[list[MediaFileType]] = dataclasses.field(default_factory=list)
 
+    def _primary_media(self) -> MediaFileType | None:
+        videos = [m for m in self._media_list if m.type == MediaTypeEnum.VIDEO]
+        if videos:
+            return videos[0]
+        images = [m for m in self._media_list if m.type == MediaTypeEnum.IMAGE]
+        if images:
+            return images[0]
+        return None
+
     @strawberry.field(description="Caption for MEDIA posts. Null for TEXT and BIBLE posts.")
     def caption(self) -> str | None:
         """Returns the caption only when this is a MEDIA post."""
@@ -202,6 +211,24 @@ class FeedPost:
         """Returns the caption content only for BIBLE posts."""
         if self.post_type == PostType.BIBLE:
             return self._caption
+        return None
+
+    @strawberry.field(name="mediaUrl", description="Primary flat media URL for image/video posts.")
+    def media_url(self) -> str | None:
+        primary_media = self._primary_media()
+        return primary_media.url if primary_media else None
+
+    @strawberry.field(
+        name="mediaType", description="Primary flat media type: image, video, or null."
+    )
+    def media_type(self) -> str | None:
+        primary_media = self._primary_media()
+        if not primary_media:
+            return None
+        if primary_media.type == MediaTypeEnum.VIDEO:
+            return "video"
+        if primary_media.type == MediaTypeEnum.IMAGE:
+            return "image"
         return None
 
     @strawberry.field(description="Image data array mapping")

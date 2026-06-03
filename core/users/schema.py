@@ -40,6 +40,48 @@ class UserType:
             created_at=user.created_at.isoformat(),
         )
 
+    @classmethod
+    def from_db_model(cls, user: User) -> "UserType":
+        """Backward-compatible alias used by embedded GraphQL types."""
+        return cls.from_model(user)
+
+
+@strawberry.type
+class AccountDetails:
+    """Settings account card fields for the authenticated user."""
+
+    member_since: str = strawberry.field(name="memberSince")
+    member_since_date: str = strawberry.field(name="memberSinceDate")
+    location: str
+    account_status: str = strawberry.field(name="accountStatus")
+
+
+@strawberry.type
+class AccountDetailsPayload:
+    """Response for updating account details."""
+
+    success: bool
+    account_details: AccountDetails | None = strawberry.field(name="accountDetails", default=None)
+    error: ErrorType | None = None
+
+
+def _account_details_from_user(user: User) -> AccountDetails:
+    return AccountDetails(
+        member_since=user.created_at.strftime("%B %Y"),
+        member_since_date=user.created_at.isoformat(),
+        location=user.location or "",
+        account_status=user.status,
+    )
+
+
+def _account_details_from_dict(data: dict) -> AccountDetails:
+    return AccountDetails(
+        member_since=data["memberSince"],
+        member_since_date=data["memberSinceDate"],
+        location=data.get("location") or "",
+        account_status=data["accountStatus"],
+    )
+
 
 @strawberry.type
 class CurrentUserResponse:
@@ -57,6 +99,7 @@ class CurrentUserResponse:
 
     profile: Annotated["UserProfileType", strawberry.lazy("core.profiles.schema")]  # noqa: F821
     stats: Annotated["ProfileStatsType", strawberry.lazy("core.profiles.schema")]  # noqa: F821
+    accountDetails: AccountDetails
 
     lastNameChange: str | None = None
     lastUsernameChange: str | None = None
@@ -134,6 +177,12 @@ class UserQueries:
         from core.profiles.schema import ProfileStatsType, ProfileViewerState, UserProfileType
 
         data = AuthService.get_me(user_id)
+        account_details_data = data.get("accountDetails")
+        if account_details_data:
+            account_details = _account_details_from_dict(account_details_data)
+        else:
+            user = User.objects.get(id=user_id, deleted_at__isnull=True)
+            account_details = _account_details_from_user(user)
 
         return CurrentUserResponse(
             id=data["id"],
@@ -168,15 +217,65 @@ class UserQueries:
                 _following=data["stats"]["followingCount"],
                 _posts=data["stats"]["postsCount"],
             ),
+            accountDetails=account_details,
             lastNameChange=data.get("lastNameChange"),
             lastUsernameChange=data.get("lastUsernameChange"),
             createdAt=data["createdAt"],
         )
 
+    @strawberry.field(description="Get settings account details for the authenticated user")
+    def account_details(self, info: strawberry.types.Info) -> AccountDetails:
+        """Return member-since, editable location, and current account status."""
+        user_id = _get_authenticated_user_id(info)
+        if not user_id:
+            from core.shared.exceptions import AuthenticationError
+
+            raise AuthenticationError("Authentication required", "UNAUTHENTICATED")
+
+        user = User.objects.get(id=user_id, deleted_at__isnull=True)
+        return _account_details_from_user(user)
+
 
 @strawberry.type
 class UserMutations:
     """User domain GraphQL mutations."""
+
+    @strawberry.mutation(description="Update settings account details for the authenticated user.")
+    def update_account_details(
+        self,
+        info: strawberry.types.Info,
+        location: str,
+    ) -> AccountDetailsPayload:
+        """Update only the editable account details fields."""
+        user_id = _get_authenticated_user_id(info)
+        if not user_id:
+            return AccountDetailsPayload(
+                success=False,
+                error=ErrorType(code="UNAUTHORIZED", message="Authentication required"),
+            )
+
+        cleaned_location = (location or "").strip()
+        if len(cleaned_location) > 100:
+            return AccountDetailsPayload(
+                success=False,
+                error=ErrorType(
+                    code="LOCATION_TOO_LONG",
+                    message="Location must be 100 characters or fewer.",
+                    field="location",
+                ),
+            )
+
+        from django.core.cache import cache
+
+        user = User.objects.get(id=user_id, deleted_at__isnull=True)
+        user.location = cleaned_location
+        user.save(update_fields=["location", "updated_at"])
+        cache.delete(f"user_me_data_{user_id}")
+
+        return AccountDetailsPayload(
+            success=True,
+            account_details=_account_details_from_user(user),
+        )
 
     @strawberry.mutation(
         description="Update the authenticated user's username (rate-limited to once every 30 days)."

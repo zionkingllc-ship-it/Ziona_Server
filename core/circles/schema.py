@@ -60,6 +60,29 @@ class AnchorPageType:
     media_url: str = strawberry.field(name="mediaUrl", default="")
 
 
+def _anchor_date_value(anchor) -> str:
+    """Return the ISO calendar date used for mobile anchor filtering."""
+    return anchor.published_at.date().isoformat()
+
+
+def _unique_anchor_dates(*anchor_groups) -> list[str]:
+    """Return unique anchor dates while preserving newest-first query order."""
+    seen: set[str] = set()
+    dates: list[str] = []
+    for group in anchor_groups:
+        if not group:
+            continue
+        anchors = group if isinstance(group, list | tuple) else [group]
+        for anchor in anchors:
+            if not anchor:
+                continue
+            anchor_date = _anchor_date_value(anchor)
+            if anchor_date not in seen:
+                seen.add(anchor_date)
+                dates.append(anchor_date)
+    return dates
+
+
 # ──────────────────────────────────────────────
 #  Viewer State Types
 # ──────────────────────────────────────────────
@@ -102,6 +125,14 @@ class AnchorType:
     @strawberry.field(name="publishedAt")
     def published_at(self) -> datetime:
         return self._dto.published_at
+
+    @strawberry.field
+    def date(self) -> str:
+        return _anchor_date_value(self._dto)
+
+    @strawberry.field(name="anchorDate")
+    def anchor_date(self) -> str:
+        return _anchor_date_value(self._dto)
 
     @strawberry.field(name="expiresAt")
     def expires_at(self) -> datetime:
@@ -396,6 +427,16 @@ class CircleType:
         anchor = get_active_anchor(str(self._dto.id))
         return AnchorType.from_db_model(anchor)
 
+    @strawberry.field(name="anchorDates")
+    def anchor_dates(self) -> list[str]:
+        from core.circles.models import Anchor
+
+        anchors = Anchor.objects.filter(
+            circle_id=self._dto.id,
+            deleted_at__isnull=True,
+        ).order_by("-published_at")
+        return _unique_anchor_dates(list(anchors))
+
     @strawberry.field(name="bannerImage")
     def banner_image(self) -> str | None:
         return self._banner_image_url()
@@ -532,6 +573,7 @@ class CircleFeedDataType:
     member_count: int = strawberry.field(name="memberCount")
     is_joined: bool = strawberry.field(name="isJoined")
     active_anchor: AnchorType | None = strawberry.field(name="activeAnchor", default=None)
+    anchor_dates: list[str] = strawberry.field(name="anchorDates")
     past_anchors: list[AnchorType] = strawberry.field(name="pastAnchors")
     posts: list[CirclePostType]
     member_avatars: list[str] = strawberry.field(name="memberAvatars")
@@ -797,6 +839,7 @@ class CircleQueries:
             include_active=False,
             max_age_days=5,
         )
+        active_anchor = get_active_anchor(circle_id)
         circle_type = CircleType.from_db_model(circle)
         return CircleFeedDataType(
             banner_image=circle_type.banner_image(),
@@ -809,7 +852,8 @@ class CircleQueries:
             if circle.display_member_count is not None
             else circle.get_member_count(),
             is_joined=circle.is_user_subscribed(viewer_id),
-            active_anchor=AnchorType.from_db_model(get_active_anchor(circle_id)),
+            active_anchor=AnchorType.from_db_model(active_anchor),
+            anchor_dates=_unique_anchor_dates(active_anchor, past_anchors),
             past_anchors=[AnchorType.from_db_model(anchor) for anchor in past_anchors],
             posts=[CirclePostType.from_db_model(post) for post in posts],
             member_avatars=circle_type.member_avatars(),
