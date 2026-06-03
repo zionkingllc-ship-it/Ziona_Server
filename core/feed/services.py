@@ -31,9 +31,25 @@ Architecture (Fan-out-on-Write + DB Fallback)
 import base64
 import json
 import logging
+from datetime import timedelta
 
-from django.db.models import Count, Exists, F, OuterRef, Q
+from django.db.models import (
+    Case,
+    Count,
+    Exists,
+    ExpressionWrapper,
+    F,
+    FloatField,
+    IntegerField,
+    OuterRef,
+    Q,
+    Subquery,
+    Value,
+    When,
+)
+from django.db.models.functions import Coalesce
 from django.utils import timezone
+from django.utils.dateparse import parse_datetime
 
 from core.follows.selectors import FollowSelector
 from core.posts.models import Post
@@ -55,6 +71,13 @@ CELEBRITY_FOLLOWER_THRESHOLD = 50_000
 # Maximum number of IDs to read from a Redis inbox in a single LRANGE.
 _INBOX_READ_LIMIT = 60
 
+DISCOVERY_BLEND_SIZE = 3
+FOLLOWED_BLEND_SIZE = 1
+REPORT_PENALTY_THRESHOLD = 5
+REPORT_SUPPRESSION_THRESHOLD = 10
+CREATOR_DIVERSITY_WINDOW = 10
+CREATOR_DIVERSITY_MAX_PER_WINDOW = 2
+
 
 # =========================================================================
 # Opaque Cursor (Phase 2)
@@ -74,7 +97,7 @@ class FeedCursor:
     and the ``algo`` / ``tier`` fields default to ``None``.
     """
 
-    VERSION = 1
+    VERSION = 2
 
     @staticmethod
     def encode(
@@ -83,6 +106,8 @@ class FeedCursor:
         created_at,
         *,
         tier: int | None = None,
+        score: float | None = None,
+        **extra,
     ) -> str:
         """Encode pagination state into an opaque cursor string."""
         payload = {
@@ -93,6 +118,10 @@ class FeedCursor:
         }
         if tier is not None:
             payload["tier"] = tier
+        if score is not None:
+            payload["score"] = float(score)
+        if extra:
+            payload.update(extra)
         return base64.urlsafe_b64encode(json.dumps(payload).encode()).decode()
 
     @staticmethod
@@ -103,7 +132,7 @@ class FeedCursor:
         try:
             raw = base64.urlsafe_b64decode(cursor.encode()).decode()
             data = json.loads(raw)
-            if data.get("v") == FeedCursor.VERSION:
+            if data.get("v") in (1, FeedCursor.VERSION):
                 return data
         except Exception:
             logger.debug("invalid cursor format — falling back to legacy uuid")
@@ -129,6 +158,91 @@ class FeedService:
 
         hidden_subquery = Exists(HiddenPost.objects.filter(user_id=user_id, post_id=OuterRef("pk")))
         return qs.annotate(is_hidden=hidden_subquery).filter(is_hidden=False)
+
+    @staticmethod
+    def _base_post_queryset():
+        """Common feed queryset with related objects needed for feed DTO hydration."""
+        return (
+            Post.objects.select_related("user")
+            .prefetch_related("media_files", "post_media")
+            .filter(deleted_at__isnull=True)
+        )
+
+    @staticmethod
+    def _with_engagement_counts(qs):
+        """Annotate reusable engagement counts for feed ranking and DTO stats."""
+        return qs.annotate(
+            likes_count=Count("likes", distinct=True),
+            comments_count=Count(
+                "comments",
+                filter=Q(comments__deleted_at__isnull=True),
+                distinct=True,
+            ),
+            shares_count=Count("shares", distinct=True),
+            saves_count=Count("saves", distinct=True),
+            unique_reports_count=Count("reports__reporter_id", distinct=True),
+        )
+
+    @staticmethod
+    def _with_final_score(qs):
+        """Annotate MVP ranking score: engagement × freshness × report penalty."""
+        now = timezone.now()
+        return FeedService._with_engagement_counts(qs).annotate(
+            engagement_score=ExpressionWrapper(
+                F("likes_count")
+                + (F("comments_count") * Value(2))
+                + (F("shares_count") * Value(3)),
+                output_field=FloatField(),
+            ),
+            freshness_multiplier=Case(
+                When(created_at__gte=now - timedelta(days=1), then=Value(1.0)),
+                When(created_at__gte=now - timedelta(days=3), then=Value(0.7)),
+                When(created_at__gte=now - timedelta(days=7), then=Value(0.4)),
+                default=Value(0.1),
+                output_field=FloatField(),
+            ),
+            report_penalty_multiplier=Case(
+                When(unique_reports_count__gte=REPORT_PENALTY_THRESHOLD, then=Value(0.5)),
+                default=Value(1.0),
+                output_field=FloatField(),
+            ),
+            final_score=ExpressionWrapper(
+                F("engagement_score") * F("freshness_multiplier") * F("report_penalty_multiplier"),
+                output_field=FloatField(),
+            ),
+        )
+
+    @staticmethod
+    def _ranked_queryset():
+        """Base algorithmic feed queryset ordered by score, freshness, and stable ID tie-breaker."""
+        return (
+            FeedService._with_final_score(FeedService._base_post_queryset())
+            .filter(unique_reports_count__lt=REPORT_SUPPRESSION_THRESHOLD)
+            .order_by("-final_score", "-created_at", "-id")
+        )
+
+    @staticmethod
+    def _with_creator_affinity(qs, user_id: str):
+        """Annotate likes this viewer gave each creator in the last 30 days."""
+        from core.engagement.models import Like
+
+        cutoff = timezone.now() - timedelta(days=30)
+        affinity = (
+            Like.objects.filter(
+                user_id=user_id,
+                post__user_id=OuterRef("user_id"),
+                created_at__gte=cutoff,
+            )
+            .values("post__user_id")
+            .annotate(total=Count("id"))
+            .values("total")[:1]
+        )
+        return qs.annotate(
+            creator_affinity=Coalesce(
+                Subquery(affinity, output_field=IntegerField()),
+                Value(0),
+            )
+        )
 
     @staticmethod
     def get_feed(
@@ -182,24 +296,6 @@ class FeedService:
 
         is_new_user = (timezone.now() - user.created_at).days < NEW_USER_THRESHOLD_DAYS
 
-        # ------------------------------------------------------------------
-        # Fast path: Redis inbox (Phase 3)
-        # ------------------------------------------------------------------
-        # Only attempt the inbox for returning users (new users need the
-        # engagement-score algorithm for cold-start).  Also skip if the
-        # cursor explicitly says it was generated by a DB algorithm — this
-        # prevents mixing inbox pages with DB pages mid-scroll.
-        cursor_data = FeedCursor.decode(cursor) if cursor else {}
-        cursor_algo = cursor_data.get("algo")
-
-        if not is_new_user and cursor_algo not in ("new",):
-            inbox_result = FeedService._get_feed_from_inbox(user_id, cursor, cursor_data, limit)
-            if inbox_result is not None:
-                return inbox_result
-
-        # ------------------------------------------------------------------
-        # DB fallback
-        # ------------------------------------------------------------------
         if is_new_user:
             return FeedService._new_user_feed(user_id, cursor, limit)
 
@@ -236,34 +332,18 @@ class FeedService:
                 ),
             )
 
-        qs = (
-            Post.objects.select_related("user")
-            .prefetch_related("media_files", "post_media")
-            .filter(
-                user_id__in=following_ids,
-                deleted_at__isnull=True,
-            )
-            .annotate(
-                likes_count=Count("likes", distinct=True),
-                comments_count=Count(
-                    "comments",
-                    filter=Q(comments__deleted_at__isnull=True),
-                    distinct=True,
-                ),
-                shares_count=Count("shares", distinct=True),
-                saves_count=Count("saves", distinct=True),
-            )
-            # Always include -id as a tiebreaker so the compound keyset cursor
-            # (_apply_cursor) can page deterministically even if two posts share
-            # the exact same created_at timestamp.
-            .order_by("-created_at", "-id")
+        qs = FeedService._with_engagement_counts(
+            FeedService._base_post_queryset().filter(user_id__in=following_ids)
+        ).filter(unique_reports_count__lt=REPORT_SUPPRESSION_THRESHOLD)
+        qs = FeedService._with_creator_affinity(qs, user_id).order_by(
+            "-created_at", "-creator_affinity", "-id"
         )
 
         qs = FeedService._exclude_hidden_posts(qs, user_id)
 
         if cursor:
             cursor_data = FeedCursor.decode(cursor)
-            qs = FeedService._apply_cursor(qs, cursor_data.get("id", cursor))
+            qs = FeedService._apply_chronological_affinity_cursor(qs, cursor_data, cursor)
 
         posts = list(qs[: limit + 1])
         has_more = len(posts) > limit
@@ -277,6 +357,7 @@ class FeedService:
                 post_id=str(posts[-1].id),
                 algo="following",
                 created_at=posts[-1].created_at,
+                affinity=getattr(posts[-1], "creator_affinity", 0),
             )
 
         return FeedResponseDTO(
@@ -305,38 +386,21 @@ class FeedService:
         """
         limit = min(limit, 50)
 
-        qs = (
-            Post.objects.select_related("user")
-            .prefetch_related("media_files", "post_media")
-            .filter(deleted_at__isnull=True)
-            # .exclude(user_id=user_id)  # Temporarily disabled per user request
-            .annotate(
-                likes_count=Count("likes", distinct=True),
-                comments_count=Count(
-                    "comments",
-                    filter=Q(comments__deleted_at__isnull=True),
-                    distinct=True,
-                ),
-                shares_count=Count("shares", distinct=True),
-                saves_count=Count("saves", distinct=True),
-            )
-        )
+        qs = FeedService._ranked_queryset()
 
         if category:
             qs = qs.filter(category__slug=category)
 
         qs = FeedService._exclude_hidden_posts(qs, user_id)
 
-        # Always include -id as a tiebreaker for deterministic keyset pagination.
-        qs = qs.order_by("-created_at", "-id")
-
         if cursor:
             cursor_data = FeedCursor.decode(cursor)
-            qs = FeedService._apply_cursor(qs, cursor_data.get("id", cursor))
+            qs = FeedService._apply_ranked_cursor(qs, cursor_data, cursor)
 
-        posts = list(qs[: limit + 1])
-        has_more = len(posts) > limit
-        posts = posts[:limit]
+        candidate_limit = max(limit * 3, limit + 10)
+        candidates = list(qs[: candidate_limit + 1])
+        posts = FeedService._apply_creator_diversity(candidates, limit)
+        has_more = len(candidates) > len(posts)
 
         if not posts:
             suggestions = FeedService._get_empty_state_suggestions(user_id) if user_id else []
@@ -357,6 +421,7 @@ class FeedService:
                 post_id=str(posts[-1].id),
                 algo="discover",
                 created_at=posts[-1].created_at,
+                score=getattr(posts[-1], "final_score", 0),
             )
 
         return FeedResponseDTO(
@@ -378,23 +443,7 @@ class FeedService:
             UserInterest.objects.filter(user_id=user_id).values_list("interest", flat=True)
         )
 
-        qs = (
-            Post.objects.select_related("user")
-            .prefetch_related("media_files", "post_media")
-            .filter(deleted_at__isnull=True)
-            # .exclude(user_id=user_id)  # Temporarily disabled per user request
-            .annotate(
-                likes_count=Count("likes", distinct=True),
-                comments_count=Count(
-                    "comments",
-                    filter=Q(comments__deleted_at__isnull=True),
-                    distinct=True,
-                ),
-                shares_count=Count("shares", distinct=True),
-                saves_count=Count("saves", distinct=True),
-                engagement_score=F("likes_count") + F("comments_count") * 2 + F("shares_count") * 3,
-            )
-        )
+        qs = FeedService._ranked_queryset()
 
         if user_interests:
             # Filter by category slug, not by the Category FK (UUID).
@@ -404,16 +453,14 @@ class FeedService:
 
         qs = FeedService._exclude_hidden_posts(qs, user_id)
 
-        # Always include -id as a tiebreaker for deterministic keyset pagination.
-        qs = qs.order_by("-engagement_score", "-created_at", "-id")
-
         if cursor:
             cursor_data = FeedCursor.decode(cursor)
-            qs = FeedService._apply_cursor(qs, cursor_data.get("id", cursor))
+            qs = FeedService._apply_ranked_cursor(qs, cursor_data, cursor)
 
-        posts = list(qs[: limit + 1])
-        has_more = len(posts) > limit
-        posts = posts[:limit]
+        candidate_limit = max(limit * 3, limit + 10)
+        candidates = list(qs[: candidate_limit + 1])
+        posts = FeedService._apply_creator_diversity(candidates, limit)
+        has_more = len(candidates) > len(posts)
 
         if not posts:
             suggestions = FeedService._get_empty_state_suggestions(user_id)
@@ -434,6 +481,7 @@ class FeedService:
                 post_id=str(posts[-1].id),
                 algo="new",
                 created_at=posts[-1].created_at,
+                score=getattr(posts[-1], "final_score", 0),
             )
 
         return FeedResponseDTO(
@@ -448,60 +496,52 @@ class FeedService:
         cursor: str | None,
         limit: int,
     ) -> FeedResponseDTO:
-        """Feed for returning users — mix of followed + discovery."""
+        """Feed for returning users — discovery-first 3:1 blend."""
         following_ids = FollowSelector.get_following_ids(user_id)
+        following_ids_set = {str(fid) for fid in following_ids}
+        cursor_data = FeedCursor.decode(cursor) if cursor else {}
+        start_slot = int(cursor_data.get("slot", 0) or 0)
+        candidate_limit = max(limit * 5, 40)
 
-        qs = (
-            Post.objects.select_related("user")
-            .prefetch_related("media_files", "post_media")
-            .filter(deleted_at__isnull=True)
-            # .exclude(user_id=user_id)  # Temporarily disabled per user request
-            .annotate(
-                likes_count=Count("likes", distinct=True),
-                comments_count=Count(
-                    "comments",
-                    filter=Q(comments__deleted_at__isnull=True),
-                    distinct=True,
-                ),
-                shares_count=Count("shares", distinct=True),
-                saves_count=Count("saves", distinct=True),
-            )
+        discovery_qs = FeedService._ranked_queryset()
+        if following_ids_set:
+            discovery_qs = discovery_qs.exclude(user_id__in=following_ids_set)
+        discovery_qs = FeedService._exclude_hidden_posts(discovery_qs, user_id)
+
+        legacy_cursor = (
+            cursor_data if cursor_data.get("id") and not cursor_data.get("discovery") else {}
+        )
+        discovery_cursor = cursor_data.get("discovery") or legacy_cursor
+        if discovery_cursor:
+            discovery_qs = FeedService._apply_ranked_cursor(discovery_qs, discovery_cursor)
+
+        followed_qs = FeedService._with_engagement_counts(
+            FeedService._base_post_queryset().filter(user_id__in=following_ids)
+        ).filter(unique_reports_count__lt=REPORT_SUPPRESSION_THRESHOLD)
+        followed_qs = FeedService._exclude_hidden_posts(followed_qs, user_id).order_by(
+            "-created_at", "-id"
         )
 
-        if following_ids:
-            from django.db.models import Case, IntegerField, Value, When
+        followed_cursor = cursor_data.get("followed") or legacy_cursor
+        if followed_cursor:
+            followed_qs = FeedService._apply_cursor(followed_qs, followed_cursor.get("id"))
 
-            qs = qs.annotate(
-                is_following=Case(
-                    When(user_id__in=following_ids, then=Value(1)),
-                    default=Value(0),
-                    output_field=IntegerField(),
-                ),
-                # Sort followed authors' posts first, then by recency.
-                # Always include -id as a final tiebreaker so the keyset cursor
-                # can page correctly even when two posts share the same timestamp.
-            ).order_by("-is_following", "-created_at", "-id")
-        else:
-            # No follows yet — pure reverse-chronological with tiebreaker.
-            qs = qs.order_by("-created_at", "-id")
+        discovery_candidates = list(discovery_qs[: candidate_limit + 1])
+        followed_candidates = list(followed_qs[: candidate_limit + 1]) if following_ids else []
 
-        qs = FeedService._exclude_hidden_posts(qs, user_id)
+        blended = FeedService._blend_discovery_and_followed(
+            discovery_candidates,
+            followed_candidates,
+            target_count=max(limit * 3, limit + 10),
+            start_slot=start_slot,
+        )
+        posts = FeedService._apply_creator_diversity(blended, limit)
 
-        if cursor:
-            cursor_data = FeedCursor.decode(cursor)
-            cursor_post_id = cursor_data.get("id", cursor)
-            cursor_tier = cursor_data.get("tier")
-
-            if following_ids:
-                qs = FeedService._apply_following_cursor(
-                    qs, cursor_post_id, following_ids, cursor_tier=cursor_tier
-                )
-            else:
-                qs = FeedService._apply_cursor(qs, cursor_post_id)
-
-        posts = list(qs[: limit + 1])
-        has_more = len(posts) > limit
-        posts = posts[:limit]
+        has_more = (
+            len(discovery_candidates) > candidate_limit
+            or len(followed_candidates) > candidate_limit
+            or len(blended) > len(posts)
+        )
 
         if not posts:
             suggestions = FeedService._get_empty_state_suggestions(user_id)
@@ -516,19 +556,22 @@ class FeedService:
 
         post_dtos = FeedService._bulk_build_post_dtos(posts, user_id)
 
-        # Determine the tier of the last post for cursor encoding.
+        selected_discovery = [post for post in posts if str(post.user_id) not in following_ids_set]
+        selected_followed = [post for post in posts if str(post.user_id) in following_ids_set]
+        last_discovery = selected_discovery[-1] if selected_discovery else None
+        last_followed = selected_followed[-1] if selected_followed else None
         last_post = posts[-1]
-        last_tier = None
-        if following_ids:
-            last_tier = 1 if str(last_post.user_id) in {str(fid) for fid in following_ids} else 0
 
         next_cursor = None
-        if has_more and posts:
+        if has_more:
             next_cursor = FeedCursor.encode(
                 post_id=str(last_post.id),
                 algo="returning",
                 created_at=last_post.created_at,
-                tier=last_tier,
+                score=getattr(last_post, "final_score", None),
+                slot=(start_slot + len(posts)) % (DISCOVERY_BLEND_SIZE + FOLLOWED_BLEND_SIZE),
+                discovery=FeedService._ranked_cursor_payload(last_discovery, discovery_cursor),
+                followed=FeedService._chronological_cursor_payload(last_followed, followed_cursor),
             )
 
         return FeedResponseDTO(
@@ -538,37 +581,134 @@ class FeedService:
         )
 
     @staticmethod
+    def _blend_discovery_and_followed(
+        discovery_posts: list,
+        followed_posts: list,
+        *,
+        target_count: int,
+        start_slot: int = 0,
+    ) -> list:
+        """Blend ranked discovery with followed posts using a 3:1 slot pattern."""
+        result = []
+        seen = set()
+        discovery_index = 0
+        followed_index = 0
+        slot = start_slot
+
+        while len(result) < target_count and (
+            discovery_index < len(discovery_posts) or followed_index < len(followed_posts)
+        ):
+            wants_followed = (
+                slot % (DISCOVERY_BLEND_SIZE + FOLLOWED_BLEND_SIZE) >= DISCOVERY_BLEND_SIZE
+            )
+            pools = (
+                (
+                    (followed_posts, "followed"),
+                    (discovery_posts, "discovery"),
+                )
+                if wants_followed
+                else (
+                    (discovery_posts, "discovery"),
+                    (followed_posts, "followed"),
+                )
+            )
+
+            added = False
+            for pool, pool_name in pools:
+                index = followed_index if pool_name == "followed" else discovery_index
+                while index < len(pool) and str(pool[index].id) in seen:
+                    index += 1
+                if index >= len(pool):
+                    if pool_name == "followed":
+                        followed_index = index
+                    else:
+                        discovery_index = index
+                    continue
+
+                post = pool[index]
+                result.append(post)
+                seen.add(str(post.id))
+                added = True
+                if pool_name == "followed":
+                    followed_index = index + 1
+                else:
+                    discovery_index = index + 1
+                break
+
+            if not added:
+                break
+            slot += 1
+
+        return result
+
+    @staticmethod
+    def _apply_creator_diversity(posts: list, limit: int) -> list:
+        """Prefer no consecutive creators and max two per creator per 10-post window."""
+        selected = []
+        skipped = []
+
+        for post in posts:
+            author_id = str(post.user_id)
+            recent_window = selected[-(CREATOR_DIVERSITY_WINDOW - 1) :]
+            author_window_count = sum(1 for item in recent_window if str(item.user_id) == author_id)
+            same_as_previous = bool(selected and str(selected[-1].user_id) == author_id)
+
+            if same_as_previous or author_window_count >= CREATOR_DIVERSITY_MAX_PER_WINDOW:
+                skipped.append(post)
+                continue
+
+            selected.append(post)
+            if len(selected) >= limit:
+                return selected
+
+        seen = {str(post.id) for post in selected}
+        for post in skipped:
+            if str(post.id) in seen:
+                continue
+            selected.append(post)
+            seen.add(str(post.id))
+            if len(selected) >= limit:
+                break
+
+        return selected[:limit]
+
+    @staticmethod
+    def _ranked_cursor_payload(post, fallback: dict | None = None) -> dict:
+        """Build a nested ranked cursor payload, preserving prior state if no post was used."""
+        if not post:
+            return fallback or {}
+        return {
+            "id": str(post.id),
+            "score": float(getattr(post, "final_score", 0) or 0),
+            "ts": post.created_at.isoformat(),
+        }
+
+    @staticmethod
+    def _chronological_cursor_payload(post, fallback: dict | None = None) -> dict:
+        """Build a nested chronological cursor payload, preserving prior state if no post was used."""
+        if not post:
+            return fallback or {}
+        return {
+            "id": str(post.id),
+            "ts": post.created_at.isoformat(),
+        }
+
+    @staticmethod
     def _public_discovery_feed(
         cursor: str | None,
         limit: int,
     ) -> FeedResponseDTO:
         """Feed for unauthenticated users — popular content."""
-        qs = (
-            Post.objects.select_related("user")
-            .prefetch_related("media_files", "post_media")
-            .filter(deleted_at__isnull=True)
-            .annotate(
-                likes_count=Count("likes", distinct=True),
-                comments_count=Count(
-                    "comments",
-                    filter=Q(comments__deleted_at__isnull=True),
-                    distinct=True,
-                ),
-                shares_count=Count("shares", distinct=True),
-                saves_count=Count("saves", distinct=True),
-                engagement_score=F("likes_count") + F("comments_count") * 2 + F("shares_count") * 3,
-            )
-            # Always include -id as a tiebreaker for deterministic keyset pagination.
-            .order_by("-engagement_score", "-created_at", "-id")
-        )
+        qs = FeedService._ranked_queryset()
 
         if cursor:
             cursor_data = FeedCursor.decode(cursor)
-            qs = FeedService._apply_cursor(qs, cursor_data.get("id", cursor))
+            qs = FeedService._apply_ranked_cursor(qs, cursor_data, cursor)
 
-        posts = list(qs[: limit + 1])
-        has_more = len(posts) > limit
-        posts = posts[:limit]
+        candidate_limit = max(limit * 3, limit + 10)
+        candidates = list(qs[: candidate_limit + 1])
+        posts = FeedService._apply_creator_diversity(candidates, limit)
+        has_more = len(candidates) > len(posts)
 
         post_dtos = FeedService._bulk_build_post_dtos(posts, viewer_id=None)
 
@@ -578,6 +718,7 @@ class FeedService:
                 post_id=str(posts[-1].id),
                 algo="public",
                 created_at=posts[-1].created_at,
+                score=getattr(posts[-1], "final_score", 0),
             )
 
         return FeedResponseDTO(
@@ -622,6 +763,60 @@ class FeedService:
             # If the cursor ID is invalid/deleted, ignore it and return the
             # unfiltered queryset (effectively a first-page fallback).
             logger.debug("Failed to apply feed cursor: invalid cursor_id")
+        return qs
+
+    @staticmethod
+    def _apply_ranked_cursor(qs, cursor_data: dict, fallback_cursor: str | None = None):
+        """Apply keyset pagination for final_score DESC, created_at DESC, id DESC."""
+        cursor_id = cursor_data.get("id") or fallback_cursor
+        cursor_score = cursor_data.get("score")
+        cursor_ts = parse_datetime(cursor_data.get("ts", "") or "")
+
+        if cursor_id and cursor_score is not None and cursor_ts is not None:
+            try:
+                cursor_score = float(cursor_score)
+                return qs.filter(
+                    Q(final_score__lt=cursor_score)
+                    | Q(final_score=cursor_score, created_at__lt=cursor_ts)
+                    | Q(
+                        final_score=cursor_score,
+                        created_at=cursor_ts,
+                        id__lt=cursor_id,
+                    )
+                )
+            except (TypeError, ValueError):
+                logger.debug("Failed to apply ranked feed cursor: invalid score")
+
+        if cursor_id:
+            return FeedService._apply_cursor(qs, cursor_id)
+        return qs
+
+    @staticmethod
+    def _apply_chronological_affinity_cursor(
+        qs, cursor_data: dict, fallback_cursor: str | None = None
+    ):
+        """Apply keyset pagination for created_at DESC, affinity DESC, id DESC."""
+        cursor_id = cursor_data.get("id") or fallback_cursor
+        cursor_affinity = cursor_data.get("affinity")
+        cursor_ts = parse_datetime(cursor_data.get("ts", "") or "")
+
+        if cursor_id and cursor_affinity is not None and cursor_ts is not None:
+            try:
+                cursor_affinity = int(cursor_affinity)
+                return qs.filter(
+                    Q(created_at__lt=cursor_ts)
+                    | Q(created_at=cursor_ts, creator_affinity__lt=cursor_affinity)
+                    | Q(
+                        created_at=cursor_ts,
+                        creator_affinity=cursor_affinity,
+                        id__lt=cursor_id,
+                    )
+                )
+            except (TypeError, ValueError):
+                logger.debug("Failed to apply following cursor: invalid affinity")
+
+        if cursor_id:
+            return FeedService._apply_cursor(qs, cursor_id)
         return qs
 
     @staticmethod
