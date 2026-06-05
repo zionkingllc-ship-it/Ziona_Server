@@ -597,13 +597,21 @@ class OTPService:
         if purpose in ("verify", "registration", "email_verification"):
             from core.emails.services import EmailService
 
-            EmailService.send_verify_email(user_name, email, otp)
+            if not EmailService.send_verify_email(user_name, email, otp):
+                raise AuthenticationError(
+                    "We could not send your verification code. Please try again.",
+                    code="OTP_EMAIL_QUEUE_FAILED",
+                )
             return
 
         if purpose == "password_reset":
             from core.emails.services import EmailService
 
-            EmailService.send_reset_password(user_name, email, otp)
+            if not EmailService.send_reset_password(user_name, email, otp):
+                raise AuthenticationError(
+                    "We could not send your reset code. Please try again.",
+                    code="OTP_EMAIL_QUEUE_FAILED",
+                )
             return
 
         from core.shared.tasks.email_tasks import send_email_async

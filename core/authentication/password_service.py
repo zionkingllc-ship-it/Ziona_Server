@@ -63,7 +63,11 @@ class PasswordService:
 
         from core.emails.services import EmailService
 
-        EmailService.send_reset_password(user.username or user.full_name, user.email, otp)
+        if not EmailService.send_reset_password(user.username or user.full_name, user.email, otp):
+            raise AuthenticationError(
+                "We could not send your reset code. Please try again.",
+                code="OTP_EMAIL_QUEUE_FAILED",
+            )
 
         log_security_event(
             "auth.password_reset.requested",

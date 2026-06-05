@@ -1,3 +1,5 @@
+from unittest.mock import patch
+
 import pytest
 
 from core.authentication.services import AuthenticationError, AuthService
@@ -20,6 +22,21 @@ class TestRegistration:
         assert "message" in result
         assert "access_token" not in result
         assert "refresh_token" not in result
+
+    def test_register_fails_when_verification_email_cannot_queue(self, db):
+        """Registration should not pretend success if the verification OTP cannot be queued."""
+        with (
+            patch("core.emails.services.EmailService.send_verify_email", return_value=False),
+            pytest.raises(AuthenticationError) as exc_info,
+        ):
+            AuthService.register(
+                email="emaildown@example.com",
+                password="SecureP@ss1",
+                username="emaildown2025",
+                date_of_birth="2000-01-15",
+            )
+
+        assert exc_info.value.code == "OTP_EMAIL_QUEUE_FAILED"
 
     def test_register_duplicate_email(self, create_user):
         """Registration with existing verified email should fail."""

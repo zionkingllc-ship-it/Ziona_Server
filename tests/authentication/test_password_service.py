@@ -164,3 +164,23 @@ class TestOAuthToPasswordFlow:
         oauth_user.refresh_from_db()
         assert oauth_user.check_password("SecondPass456!") is True
         assert oauth_user.check_password("FirstPass123!") is False
+
+
+class TestPasswordResetRequest:
+    """Tests for password reset OTP request behavior."""
+
+    def test_existing_user_fails_when_reset_email_cannot_queue(self, email_user):
+        with (
+            patch("core.emails.services.EmailService.send_reset_password", return_value=False),
+            pytest.raises(AuthenticationError) as exc_info,
+        ):
+            PasswordService.request_password_reset("email@test.com")
+
+        assert exc_info.value.code == "OTP_EMAIL_QUEUE_FAILED"
+
+    def test_unknown_user_still_returns_success_to_prevent_enumeration(self, db):
+        with patch("core.emails.services.EmailService.send_reset_password") as mock_send:
+            result = PasswordService.request_password_reset("missing@test.com")
+
+        assert result is True
+        mock_send.assert_not_called()

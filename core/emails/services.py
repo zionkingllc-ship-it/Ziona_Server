@@ -20,13 +20,13 @@ class EmailService:
 
     # ── Template 1 ────────────────────────────────────────────
     @staticmethod
-    def send_verify_email(user_name: str | None, email: str, otp_code: str) -> None:
+    def send_verify_email(user_name: str | None, email: str, otp_code: str) -> bool:
         """Send email verification OTP. Trigger: on user registration."""
         from core.emails.templates import render_verify_email
         from core.shared.tasks.email_tasks import send_email_async
 
         try:
-            subject, plain, html = render_verify_email(user_name, otp_code)
+            subject, plain, html = render_verify_email(user_name, otp_code, expiry_minutes=10)
             send_email_async.delay(
                 subject=subject,
                 message=plain,
@@ -35,18 +35,20 @@ class EmailService:
                 html_message=html,
             )
             logger.info("verify_email_queued", extra={"email": email})
+            return True
         except Exception:  # noqa: BLE001 — Celery broker can raise arbitrary errors
             logger.error("Failed to queue verify_email", extra={"email": email}, exc_info=True)
+            return False
 
     # ── Template 2 ────────────────────────────────────────────
     @staticmethod
-    def send_reset_password(user_name: str | None, email: str, otp_code: str) -> None:
+    def send_reset_password(user_name: str | None, email: str, otp_code: str) -> bool:
         """Send password reset OTP. Trigger: POST /auth/forgot-password."""
         from core.emails.templates import render_reset_password
         from core.shared.tasks.email_tasks import send_email_async
 
         try:
-            subject, plain, html = render_reset_password(user_name, otp_code)
+            subject, plain, html = render_reset_password(user_name, otp_code, expiry_minutes=10)
             send_email_async.delay(
                 subject=subject,
                 message=plain,
@@ -55,10 +57,12 @@ class EmailService:
                 html_message=html,
             )
             logger.info("reset_password_email_queued", extra={"email": email})
+            return True
         except Exception:  # noqa: BLE001
             logger.error(
                 "Failed to queue reset_password email", extra={"email": email}, exc_info=True
             )
+            return False
 
     # ── Template 3 ────────────────────────────────────────────
     @staticmethod
