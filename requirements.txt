@@ -1,29 +1,29 @@
 # Django Core
-Django==5.0.1
+Django==5.2.15
 django-environ==0.11.2
 django-cors-headers==4.3.1
 django-health-check==3.18.1
 django-filter==23.5
 
 # GraphQL
-strawberry-graphql==0.227.3
-strawberry-graphql-django==0.39.2
+strawberry-graphql==0.316.0
+strawberry-graphql-django==0.86.0
 
 # Database
 psycopg2-binary==2.9.9
 dj-database-url==2.1.0
 
 # Authentication
-PyJWT==2.8.0
+PyJWT==2.13.0
 bcrypt==4.1.2
 firebase-admin==6.3.0
-cryptography==42.0.2
+cryptography==46.0.7
 
 # Redis & Celery
 redis==5.0.1
 django-redis==5.4.0
 celery==5.3.4
-django-celery-beat==2.6.0
+django-celery-beat==2.9.0
 
 # GCP Storage
 google-cloud-storage==2.14.0
@@ -33,10 +33,10 @@ imageio-ffmpeg==0.5.1
 
 # ASGI Server
 uvicorn[standard]==0.27.0
-gunicorn==21.2.0
+gunicorn==22.0.0
 
 # Monitoring
-sentry-sdk[django]==1.40.0
+sentry-sdk[django]==2.61.1
 structlog==24.1.0
 django-structlog==6.0.1
 
@@ -50,7 +50,7 @@ django-stubs==4.2.7
 pre-commit==3.6.2
 
 # Testing
-pytest==8.0.0
+pytest==9.0.3
 pytest-django==4.8.0
 pytest-asyncio==0.23.3
 pytest-cov==4.1.0
@@ -58,7 +58,7 @@ factory-boy==3.3.0
 faker==22.4.0
 
 # Email (Ensend REST API)
-requests==2.31.0
+requests==2.33.1
 
 # DTOs
 pydantic==2.6.1
