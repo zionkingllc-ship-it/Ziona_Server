@@ -17,15 +17,8 @@ from core.posts.views import (
     share_preview,
 )
 
-
-def health_status(request):
-    """Lightweight deploy smoke-test endpoint."""
-    return JsonResponse({"status": "ok"})
-
-
 urlpatterns = [
     path("admin/", admin.site.urls),
-    path("health", health_status, name="health-status"),
     path("health/", include("health_check.urls")),
     path(
         "graphql/",
