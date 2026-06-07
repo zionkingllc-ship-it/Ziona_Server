@@ -17,8 +17,8 @@ logger = logging.getLogger("core.posts")
 class ScriptureInput:
     book: str
     chapter: int
-    verse_start: int
-    verse_end: int | None = None
+    verse_start: int = strawberry.field(name="verseStart")
+    verse_end: int | None = strawberry.field(name="verseEnd", default=None)
     translation: str | None = "KJV"
 
 

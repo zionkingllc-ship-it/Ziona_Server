@@ -129,8 +129,8 @@ class FeedPostScripture:
     translation: str = strawberry.field(name="translation", default="KJV")
     book: str
     chapter: int
-    verse_start: int
-    verse_end: int | None = None
+    verse_start: int = strawberry.field(name="verseStart")
+    verse_end: int | None = strawberry.field(name="verseEnd", default=None)
     verses: list[ScriptureVerse] = strawberry.field(default_factory=list)
 
 

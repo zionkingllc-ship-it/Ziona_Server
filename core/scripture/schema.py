@@ -39,8 +39,16 @@ class ScriptureResponse:
     book: str = strawberry.field(description="Book name ('John')")
     chapter: int = strawberry.field(description="Chapter number")
     translation: str = strawberry.field(description="Translation version ('kjv')")
-    verse_start: int | None = strawberry.field(default=None, description="Starting verse boundary")
-    verse_end: int | None = strawberry.field(default=None, description="Ending verse boundary")
+    verse_start: int | None = strawberry.field(
+        name="verseStart",
+        default=None,
+        description="Starting verse boundary",
+    )
+    verse_end: int | None = strawberry.field(
+        name="verseEnd",
+        default=None,
+        description="Ending verse boundary",
+    )
     verses: list[ScriptureVerse] = strawberry.field(description="All verses in the chapter")
 
 

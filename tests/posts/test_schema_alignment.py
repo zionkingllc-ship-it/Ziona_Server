@@ -208,6 +208,8 @@ class TestSchemaAlignment:
                 book
                 chapter
                 translation
+                verseStart
+                verseEnd
                 verses {
                   number
                   text
@@ -235,6 +237,8 @@ class TestSchemaAlignment:
             assert data["book"] == "John"
             assert data["chapter"] == 3
             assert data["translation"] == "KJV"
+            assert data["verseStart"] == 1
+            assert data["verseEnd"] is None
 
     def test_scripture_range_query_alignment(self, auth_client):
         """Verify scriptureRange query returns concatenated string."""
@@ -424,3 +428,130 @@ class TestSchemaAlignment:
 
             assert data["success"] is True
             assert data["post"]["scripture"]["book"] == "John"
+            assert data["post"]["scripture"]["chapter"] == 11
+            assert data["post"]["scripture"]["verseStart"] == 35
+
+    def test_scripture_fields_are_populated_in_post_and_feed(self, auth_client):
+        """Bible post scripture fields remain camelCase and populated across APIs."""
+        with patch("core.scripture.services.ScriptureService.fetch_verse") as mock_fetch:
+            mock_fetch.return_value = {
+                "reference": "Psalm 23:1-2",
+                "text": "The Lord is my shepherd.",
+                "version": "KJV",
+                "book": "Psalm",
+                "chapter": 23,
+                "verse_start": 1,
+                "verse_end": 2,
+                "verses": [
+                    {"number": 1, "text": "The Lord is my shepherd."},
+                    {"number": 2, "text": "He maketh me to lie down in green pastures."},
+                ],
+            }
+            mutation = """
+            mutation CreateBible($postType: PostType!, $book: String!, $chap: Int!, $vs: Int!, $ve: Int) {
+              createPost(
+                postType: $postType,
+                scriptureBook: $book,
+                scriptureChapter: $chap,
+                scriptureVerseStart: $vs,
+                scriptureVerseEnd: $ve
+              ) {
+                success
+                post {
+                  id
+                  scripture {
+                    reference
+                    verseStart
+                    verseEnd
+                    verses { number text }
+                  }
+                }
+              }
+            }
+            """
+            create_response = auth_client.post(
+                "/graphql/",
+                data=json.dumps(
+                    {
+                        "query": mutation,
+                        "variables": {
+                            "postType": "BIBLE",
+                            "book": "Psalm",
+                            "chap": 23,
+                            "vs": 1,
+                            "ve": 2,
+                        },
+                    }
+                ),
+                content_type="application/json",
+            )
+            create_content = json.loads(create_response.content)
+            if "errors" in create_content:
+                pytest.fail(f"GraphQL errors: {create_content['errors']}")
+
+            created_post = create_content["data"]["createPost"]["post"]
+            assert created_post["scripture"]["reference"] == "Psalm 23:1-2"
+            assert created_post["scripture"]["verseStart"] == 1
+            assert created_post["scripture"]["verseEnd"] == 2
+            assert created_post["scripture"]["verses"][0]["number"] == 1
+
+            post_query = """
+            query GetPost($id: ID!) {
+              post(id: $id) {
+                id
+                scripture {
+                  reference
+                  verseStart
+                  verseEnd
+                  verses { number text }
+                }
+              }
+            }
+            """
+            post_response = auth_client.post(
+                "/graphql/",
+                data=json.dumps({"query": post_query, "variables": {"id": created_post["id"]}}),
+                content_type="application/json",
+            )
+            post_content = json.loads(post_response.content)
+            if "errors" in post_content:
+                pytest.fail(f"GraphQL errors: {post_content['errors']}")
+
+            post_scripture = post_content["data"]["post"]["scripture"]
+            assert post_scripture["verseStart"] == 1
+            assert post_scripture["verseEnd"] == 2
+            assert len(post_scripture["verses"]) == 2
+
+            feed_query = """
+            query Feed {
+              feed(limit: 20) {
+                posts {
+                  id
+                  scripture {
+                    reference
+                    verseStart
+                    verseEnd
+                    verses { number text }
+                  }
+                }
+              }
+            }
+            """
+            feed_response = auth_client.post(
+                "/graphql/",
+                data=json.dumps({"query": feed_query}),
+                content_type="application/json",
+            )
+            feed_content = json.loads(feed_response.content)
+            if "errors" in feed_content:
+                pytest.fail(f"GraphQL errors: {feed_content['errors']}")
+
+            feed_post = next(
+                item
+                for item in feed_content["data"]["feed"]["posts"]
+                if item["id"] == created_post["id"]
+            )
+            assert feed_post["scripture"]["reference"] == "Psalm 23:1-2"
+            assert feed_post["scripture"]["verseStart"] == 1
+            assert feed_post["scripture"]["verseEnd"] == 2
+            assert feed_post["scripture"]["verses"][1]["number"] == 2
