@@ -9,7 +9,7 @@ DEBUG = False
 
 ALLOWED_HOSTS = env.list(  # noqa: F405
     "ALLOWED_HOSTS",
-    default=["api.ziona.app"],
+    default=["api.ziona.app", "ziona-server.onrender.com"],
 )
 
 SECURE_SSL_REDIRECT = True
@@ -23,9 +23,11 @@ SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 DATABASES = {
     "default": env.db("DATABASE_URL"),  # noqa: F405
 }
-DATABASES["default"]["OPTIONS"] = {
-    "sslmode": "require",
-}
+if "postgresql" in DATABASES["default"].get("ENGINE", ""):
+    DATABASES["default"]["OPTIONS"] = {
+        **DATABASES["default"].get("OPTIONS", {}),
+        "sslmode": "require",
+    }
 
 CACHES = {
     "default": {

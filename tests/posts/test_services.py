@@ -60,6 +60,7 @@ class TestCreatePost:
             storage_path="img.jpg",
             media_type="image",
             file_size=1024,
+            status="ready",
         )
 
         result = PostService.create_post(
@@ -69,6 +70,29 @@ class TestCreatePost:
             media_ids=[str(media.id)],
         )
         assert result.type == "image"
+
+    def test_create_image_post_rejects_processing_media(self, user_a, db):
+        from core.media.models import MediaFile
+        from core.posts.services import PostService
+
+        media = MediaFile.objects.create(
+            user=user_a,
+            file_name="img.jpg",
+            storage_path="img.jpg",
+            media_type="image",
+            file_size=1024,
+            status="processing",
+        )
+
+        with pytest.raises(PostError) as excinfo:
+            PostService.create_post(
+                user_id=str(user_a.id),
+                post_type="image",
+                caption="My photo",
+                media_ids=[str(media.id)],
+            )
+
+        assert "still processing" in excinfo.value.message
 
 
 class TestPostViewerState:

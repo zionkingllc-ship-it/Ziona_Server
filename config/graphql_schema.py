@@ -9,7 +9,7 @@ from core.engagement.schema import EngagementMutations, EngagementQueries
 from core.feed.schema import FeedQueries
 from core.follows.schema import FollowMutations, FollowQueries
 from core.landing.schema import LandingMutations, LandingQueries
-from core.media.schema import MediaMutations
+from core.media.schema import MediaMutations, MediaQueries
 from core.moderation.schema import ModerationMutations, ModerationQueries
 from core.notifications.schema import NotificationMutations, NotificationQueries
 from core.posts.schema import PostMutations, PostQueries
@@ -34,6 +34,7 @@ class Query(
     AdminDashboardQueries,
     LandingQueries,
     DonationQueries,
+    MediaQueries,
 ):
     """Root query type — extends all domain queries."""
 

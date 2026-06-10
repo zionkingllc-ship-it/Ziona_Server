@@ -79,6 +79,7 @@ def test_upload_media_graphql_returns_media_url(settings, authenticated_user, mo
                     uploadUrl
                     mediaId
                     mediaUrl
+                    status
                     expiresIn
                     error { code message field }
                   }
@@ -101,6 +102,7 @@ def test_upload_media_graphql_returns_media_url(settings, authenticated_user, mo
     assert payload["uploadUrl"] == "https://storage.googleapis.com/signed-upload-url"
     assert payload["mediaId"]
     assert payload["mediaUrl"].startswith("https://storage.googleapis.com/ziona-media-test/")
+    assert payload["status"] == "pending"
     assert payload["expiresIn"] == settings.GCP_SIGNED_URL_EXPIRY
     assert payload["error"] is None
 
@@ -129,6 +131,7 @@ def test_upload_media_graphql_preserves_mobile_public_url_workaround(
                     uploadUrl
                     mediaId
                     mediaUrl
+                    status
                     error { code message }
                   }
                 }
@@ -155,7 +158,105 @@ def test_upload_media_graphql_preserves_mobile_public_url_workaround(
 
     assert payload["success"] is True
     assert payload["mediaId"]
+    assert payload["status"] == "pending"
     assert payload["mediaUrl"] == mobile_derived_public_url
+
+
+@pytest.mark.django_db
+def test_confirm_upload_graphql_queues_processing(settings, authenticated_user, monkeypatch):
+    settings.GCP_STORAGE_BUCKET = "ziona-media-test"
+    monkeypatch.setattr(
+        "core.media.services._generate_gcp_signed_url",
+        lambda **kwargs: "https://storage.googleapis.com/signed-upload-url",
+    )
+    queued = []
+
+    from core.media.tasks import process_media_upload
+
+    monkeypatch.setattr(process_media_upload, "delay", lambda media_id: queued.append(media_id))
+
+    generated = MediaService.generate_upload_url(
+        user_id=str(authenticated_user["user"].id),
+        file_name="circle-cover.jpg",
+        file_type="image/jpeg",
+        file_size=2048,
+    )
+
+    client = Client()
+    client.defaults["HTTP_AUTHORIZATION"] = f'Bearer {authenticated_user["access_token"]}'
+    response = client.post(
+        "/graphql/",
+        data=json.dumps(
+            {
+                "query": """
+                mutation ConfirmMediaUpload($mediaId: String!) {
+                  confirmMediaUpload(mediaId: $mediaId) {
+                    success
+                    mediaId
+                    mediaUrl
+                    status
+                    error { code message }
+                  }
+                }
+                """,
+                "variables": {"mediaId": generated["media_id"]},
+            }
+        ),
+        content_type="application/json",
+    )
+
+    content = json.loads(response.content)
+    assert "errors" not in content
+    payload = content["data"]["confirmMediaUpload"]
+    assert payload["success"] is True
+    assert payload["mediaId"] == generated["media_id"]
+    assert payload["status"] == "processing"
+    assert queued == [generated["media_id"]]
+
+
+@pytest.mark.django_db
+def test_media_status_query_returns_processing_state(settings, authenticated_user):
+    settings.GCP_STORAGE_BUCKET = "ziona-media-test"
+    media = MediaFile.objects.create(
+        user=authenticated_user["user"],
+        file_name="circle-cover.jpg",
+        file_type="image/jpeg",
+        file_size=2048,
+        media_type="image",
+        storage_path="uploads/test/images/circle-cover.jpg",
+        status="processing",
+    )
+
+    client = Client()
+    client.defaults["HTTP_AUTHORIZATION"] = f'Bearer {authenticated_user["access_token"]}'
+    response = client.post(
+        "/graphql/",
+        data=json.dumps(
+            {
+                "query": """
+                query MediaStatus($mediaId: String!) {
+                  mediaStatus(mediaId: $mediaId) {
+                    success
+                    mediaId
+                    mediaUrl
+                    status
+                    error { code message }
+                  }
+                }
+                """,
+                "variables": {"mediaId": str(media.id)},
+            }
+        ),
+        content_type="application/json",
+    )
+
+    content = json.loads(response.content)
+    assert "errors" not in content
+    payload = content["data"]["mediaStatus"]
+    assert payload["success"] is True
+    assert payload["mediaId"] == str(media.id)
+    assert payload["status"] == "processing"
+    assert payload["mediaUrl"].endswith("/uploads/test/images/circle-cover.jpg")
 
 
 @pytest.mark.django_db

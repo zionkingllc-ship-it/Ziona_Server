@@ -67,11 +67,15 @@ class EngagementCache:
         key = cls._get_key(user_id)
 
         try:
-            # Check if cache exists (the _INIT_ sentinel guarantees this)
-            if not redis_conn.exists(key):
-                cls.warm_hidden_posts_cache(user_id)
+            if redis_conn.sismember(key, str(post_id)):
+                return True
 
-            return bool(redis_conn.sismember(key, str(post_id)))
+            # The _INIT_ sentinel confirms a warm empty/non-matching cache.
+            if not redis_conn.sismember(key, "_INIT_"):
+                cls.warm_hidden_posts_cache(user_id)
+                return bool(redis_conn.sismember(key, str(post_id)))
+
+            return False
         except Exception as e:
             logger.error(f"Redis error checking hidden post: {e}")
             # Fallback to postgres
@@ -87,17 +91,13 @@ class EngagementCache:
         key = cls._get_key(user_id)
 
         try:
-            if not redis_conn.exists(key):
-                cls.warm_hidden_posts_cache(user_id)
-
             members = redis_conn.smembers(key)
+            if not members:
+                cls.warm_hidden_posts_cache(user_id)
+                members = redis_conn.smembers(key)
+
             # Filter out and decode members
-            hidden_ids = {m.decode("utf-8") for m in members if m.decode("utf-8") != "_INIT_"}
-
-            # Reset TTL on read
-            redis_conn.expire(key, CACHE_TTL)
-
-            return hidden_ids
+            return {m.decode("utf-8") for m in members if m.decode("utf-8") != "_INIT_"}
         except Exception as e:
             logger.error(f"Redis error getting hidden posts: {e}")
             # Fallback to postgres
@@ -114,8 +114,8 @@ class EngagementCache:
         redis_conn = get_redis_connection("default")
         key = cls._get_key(user_id)
         try:
-            if redis_conn.exists(key):
-                redis_conn.sadd(key, str(post_id))
+            redis_conn.sadd(key, str(post_id))
+            redis_conn.expire(key, CACHE_TTL)
         except Exception as e:
             logger.error(f"Redis error marking hidden post: {e}")
 
@@ -125,7 +125,6 @@ class EngagementCache:
         redis_conn = get_redis_connection("default")
         key = cls._get_key(user_id)
         try:
-            if redis_conn.exists(key):
-                redis_conn.srem(key, str(post_id))
+            redis_conn.srem(key, str(post_id))
         except Exception as e:
             logger.error(f"Redis error unmarking hidden post: {e}")

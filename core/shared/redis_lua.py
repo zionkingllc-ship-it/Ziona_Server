@@ -127,7 +127,10 @@ class LuaLimiter:
             )
             return bool(results[0]), int(results[2])
         except Exception as e:
-            logger.warning("LuaLimiter.check_rate_limit failed: %s — failing open", e)
+            logger.warning(
+                "Rate limiting unavailable - Redis connection failed",
+                extra={"feature": "rate_limit", "redis_key": key, "error": str(e)},
+            )
             return False, 0
 
     @staticmethod
@@ -178,5 +181,14 @@ class LuaLimiter:
             )
             return bool(results[0]), int(results[1])
         except Exception as e:
-            logger.warning("LuaLimiter.check_spam failed: %s — failing open", e)
+            logger.warning(
+                "Spam protection unavailable - Redis connection failed",
+                extra={
+                    "feature": "engagement_spam_protection",
+                    "user_id": str(user_id),
+                    "post_id": str(post_id),
+                    "action": action,
+                    "error": str(e),
+                },
+            )
             return False, 0

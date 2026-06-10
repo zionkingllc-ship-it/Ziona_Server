@@ -110,7 +110,7 @@ class PostService:
         from django.db.models import Q
 
         from core.categories.models import Category
-        from core.media.models import MediaFile
+        from core.media.models import MediaFile, MediaStatus
         from core.users.models import User
 
         category_obj = None
@@ -130,6 +130,22 @@ class PostService:
                     message="One or more media IDs not found",
                     code=ErrorCode.VALIDATION_ERROR,
                 )
+            for media_file in resolved_media_files:
+                if str(media_file.user_id) != str(user_id):
+                    raise PostError(
+                        message="One or more media IDs do not belong to this user",
+                        code=ErrorCode.VALIDATION_ERROR,
+                    )
+                if media_file.status == MediaStatus.FAILED:
+                    raise PostError(
+                        message="One or more media files failed processing",
+                        code=ErrorCode.VALIDATION_ERROR,
+                    )
+                if media_file.status != MediaStatus.READY:
+                    raise PostError(
+                        message="One or more media files are still processing",
+                        code=ErrorCode.VALIDATION_ERROR,
+                    )
         elif media_urls:
             url_pattern = re.compile(
                 r"^(?:http|ftp)s?://"

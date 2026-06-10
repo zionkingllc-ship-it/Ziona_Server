@@ -21,6 +21,7 @@ ALLOWED_TYPES = {
     "image/jpeg": {"ext": "jpg", "media_type": MediaType.IMAGE, "max_size": 10 * 1024 * 1024},
     "image/png": {"ext": "png", "media_type": MediaType.IMAGE, "max_size": 10 * 1024 * 1024},
     "image/jpg": {"ext": "jpg", "media_type": MediaType.IMAGE, "max_size": 10 * 1024 * 1024},
+    "image/webp": {"ext": "webp", "media_type": MediaType.IMAGE, "max_size": 10 * 1024 * 1024},
     "video/mp4": {"ext": "mp4", "media_type": MediaType.VIDEO, "max_size": 50 * 1024 * 1024},
     "video/quicktime": {"ext": "mov", "media_type": MediaType.VIDEO, "max_size": 50 * 1024 * 1024},
 }
@@ -255,18 +256,20 @@ class MediaService:
             # Fallback if path() isn't available (e.g. S3/GCS without local mirror)
             width, height = 0, 0
 
-        # 4. Create record
-        return MediaFile.objects.create(
+        media_file = MediaFile.objects.create(
             user_id=user_id,
             file_name=getattr(file, "name", "upload"),
             file_type=content_type,
             file_size=file.size,
             media_type=media_type.lower(),
             storage_path=actual_path,
-            status=MediaStatus.READY,  # For simple upload, mark as ready
+            status=MediaStatus.PROCESSING,
             width=width,
             height=height,
         )
+
+        _queue_media_processing(media_file)
+        return media_file
 
     @staticmethod
     def confirm_upload(media_id: str, user_id: str) -> MediaFile:
@@ -304,7 +307,13 @@ class MediaService:
 
             process_media_upload.delay(str(media_file.id))
         except Exception as e:
-            logger.warning(f"Failed to queue media processing task: {e}")
+            media_file.status = MediaStatus.FAILED
+            media_file.save(update_fields=["status", "updated_at"])
+            logger.warning("Failed to queue media processing task: %s", e)
+            raise MediaError(
+                "Upload completed, but media processing could not be queued. Please retry.",
+                code="MEDIA_PROCESSING_QUEUE_FAILED",
+            ) from e
 
         return media_file
 
@@ -388,6 +397,22 @@ def _generate_gcp_signed_url(
         method=method,
         content_type=content_type if method == "PUT" else None,
     )
+
+
+def _queue_media_processing(media_file: MediaFile) -> None:
+    """Queue async media optimization and fail visibly if enqueueing is impossible."""
+    try:
+        from core.media.tasks import process_media_upload
+
+        process_media_upload.delay(str(media_file.id))
+    except Exception as exc:
+        media_file.status = MediaStatus.FAILED
+        media_file.save(update_fields=["status", "updated_at"])
+        logger.warning("Failed to queue media processing task: %s", exc)
+        raise MediaError(
+            "Media uploaded, but processing could not be queued. Please retry.",
+            code="MEDIA_PROCESSING_QUEUE_FAILED",
+        ) from exc
 
 
 def extract_dimensions(file_path: str, media_type: str) -> tuple[int, int]:

@@ -5,10 +5,14 @@ Handles post-upload file validation and processing.
 """
 
 import logging
+import os
 import subprocess
+import tempfile
+from pathlib import Path
 
 from celery import shared_task
 from django.conf import settings
+from django.utils import timezone
 
 from core.media.models import MediaFile, MediaStatus, MediaType
 
@@ -26,13 +30,9 @@ def process_media_upload(self, media_id: str) -> None:
 
     Steps:
     1. Validate the MediaFile record exists.
-    2. If video: attempt thumbnail generation (failure is non-fatal).
-    3. Update status to READY.
-    4. On catastrophic failure: mark FAILED and retry.
-
-    Thumbnail generation is intentionally wrapped in its own try/except.
-    If FFmpeg fails or GCS upload fails, the video is still marked READY
-    and served normally — the mobile client handles thumbnailUrl=None.
+    2. Optimize and replace the canonical GCS object.
+    3. For videos: generate a thumbnail.
+    4. Update status to READY only after processing succeeds.
 
     Args:
         media_id: UUID of the MediaFile to process.
@@ -53,17 +53,16 @@ def process_media_upload(self, media_id: str) -> None:
     )
 
     try:
-        # Thumbnail generation is non-fatal — a failure here must never
-        # prevent the video from being marked READY and viewable.
+        if media_file.status == MediaStatus.PENDING:
+            media_file.status = MediaStatus.PROCESSING
+            media_file.save(update_fields=["status", "updated_at"])
+
+        if media_file.media_type == MediaType.IMAGE:
+            _optimize_image_media(media_file)
+
         if media_file.media_type == MediaType.VIDEO:
-            try:
-                _generate_video_thumbnail(media_file)
-            except Exception as thumb_exc:
-                logger.error(
-                    "Thumbnail generation failed — video will be READY without thumbnail",
-                    extra={"media_id": media_id, "error": str(thumb_exc)},
-                    exc_info=True,
-                )
+            _optimize_video_media(media_file)
+            _generate_video_thumbnail(media_file)
 
         media_file.status = MediaStatus.READY
         media_file.save(update_fields=["status", "updated_at"])
@@ -85,6 +84,193 @@ def process_media_upload(self, media_id: str) -> None:
 
         # Retry on catastrophic failure (DB unavailable, OOM, etc.)
         raise self.retry(exc=exc) from exc
+
+
+@shared_task(bind=True, max_retries=1, default_retry_delay=60, time_limit=180)
+def cleanup_stale_media_uploads(self) -> int:
+    """Mark stale unprocessed media failed and remove abandoned GCS objects."""
+    cutoff = timezone.now() - timezone.timedelta(hours=settings.MEDIA_STALE_UPLOAD_HOURS)
+    stale_media = list(
+        MediaFile.objects.filter(
+            status__in=[MediaStatus.PENDING, MediaStatus.PROCESSING],
+            updated_at__lt=cutoff,
+        )[:250]
+    )
+    deleted = 0
+    try:
+        bucket = _get_gcs_bucket()
+        for media_file in stale_media:
+            if media_file.storage_path:
+                try:
+                    bucket.blob(media_file.storage_path).delete()
+                    deleted += 1
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning(
+                        "stale_media_blob_delete_failed",
+                        extra={"media_id": str(media_file.id), "error": str(exc)},
+                    )
+            media_file.status = MediaStatus.FAILED
+            media_file.save(update_fields=["status", "updated_at"])
+    except Exception as exc:
+        logger.error("stale_media_cleanup_failed", exc_info=True)
+        raise self.retry(exc=exc) from exc
+
+    logger.info(
+        "stale_media_cleanup_complete", extra={"count": len(stale_media), "deleted": deleted}
+    )
+    return len(stale_media)
+
+
+def _optimize_image_media(media_file: MediaFile) -> None:
+    """Download, optimize, and replace an image blob in GCS."""
+    suffix = Path(media_file.storage_path).suffix or ".img"
+    with tempfile.TemporaryDirectory() as tmpdir:
+        original_path = Path(tmpdir) / f"original{suffix}"
+        optimized_path = Path(tmpdir) / f"optimized{suffix}"
+
+        _download_blob(media_file.storage_path, original_path)
+        content_type, width, height = _optimize_image_file(
+            original_path,
+            optimized_path,
+            media_file.file_type,
+        )
+        _upload_blob(media_file.storage_path, optimized_path, content_type)
+
+        media_file.file_type = content_type
+        media_file.file_size = optimized_path.stat().st_size
+        media_file.width = width
+        media_file.height = height
+        media_file.save(update_fields=["file_type", "file_size", "width", "height", "updated_at"])
+
+
+def _optimize_video_media(media_file: MediaFile) -> None:
+    """Download, normalize, and replace a video blob in GCS."""
+    suffix = Path(media_file.storage_path).suffix or ".mp4"
+    with tempfile.TemporaryDirectory() as tmpdir:
+        original_path = Path(tmpdir) / f"original{suffix}"
+        optimized_path = Path(tmpdir) / "optimized.mp4"
+
+        _download_blob(media_file.storage_path, original_path)
+        _optimize_video_file(original_path, optimized_path)
+        _upload_blob(media_file.storage_path, optimized_path, "video/mp4")
+
+        media_file.file_type = "video/mp4"
+        media_file.file_size = optimized_path.stat().st_size
+        media_file.save(update_fields=["file_type", "file_size", "updated_at"])
+
+
+def _optimize_image_file(
+    input_path: Path,
+    output_path: Path,
+    content_type: str,
+) -> tuple[str, int, int]:
+    """Resize and compress an image file, returning content type and dimensions."""
+    from PIL import Image, ImageOps
+
+    with Image.open(input_path) as image:
+        image = ImageOps.exif_transpose(image)
+        image.thumbnail(
+            (settings.MEDIA_IMAGE_MAX_DIMENSION, settings.MEDIA_IMAGE_MAX_DIMENSION),
+            Image.Resampling.LANCZOS,
+        )
+        width, height = image.size
+
+        if content_type in {"image/jpeg", "image/jpg"}:
+            optimized = image.convert("RGB")
+            optimized.save(
+                output_path,
+                format="JPEG",
+                quality=settings.MEDIA_IMAGE_JPEG_QUALITY,
+                optimize=True,
+                progressive=True,
+            )
+            return "image/jpeg", width, height
+
+        if content_type == "image/webp":
+            optimized = image.convert("RGBA" if _has_alpha(image) else "RGB")
+            optimized.save(
+                output_path,
+                format="WEBP",
+                quality=settings.MEDIA_IMAGE_JPEG_QUALITY,
+                method=6,
+            )
+            return "image/webp", width, height
+
+        optimized = image.convert("RGBA" if _has_alpha(image) else "RGB")
+        optimized.save(output_path, format="PNG", optimize=True, compress_level=9)
+        return "image/png", width, height
+
+
+def _optimize_video_file(input_path: Path, output_path: Path) -> None:
+    """Normalize video into a cost-conscious MP4 delivery profile."""
+    import imageio_ffmpeg
+
+    ffmpeg_bin = imageio_ffmpeg.get_ffmpeg_exe()
+    scale_filter = (
+        "scale="
+        f"if(gt(iw\\,ih)\\,min({settings.MEDIA_VIDEO_MAX_DIMENSION}\\,iw)\\,-2):"
+        f"if(gt(iw\\,ih)\\,-2\\,min({settings.MEDIA_VIDEO_MAX_DIMENSION}\\,ih))"
+    )
+    cmd = [
+        ffmpeg_bin,
+        "-y",
+        "-i",
+        str(input_path),
+        "-map_metadata",
+        "-1",
+        "-vf",
+        scale_filter,
+        "-c:v",
+        "libx264",
+        "-preset",
+        settings.MEDIA_VIDEO_PRESET,
+        "-crf",
+        str(settings.MEDIA_VIDEO_CRF),
+        "-pix_fmt",
+        "yuv420p",
+        "-movflags",
+        "+faststart",
+        "-c:a",
+        "aac",
+        "-b:a",
+        "96k",
+        str(output_path),
+    ]
+    result = subprocess.run(
+        cmd,  # noqa: S603
+        capture_output=True,
+        timeout=240,
+        check=False,
+    )
+    if result.returncode != 0:
+        stderr = result.stderr.decode("utf-8", errors="replace")
+        raise RuntimeError(f"FFmpeg video optimization failed: {stderr[:500]}")
+
+
+def _has_alpha(image) -> bool:
+    if image.mode in {"RGBA", "LA"}:
+        return True
+    return image.mode == "P" and "transparency" in image.info
+
+
+def _get_gcs_bucket():
+    from google.cloud import storage
+
+    if settings.GCP_CREDENTIALS_FILE and os.path.exists(settings.GCP_CREDENTIALS_FILE):
+        client = storage.Client.from_service_account_json(settings.GCP_CREDENTIALS_FILE)
+    else:
+        client = storage.Client()
+    return client.bucket(settings.GCP_STORAGE_BUCKET)
+
+
+def _download_blob(storage_path: str, destination: Path) -> None:
+    bucket = _get_gcs_bucket()
+    bucket.blob(storage_path).download_to_filename(str(destination))
+
+
+def _upload_blob(storage_path: str, source: Path, content_type: str) -> None:
+    bucket = _get_gcs_bucket()
+    bucket.blob(storage_path).upload_from_filename(str(source), content_type=content_type)
 
 
 def _generate_video_thumbnail(media_file: MediaFile) -> None:
@@ -111,8 +297,6 @@ def _generate_video_thumbnail(media_file: MediaFile) -> None:
         RuntimeError: If FFmpeg fails or produces no output.
         Exception: On GCS upload failure.
     """
-    from google.cloud import storage
-
     from core.media.services import _generate_gcp_signed_url
 
     # -----------------------------------------------------------------------
@@ -199,12 +383,7 @@ def _generate_video_thumbnail(media_file: MediaFile) -> None:
     # -----------------------------------------------------------------------
     thumbnail_path = f"thumbnails/{media_file.user_id}/{media_file.id}.jpg"
 
-    if settings.GCP_CREDENTIALS_FILE:
-        gcs_client = storage.Client.from_service_account_json(settings.GCP_CREDENTIALS_FILE)
-    else:
-        gcs_client = storage.Client()  # Uses Application Default Credentials
-
-    bucket = gcs_client.bucket(settings.GCP_STORAGE_BUCKET)
+    bucket = _get_gcs_bucket()
     blob = bucket.blob(thumbnail_path)
     blob.upload_from_string(jpeg_bytes, content_type="image/jpeg")
 

@@ -270,7 +270,7 @@ class TokenService:
 
             redis_conn = get_redis_connection("default")
             pattern = f"refresh:{user_id}:*"
-            keys = redis_conn.keys(pattern)
+            keys = list(_scan_redis_keys(redis_conn, pattern))
             if keys:
                 redis_conn.delete(*keys)
             logger.info(
@@ -301,8 +301,8 @@ class TokenService:
             pattern = f"refresh:{user_id}:*"
             keep_key = f"refresh:{user_id}:{keep_jti}"
 
-            keys = redis_conn.keys(pattern)
-            keys_to_delete = [k for k in keys if k.decode() != keep_key]
+            keys = list(_scan_redis_keys(redis_conn, pattern))
+            keys_to_delete = [key for key in keys if _decode_redis_key(key) != keep_key]
 
             if keys_to_delete:
                 redis_conn.delete(*keys_to_delete)
@@ -373,3 +373,15 @@ def _decode_rotation_value(value) -> dict | None:
             "refresh_token": data["refresh_token"],
         }
     return None
+
+
+def _scan_redis_keys(redis_conn, pattern: str):
+    """Yield Redis keys without using KEYS, which is costly and blocking at scale."""
+    yield from redis_conn.scan_iter(match=pattern, count=100)
+
+
+def _decode_redis_key(key) -> str:
+    """Normalize redis-py bytes/str keys for comparisons."""
+    if isinstance(key, bytes):
+        return key.decode("utf-8")
+    return str(key)

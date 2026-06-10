@@ -1,4 +1,8 @@
 # Render deployment configuration
+#
+# Production uses native Python runtime plus imageio-ffmpeg; no Docker image is
+# needed for media workers. Scheduled jobs are Render cron services instead of a
+# continuously running Celery beat service to keep monthly cost lower.
 
 services:
   - type: web
@@ -7,18 +11,11 @@ services:
     region: oregon
     plan: starter
     branch: staging
-    buildCommand: >-
-      pip install -r requirements.txt && 
-      python manage.py migrate --noinput && 
-      python manage.py setup_test_admin &&
-      python manage.py seed_legal_documents &&
-      python manage.py collectstatic --noinput && 
-      python manage.py seed_circle_sample_data &&
-      python manage.py shell -c "from strawberry.printer import print_schema; from config.graphql_schema import schema; open('schema.graphql', 'w').write(print_schema(schema))" && 
-      python manage.py import_bible kjv asv web rv --resume && 
-      npm install && 
-      npm run docs:build
-    startCommand: celery -A config worker --loglevel=info --concurrency=1 & gunicorn config.wsgi:application --bind 0.0.0.0:$PORT --workers 1 --threads 2 --timeout 120 --keep-alive 120
+    buildCommand: &buildCommand >-
+      pip install -r requirements.txt &&
+      python manage.py collectstatic --noinput
+    preDeployCommand: python manage.py migrate --noinput
+    startCommand: gunicorn config.wsgi:application --bind 0.0.0.0:$PORT --workers 1 --threads 2 --timeout 120 --keep-alive 120
     envVars:
       - key: DJANGO_SETTINGS_MODULE
         value: config.settings.staging
@@ -28,20 +25,16 @@ services:
         value: ziona-api-staging.onrender.com
       - key: DATABASE_URL
         sync: false
-      
       - key: REDIS_URL
         sync: false
-
       - key: CELERY_BROKER_URL
         sync: false
-
       - key: CELERY_RESULT_BACKEND
         sync: false
-
       - key: DJANGO_SECRET_KEY
-        generateValue: true
+        sync: false
       - key: JWT_SECRET_KEY
-        generateValue: true
+        sync: false
       - key: ENCRYPTION_KEY
         sync: false
       - key: GOOGLE_CLIENT_IDS
@@ -58,11 +51,181 @@ services:
         value: noreply@ziona.app
       - key: ENSEND_SENDER_NAME
         value: Ziona Team
-
       - key: SENTRY_DSN
         sync: false
-
       - key: CORS_ALLOWED_ORIGINS
-        value: http://localhost:3000,http://localhost:19006,http://localhost:8080,https://ziona-app-staging.netlify.app,https://ziona-admin-dashboard.vercel.app
+        value: https://ziona-app-staging.netlify.app,https://ziona-admin-dashboard-git-staging-zionking-llc.vercel.app,https://ziona-admin-dashboard.vercel.app
       - key: GCS_CORS_ALLOWED_ORIGINS
-        value: http://localhost:3000,http://localhost:19006,http://localhost:8080,https://ziona-app-staging.netlify.app,https://ziona-admin-dashboard.vercel.app
+        value: https://ziona-app-staging.netlify.app,https://ziona-admin-dashboard-git-staging-zionking-llc.vercel.app,https://ziona-admin-dashboard.vercel.app
+
+  - type: web
+    name: ziona-api-prod
+    runtime: python
+    region: oregon
+    plan: starter
+    branch: main
+    buildCommand: *buildCommand
+    preDeployCommand: python manage.py migrate --noinput
+    startCommand: gunicorn config.wsgi:application --bind 0.0.0.0:$PORT --workers 1 --threads 2 --timeout 120 --keep-alive 120
+    envVars: &prodEnv
+      - key: DJANGO_SETTINGS_MODULE
+        value: config.settings.production
+      - key: PYTHON_VERSION
+        value: "3.12.0"
+      - key: ALLOWED_HOSTS
+        value: api.ziona.app,ziona-server.onrender.com
+      - key: CORS_ALLOWED_ORIGINS
+        value: https://ziona.app,https://www.ziona.app,https://admin.ziona.app
+      - key: GCS_CORS_ALLOWED_ORIGINS
+        value: https://ziona.app,https://www.ziona.app,https://admin.ziona.app
+      - key: GCP_STORAGE_BUCKET
+        value: ziona-media-prod
+      - key: GCP_CREDENTIALS_FILE
+        value: /etc/secrets/gcp-credentials.json
+      - key: FIREBASE_CREDENTIALS_FILE
+        value: /etc/secrets/firebase-credentials.json
+      - key: DATABASE_URL
+        sync: false
+      - key: REDIS_URL
+        sync: false
+      - key: CELERY_BROKER_URL
+        sync: false
+      - key: CELERY_RESULT_BACKEND
+        sync: false
+      - key: DJANGO_SECRET_KEY
+        sync: false
+      - key: JWT_SECRET_KEY
+        sync: false
+      - key: ENCRYPTION_KEY
+        sync: false
+      - key: GOOGLE_CLIENT_IDS
+        sync: false
+      - key: APPLE_BUNDLE_ID
+        value: com.zionking.ziona
+      - key: APPLE_CLIENT_IDS
+        sync: false
+      - key: ENSEND_API_KEY
+        sync: false
+      - key: ENSEND_API_URL
+        value: https://api.smtpexpress.com/send
+      - key: DEFAULT_FROM_EMAIL
+        value: noreply@ziona.app
+      - key: ENSEND_SENDER_NAME
+        value: Ziona Team
+      - key: SENTRY_DSN
+        sync: false
+      - key: STRIPE_SECRET_KEY
+        sync: false
+      - key: STRIPE_WEBHOOK_SECRET
+        sync: false
+      - key: STRIPE_MONTHLY_PRICE_ID
+        sync: false
+
+  - type: worker
+    name: ziona-worker-prod
+    runtime: python
+    region: oregon
+    plan: starter
+    branch: main
+    buildCommand: *buildCommand
+    startCommand: python manage.py check_media_runtime && celery -A config worker --loglevel=info --concurrency=1
+    envVars: *prodEnv
+
+  - type: cron
+    name: ziona-cron-check-scheduled-anchors
+    runtime: python
+    region: oregon
+    plan: starter
+    branch: main
+    schedule: "* * * * *"
+    buildCommand: *buildCommand
+    startCommand: python manage.py enqueue_scheduled_task check-scheduled-anchors
+    envVars: *prodEnv
+
+  - type: cron
+    name: ziona-cron-refresh-dashboard-cache
+    runtime: python
+    region: oregon
+    plan: starter
+    branch: main
+    schedule: "*/5 * * * *"
+    buildCommand: *buildCommand
+    startCommand: python manage.py enqueue_scheduled_task refresh-dashboard-cache
+    envVars: *prodEnv
+
+  - type: cron
+    name: ziona-cron-refresh-company-stats
+    runtime: python
+    region: oregon
+    plan: starter
+    branch: main
+    schedule: "0 * * * *"
+    buildCommand: *buildCommand
+    startCommand: python manage.py enqueue_scheduled_task refresh-company-stats
+    envVars: *prodEnv
+
+  - type: cron
+    name: ziona-cron-daily-anchor-notifications
+    runtime: python
+    region: oregon
+    plan: starter
+    branch: main
+    schedule: "0 18 * * *"
+    buildCommand: *buildCommand
+    startCommand: python manage.py enqueue_scheduled_task send-daily-anchor-notifications
+    envVars: *prodEnv
+
+  - type: cron
+    name: ziona-cron-notification-digest
+    runtime: python
+    region: oregon
+    plan: starter
+    branch: main
+    schedule: "0 8 * * *"
+    buildCommand: *buildCommand
+    startCommand: python manage.py enqueue_scheduled_task send-daily-notification-digest
+    envVars: *prodEnv
+
+  - type: cron
+    name: ziona-cron-daily-analytics
+    runtime: python
+    region: oregon
+    plan: starter
+    branch: main
+    schedule: "5 0 * * *"
+    buildCommand: *buildCommand
+    startCommand: python manage.py enqueue_scheduled_task calculate-daily-analytics
+    envVars: *prodEnv
+
+  - type: cron
+    name: ziona-cron-expired-anchor-purge
+    runtime: python
+    region: oregon
+    plan: starter
+    branch: main
+    schedule: "0 2 * * *"
+    buildCommand: *buildCommand
+    startCommand: python manage.py enqueue_scheduled_task purge-expired-anchors
+    envVars: *prodEnv
+
+  - type: cron
+    name: ziona-cron-notification-cleanup
+    runtime: python
+    region: oregon
+    plan: starter
+    branch: main
+    schedule: "0 2 * * 0"
+    buildCommand: *buildCommand
+    startCommand: python manage.py enqueue_scheduled_task cleanup-old-notifications
+    envVars: *prodEnv
+
+  - type: cron
+    name: ziona-cron-stale-media-cleanup
+    runtime: python
+    region: oregon
+    plan: starter
+    branch: main
+    schedule: "30 2 * * *"
+    buildCommand: *buildCommand
+    startCommand: python manage.py enqueue_scheduled_task cleanup-stale-media
+    envVars: *prodEnv

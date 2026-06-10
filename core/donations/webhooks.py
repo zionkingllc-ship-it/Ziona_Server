@@ -29,6 +29,10 @@ def stripe_webhook(request: HttpRequest) -> JsonResponse:
     sig_header = request.META.get("HTTP_STRIPE_SIGNATURE", "")
     webhook_secret = getattr(settings, "STRIPE_WEBHOOK_SECRET", "")
 
+    if not webhook_secret:
+        logger.warning("stripe_webhook_not_configured")
+        return JsonResponse({"error": "Stripe webhook is not configured"}, status=503)
+
     try:
         import stripe
 

@@ -119,59 +119,58 @@ class DonationService:
                     }
 
                 # Monthly: create Subscription
+                plan_id = plan_id or getattr(settings, "STRIPE_MONTHLY_PRICE_ID", "")
                 if not plan_id:
-                    plan_id = getattr(settings, "STRIPE_MONTHLY_PRICE_ID", "")
-                    if not plan_id:
-                        raise AdminError(
-                            "Monthly plan ID is required for subscriptions.",
-                            ErrorCode.VALIDATION_ERROR,
-                        )
-
-                    subscription = stripe.Subscription.create(
-                        customer=customer_id,
-                        items=[{"price": plan_id}],
-                        payment_settings={
-                            "payment_method_types": ["card"],
-                            "save_default_payment_method": "on_subscription",
-                        },
-                        expand=["latest_invoice.payment_intent"],
-                        metadata={"donor_name": name, "donor_email": email},
+                    raise AdminError(
+                        "Monthly plan ID is required for subscriptions.",
+                        ErrorCode.VALIDATION_ERROR,
                     )
 
-                    donation = Donation.objects.create(
-                        donor_name=name,
-                        donor_email=email,
-                        amount=amount,
-                        type=DonationType.MONTHLY,
-                        status=DonationStatus.PENDING,
-                        stripe_payment_id=subscription["id"],
-                        stripe_customer_id=customer_id,
-                        is_early_supporter=_is_early_supporter(),
-                    )
+                subscription = stripe.Subscription.create(
+                    customer=customer_id,
+                    items=[{"price": plan_id}],
+                    payment_settings={
+                        "payment_method_types": ["card"],
+                        "save_default_payment_method": "on_subscription",
+                    },
+                    expand=["latest_invoice.payment_intent"],
+                    metadata={"donor_name": name, "donor_email": email},
+                )
 
-                    from core.donations.models import Subscription
+                donation = Donation.objects.create(
+                    donor_name=name,
+                    donor_email=email,
+                    amount=amount,
+                    type=DonationType.MONTHLY,
+                    status=DonationStatus.PENDING,
+                    stripe_payment_id=subscription["id"],
+                    stripe_customer_id=customer_id,
+                    is_early_supporter=_is_early_supporter(),
+                )
 
-                    Subscription.objects.create(
-                        donation=donation,
-                        stripe_subscription_id=subscription["id"],
-                        stripe_price_id=plan_id,
-                        billing_cycle_anchor=timezone.datetime.fromtimestamp(
-                            subscription["billing_cycle_anchor"],
-                            tz=timezone.utc,
-                        ),
-                    )
+                from core.donations.models import Subscription
 
-                    client_secret = None
-                    latest_invoice = subscription.get("latest_invoice")
-                    if latest_invoice and isinstance(latest_invoice, dict):
-                        payment_intent = latest_invoice.get("payment_intent")
-                        if payment_intent and isinstance(payment_intent, dict):
-                            client_secret = payment_intent.get("client_secret")
+                Subscription.objects.create(
+                    donation=donation,
+                    stripe_subscription_id=subscription["id"],
+                    stripe_price_id=plan_id,
+                    billing_cycle_anchor=timezone.datetime.fromtimestamp(
+                        subscription["billing_cycle_anchor"],
+                        tz=timezone.utc,
+                    ),
+                )
 
-                    return {
-                        "transaction_id": str(donation.id),
-                        "client_secret": client_secret,
-                    }
+                client_secret = None
+                latest_invoice = subscription.get("latest_invoice")
+                if latest_invoice and isinstance(latest_invoice, dict):
+                    payment_intent = latest_invoice.get("payment_intent")
+                    if payment_intent and isinstance(payment_intent, dict):
+                        client_secret = payment_intent.get("client_secret")
+
+                return {
+                    "transaction_id": str(donation.id),
+                    "client_secret": client_secret,
+                }
 
         except AdminError:
             raise

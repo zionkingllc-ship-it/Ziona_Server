@@ -29,8 +29,57 @@ class MediaUploadPayload:
     upload_url: str | None = None  # For signed URL approach
     media_id: str | None = None
     media_url: str | None = None
+    status: str | None = None
     expires_in: int | None = None
     error: ErrorType | None = None
+
+
+@strawberry.type
+class MediaStatusPayload:
+    """Response type for polling media processing state."""
+
+    success: bool
+    media_id: str | None = None
+    media_url: str | None = None
+    thumbnail_url: str | None = None
+    status: str | None = None
+    error: ErrorType | None = None
+
+
+@strawberry.type
+class MediaQueries:
+    """Media status queries."""
+
+    @strawberry.field(description="Return media processing status by media ID")
+    def media_status(
+        self,
+        info: strawberry.types.Info,
+        media_id: str,
+    ) -> MediaStatusPayload:
+        from core.media.models import MediaFile
+        from core.users.schema import _get_authenticated_user_id
+
+        user_id = _get_authenticated_user_id(info)
+        if not user_id:
+            return MediaStatusPayload(
+                success=False,
+                error=ErrorType(code="UNAUTHORIZED", message="Authentication required"),
+            )
+
+        media_file = MediaFile.objects.filter(id=media_id, user_id=user_id).first()
+        if not media_file:
+            return MediaStatusPayload(
+                success=False,
+                error=ErrorType(code="MEDIA_NOT_FOUND", message="Media file not found"),
+            )
+
+        return MediaStatusPayload(
+            success=True,
+            media_id=str(media_file.id),
+            media_url=media_file.url,
+            thumbnail_url=media_file.thumbnail_url,
+            status=media_file.status,
+        )
 
 
 @strawberry.type
@@ -78,6 +127,7 @@ class MediaMutations:
                 success=True,
                 media_id=str(media_file.id),
                 media_url=media_file.url,
+                status=media_file.status,
             )
 
         except (MediaError, ValueError) as e:
@@ -125,6 +175,7 @@ class MediaMutations:
                 upload_url=result["upload_url"],
                 media_id=result["media_id"],
                 media_url=result["media_url"],
+                status="pending",
                 expires_in=result["expires_in"],
             )
         except MediaError as e:
@@ -138,4 +189,41 @@ class MediaMutations:
             return MediaUploadPayload(
                 success=False,
                 error=ErrorType(code=code, message=message, field=field, details=details),
+            )
+
+    @strawberry.mutation(description="Confirm direct-to-GCS media upload and start processing")
+    def confirm_media_upload(
+        self,
+        info: strawberry.types.Info,
+        media_id: str,
+    ) -> MediaUploadPayload:
+        """Mark a signed-url upload complete and enqueue optimization."""
+        from core.media.services import MediaError, MediaService
+        from core.users.schema import _get_authenticated_user_id
+
+        user_id = _get_authenticated_user_id(info)
+        if not user_id:
+            return MediaUploadPayload(
+                success=False,
+                error=ErrorType(code="UNAUTHORIZED", message="Authentication required"),
+            )
+
+        try:
+            media_file = MediaService.confirm_upload(media_id=media_id, user_id=user_id)
+            return MediaUploadPayload(
+                success=True,
+                media_id=str(media_file.id),
+                media_url=media_file.url,
+                status=media_file.status,
+            )
+        except MediaError as e:
+            return MediaUploadPayload(
+                success=False,
+                media_id=media_id,
+                error=ErrorType(
+                    code=getattr(e, "code", "VALIDATION_ERROR"),
+                    message=getattr(e, "message", str(e)),
+                    field=getattr(e, "field", None),
+                    details=getattr(e, "details", None),
+                ),
             )
