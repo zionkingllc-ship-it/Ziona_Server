@@ -1,3 +1,5 @@
+import ssl
+
 import sentry_sdk
 from sentry_sdk.integrations.celery import CeleryIntegration
 from sentry_sdk.integrations.django import DjangoIntegration
@@ -35,9 +37,13 @@ CACHES = {
         "LOCATION": env("REDIS_URL"),  # noqa: F405
         "OPTIONS": {
             "CLIENT_CLASS": "django_redis.client.DefaultClient",
+            "CONNECTION_POOL_KWARGS": {"ssl_cert_reqs": ssl.CERT_REQUIRED},
         },
     }
 }
+
+CELERY_BROKER_USE_SSL = {"ssl_cert_reqs": ssl.CERT_REQUIRED}
+CELERY_REDIS_BACKEND_USE_SSL = {"ssl_cert_reqs": ssl.CERT_REQUIRED}
 
 CORS_ALLOW_ALL_ORIGINS = False
 
