@@ -21,6 +21,7 @@ class UserType:
     avatar_url: str
     role: str
     is_email_verified: bool
+    needs_username_selection: bool
     location: str
     created_at: str
 
@@ -36,6 +37,7 @@ class UserType:
             avatar_url=user.avatar_url,
             role=user.role,
             is_email_verified=user.is_email_verified,
+            needs_username_selection=getattr(user, "needs_username_selection", False),
             location=user.location,
             created_at=user.created_at.isoformat(),
         )

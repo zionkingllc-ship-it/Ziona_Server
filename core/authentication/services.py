@@ -525,6 +525,60 @@ class AuthService:
 
         return True
 
+    @staticmethod
+    def finalize_username(user_id: str, username: str) -> User:
+        """Set the permanent username for an authenticated OAuth-style account."""
+        try:
+            user = User.objects.get(id=user_id)
+        except User.DoesNotExist:
+            raise AuthenticationError("User not found", "USER_NOT_FOUND") from None
+
+        ensure_account_can_authenticate(user)
+
+        username = username.strip()
+        validate_username(username)
+
+        if User.all_objects.filter(username=username).exclude(id=user.id).exists():
+            raise AuthenticationError(
+                "Username already exists",
+                code="USERNAME_TAKEN",
+            )
+
+        user.username = username
+        user.needs_username_selection = False
+        user.save(update_fields=["username", "needs_username_selection", "updated_at"])
+        cache.delete(f"user_me_data_{user.id}")
+
+        return user
+
+    @staticmethod
+    def add_password(user_id: str, password: str) -> dict[str, Any]:
+        """Add a password to an authenticated OAuth-style account."""
+        from core.authentication.password_service import PasswordService
+
+        return PasswordService.add_password(user_id=user_id, password=password)
+
+    @staticmethod
+    def change_password(
+        user_id: str,
+        current_password: str,
+        new_password: str,
+        sign_out_other_devices: bool = False,
+        current_jti: str | None = None,
+        ip_address: str | None = None,
+    ) -> dict[str, Any]:
+        """Change a user's password through the shared authentication service."""
+        from core.authentication.password_service import PasswordService
+
+        return PasswordService.change_password(
+            user_id=user_id,
+            current_password=current_password,
+            new_password=new_password,
+            sign_out_other_devices=sign_out_other_devices,
+            current_jti=current_jti,
+            ip_address=ip_address,
+        )
+
     send_verification_otp = staticmethod(OTPService.send_verification_otp)
     verify_email_otp = staticmethod(OTPService.verify_email_otp)
     resend_verification_otp = staticmethod(OTPService.resend_verification_otp)

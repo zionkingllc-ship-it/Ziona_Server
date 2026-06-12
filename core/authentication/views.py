@@ -778,18 +778,13 @@ class FinalizeUsernameView(BaseAuthView):
             )
 
         try:
-            from core.authentication.account_status import ensure_account_can_authenticate
             from core.authentication.tokens import TokenService
-            from core.users.models import User
 
             payload = TokenService.validate_access_token(access_token)
             user_id = payload.get("user_id")
 
             if not user_id:
                 raise AuthenticationError("Invalid token payload", "INVALID_TOKEN")
-
-            user = User.objects.get(id=user_id)
-            ensure_account_can_authenticate(user)
 
             data = _parse_json_body(request)
             username = data.get("username", "").strip()
@@ -800,43 +795,17 @@ class FinalizeUsernameView(BaseAuthView):
                     code="MISSING_FIELDS",
                 )
 
-            from core.authentication.validators import validate_username
-
-            try:
-                validate_username(username)
-            except AuthenticationError as e:
-                return error_response(
-                    message=e.message,
-                    code=e.code,
-                )
-
-            if User.all_objects.filter(username=username).exclude(id=user.id).exists():
-                return error_response(
-                    message="Username already exists",
-                    code="USERNAME_TAKEN",
-                )
-
-            user.username = username
-            user.needs_username_selection = False
-            user.save(update_fields=["username", "needs_username_selection", "updated_at"])
-
-            from django.core.cache import cache
-
-            cache_key = f"user_me_data_{user.id}"
-            cache.delete(cache_key)
+            user = AuthService.finalize_username(
+                user_id=user_id,
+                username=username,
+            )
 
             return success_response(
                 data={
-                    "username": username,
+                    "username": user.username,
                     "message": "Username updated successfully",
                 }
             )
 
         except AuthenticationError as e:
             return _auth_error_response(e)
-        except User.DoesNotExist:
-            return error_response(
-                message="Authentication required",
-                code="UNAUTHENTICATED",
-                status=401,
-            )

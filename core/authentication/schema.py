@@ -9,13 +9,13 @@ from core.users.schema import UserType
 @strawberry.type
 class AuthPayload:
     """
-    Authentication response containing user object and JWT tokens.
+    Authentication response containing user details and optional JWT tokens.
 
-    Returned after successful login, registration, or token refresh operations.
-    Contains the user data along with access and refresh tokens for subsequent requests.
+    Used by token-oriented auth operations such as login and refresh. Some mutations
+    return user metadata without issuing tokens immediately.
 
     **Authentication:** Not required
-    **Related operations:** login, register, refresh_token
+    **Related operations:** login, refresh_token, verify_email, finalize_username
     """
 
     success: bool = strawberry.field(
@@ -31,9 +31,42 @@ class AuthPayload:
         default=None, description="JWT refresh token (valid for 7 days)"
     )
     message: str | None = strawberry.field(default=None, description="Success or error message")
+    requires_verification: bool = strawberry.field(
+        default=False,
+        description="Whether the user must complete email verification before tokens are issued",
+    )
     error_code: str | None = strawberry.field(
         default=None,
         description="Specific error code if operation failed (e.g. INVALID_CREDENTIALS)",
+    )
+    error: ErrorType | None = strawberry.field(default=None)
+
+
+@strawberry.type
+class RegisterPayload:
+    """
+    Response for password registration before email verification.
+
+    Mirrors ``AuthService.register`` by returning the created or refreshed unverified
+    user, an instructional message, and a verification flag without issuing tokens.
+
+    **Authentication:** Not required
+    **Related operations:** register, verify_otp
+    """
+
+    success: bool = strawberry.field(description="Whether the registration operation succeeded")
+    user: UserType | None = strawberry.field(
+        default=None,
+        description="The registered user data in its current unverified state",
+    )
+    message: str | None = strawberry.field(default=None, description="Success or error message")
+    requires_verification: bool = strawberry.field(
+        default=False,
+        description="Whether the client must verify the user's email before login tokens are issued",
+    )
+    error_code: str | None = strawberry.field(
+        default=None,
+        description="Specific error code if the operation failed (e.g. USERNAME_TAKEN)",
     )
     error: ErrorType | None = strawberry.field(default=None)
 
@@ -105,6 +138,27 @@ class OTPPayload:
     )
     error_code: str | None = strawberry.field(
         default=None, description="Specific error code if operation failed"
+    )
+    error: ErrorType | None = strawberry.field(default=None)
+
+
+@strawberry.type
+class PasswordResetRequestPayload:
+    """
+    Response for requesting a password reset code.
+
+    Mirrors the password-reset request flow by returning a generic success message
+    without exposing whether an account exists for the email address.
+
+    **Authentication:** Not required
+    **Related operations:** reset_password
+    """
+
+    success: bool = strawberry.field(description="Whether the request was accepted")
+    message: str | None = strawberry.field(default=None, description="Success or error message")
+    error_code: str | None = strawberry.field(
+        default=None,
+        description="Specific error code if the request failed",
     )
     error: ErrorType | None = strawberry.field(default=None)
 
@@ -188,6 +242,7 @@ class AuthQueries:
         self,
         info: strawberry.types.Info,
         email: str,
+        date_of_birth: str | None = None,
         dob: str | None = None,
     ) -> list[str]:
         """
@@ -198,13 +253,15 @@ class AuthQueries:
         **Authentication:** Not required
         **Parameters:**
         - email (String, required) - The user's email address
-        - dob (String, optional) - Date of birth (YYYY-MM-DD)
+        - date_of_birth (String, optional) - Date of birth (YYYY-MM-DD)
+        - dob (String, optional) - Legacy alias for date_of_birth
         **Returns:** A list of exactly 4 available username strings
         **Errors:** INVALID_EMAIL
         """
         from core.authentication.services import AuthService
 
-        return AuthService.suggest_usernames(email, dob)
+        effective_dob = date_of_birth if date_of_birth is not None else dob
+        return AuthService.suggest_usernames(email, effective_dob)
 
 
 @strawberry.type
@@ -212,42 +269,50 @@ class AuthMutations:
     """Authentication domain mutations."""
 
     @strawberry.mutation(
-        description="Create a new user account with email and password. Returns user object and JWT tokens for immediate login."
+        description=(
+            "Create a new unverified user account with email, password, username, and date of birth. "
+            "Queues an OTP and returns requiresVerification instead of tokens."
+        )
     )
     def register(
         self,
         info: strawberry.types.Info,
         email: str,
         password: str,
-        full_name: str = "",
-    ) -> AuthPayload:
+        username: str,
+        date_of_birth: str,
+    ) -> RegisterPayload:
         """
-        Create a new user account with email and password.
+        Create a new user account and trigger email verification.
 
-        Registers a new user on the platform. The username is set temporarily and is
-        finalized later during the onboarding process.
+        This mutation follows ``AuthService.register`` exactly: it validates the email,
+        password, username, and date of birth, stores an unverified account, and queues
+        an OTP email. Tokens are only issued after OTP verification.
 
         **Authentication:** Not required
         **Parameters:**
         - email (String, required) - Valid email address for the new account
         - password (String, required) - Secure password for the account
-        - full_name (String, optional) - User's full name
-        **Returns:** AuthPayload with user data and immediate JWT access/refresh tokens
+        - username (String, required) - Unique username selected during signup
+        - date_of_birth (String, required) - Date of birth in YYYY-MM-DD format
+        **Returns:** RegisterPayload with user data and requiresVerification=true
         **Example:**
         ```graphql
         mutation Register {
           register(
             email: "newuser@example.com",
             password: "securePassword123!",
-            fullName: "John Doe"
+            username: "newuser_95",
+            dateOfBirth: "1995-08-12"
           ) {
+            success
+            message
+            requiresVerification
             user { id username email }
-            accessToken
-            refreshToken
           }
         }
         ```
-        **Errors:** EMAIL_ALREADY_EXISTS, WEAK_PASSWORD, INVALID_EMAIL
+        **Errors:** EMAIL_ALREADY_REGISTERED, USERNAME_TAKEN, WEAK_PASSWORD, INVALID_EMAIL
         """
         from core.authentication.services import AuthenticationError, AuthService
 
@@ -258,47 +323,59 @@ class AuthMutations:
             result = AuthService.register(
                 email=email,
                 password=password,
-                full_name=full_name,
+                username=username,
+                date_of_birth=date_of_birth,
                 ip_address=ip,
             )
-            return AuthPayload(
+            return RegisterPayload(
                 success=True,
                 user=UserType.from_model(result["user"]),
-                access_token=result["access_token"],
-                refresh_token=result["refresh_token"],
+                message=result["message"],
+                requires_verification=result.get("requires_verification", False),
             )
         except AuthenticationError as e:
-            return AuthPayload(
+            return RegisterPayload(
                 success=False,
                 message=e.message,
                 error_code=e.code,
             )
 
     @strawberry.mutation(
-        description="Verify email address using verification token. Returns tokens for registration/verification or resetToken for password reset."
+        description=(
+            "Verify the email OTP issued by password registration or unverified login. "
+            "Returns the authenticated user and JWT tokens on success."
+        )
     )
     def verify_email(
         self,
         info: strawberry.types.Info,
-        token: str,
+        email: str,
+        code: str,
     ) -> AuthPayload:
         """
-        Verify user's email using a provided token.
+        Verify the email OTP issued by ``AuthService.register`` or ``AuthService.login``.
 
-        Used to finalize the email verification process after an OTP/token is sent.
+        This mutation mirrors the REST ``/api/auth/verify-email`` endpoint and the
+        underlying ``AuthService.verify_email_otp`` flow exactly. It validates the
+        ``otp:verify`` code, marks the user as verified, and returns access and refresh
+        tokens immediately.
 
         **Authentication:** Not required
         **Parameters:**
-        - token (String, required) - The verification token from the email
+        - email (String, required) - Email address for the account being verified
+        - code (String, required) - 6-digit OTP sent by the registration/login flow
         **Returns:** AuthPayload indicating success status and tokens
-        **Errors:** INVALID_TOKEN, TOKEN_EXPIRED, USER_NOT_FOUND
+        **Errors:** INVALID_OTP, OTP_EXPIRED, EMAIL_ALREADY_VERIFIED
         """
         from core.authentication.services import AuthenticationError, AuthService
 
         try:
-            AuthService.verify_email(token)
+            result = AuthService.verify_email_otp(email=email, code=code)
             return AuthPayload(
                 success=True,
+                user=UserType.from_model(result["user"]),
+                access_token=result["access_token"],
+                refresh_token=result["refresh_token"],
                 message="Email verified successfully",
             )
         except AuthenticationError as e:
@@ -309,7 +386,52 @@ class AuthMutations:
             )
 
     @strawberry.mutation(
-        description="Authenticate existing user with email/password. Returns user data and access/refresh tokens."
+        description=(
+            "Resend the verification OTP for an unverified password account. "
+            "Returns timing metadata for resend countdown UI."
+        )
+    )
+    def resend_verification_otp(
+        self,
+        info: strawberry.types.Info,
+        email: str,
+    ) -> OTPPayload:
+        """
+        Resend the verification OTP for the password register/login flow.
+
+        This mirrors ``AuthService.resend_verification_otp`` and the REST
+        ``/api/auth/resend-otp`` endpoint exactly. Use this after ``register`` or an
+        unverified ``login`` response, rather than the generic ``sendOtp`` route.
+
+        **Authentication:** Not required
+        **Parameters:**
+        - email (String, required) - Email address for the unverified account
+        **Returns:** OTPPayload with expiresIn and resendAfter values
+        **Errors:** EMAIL_ALREADY_VERIFIED, TOO_MANY_REQUESTS
+        """
+        from core.authentication.services import AuthenticationError, AuthService
+
+        try:
+            result = AuthService.resend_verification_otp(email=email)
+            return OTPPayload(
+                success=True,
+                message=result["message"],
+                expires_in=result["expires_in"],
+                purpose="email_verification",
+                resend_after=result.get("resend_after", 0),
+            )
+        except AuthenticationError as e:
+            return OTPPayload(
+                success=False,
+                message=e.message,
+                error_code=e.code,
+            )
+
+    @strawberry.mutation(
+        description=(
+            "Authenticate existing user with email/password. Verified users receive tokens; "
+            "unverified users receive requiresVerification and a fresh OTP."
+        )
     )
     def login(
         self,
@@ -320,13 +442,15 @@ class AuthMutations:
         """
         Authenticate existing user with email and password.
 
-        Validates credentials and returns JWT tokens for subsequent authenticated requests.
+        Validates credentials and mirrors ``AuthService.login`` exactly. Verified users
+        receive JWT tokens. Unverified users receive their user record, a message, and
+        ``requiresVerification=true`` after a new OTP is queued.
 
         **Authentication:** Not required
         **Parameters:**
         - email (String, required) - User's registered email address
         - password (String, required) - User's password
-        **Returns:** AuthPayload containing user data and JWT tokens
+        **Returns:** AuthPayload containing user data and either JWT tokens or requiresVerification
         **Example:**
         ```graphql
         mutation Login {
@@ -353,8 +477,10 @@ class AuthMutations:
             return AuthPayload(
                 success=True,
                 user=UserType.from_model(result["user"]),
-                access_token=result["access_token"],
-                refresh_token=result["refresh_token"],
+                access_token=result.get("access_token"),
+                refresh_token=result.get("refresh_token"),
+                message=result.get("message"),
+                requires_verification=result.get("requires_verification", False),
             )
         except AuthenticationError as e:
             return AuthPayload(
@@ -421,7 +547,7 @@ class AuthMutations:
         **Returns:** AddPasswordPayload indicating success and updated user data
         **Errors:** UNAUTHENTICATED, PASSWORD_ALREADY_SET, WEAK_PASSWORD
         """
-        from core.authentication.password_service import PasswordService
+        from core.authentication.services import AuthService
         from core.authentication.validators import AuthenticationError
         from core.users.schema import _get_authenticated_user_id
 
@@ -430,11 +556,11 @@ class AuthMutations:
             return AddPasswordPayload(
                 success=False,
                 message="Authentication required",
-                error_code="UNAUTHORIZED",
+                error_code="UNAUTHENTICATED",
             )
 
         try:
-            result = PasswordService.add_password(user_id, password)
+            result = AuthService.add_password(user_id=user_id, password=password)
             return AddPasswordPayload(
                 success=True,
                 message="Password added successfully. You can now login with email and password.",
@@ -485,7 +611,7 @@ class AuthMutations:
         ```
         **Errors:** UNAUTHENTICATED, INVALID_CREDENTIALS, WEAK_PASSWORD
         """
-        from core.authentication.password_service import PasswordService
+        from core.authentication.services import AuthService
         from core.authentication.tokens import TokenService
         from core.authentication.validators import AuthenticationError
         from core.users.schema import _get_authenticated_user_id
@@ -495,7 +621,7 @@ class AuthMutations:
             return ChangePasswordPayload(
                 success=False,
                 message="Authentication required",
-                error_code="UNAUTHORIZED",
+                error_code="UNAUTHENTICATED",
             )
 
         current_jti = None
@@ -515,7 +641,7 @@ class AuthMutations:
 
         try:
             request = info.context.request
-            result = PasswordService.change_password(
+            result = AuthService.change_password(
                 user_id=user_id,
                 current_password=current_password,
                 new_password=new_password,
@@ -568,12 +694,12 @@ class AuthMutations:
         ```
         **Errors:** EMAIL_REGISTERED_WITH_PASSWORD, EMAIL_REGISTERED_WITH_DIFFERENT_PROVIDER, INVALID_OAUTH_TOKEN
         """
-        from core.authentication.oauth_service import OAuthService
+        from core.authentication.services import AuthService
         from core.authentication.validators import AuthenticationError
 
         request = info.context.request
         try:
-            result = OAuthService.google_oauth_login(
+            result = AuthService.google_oauth_login(
                 id_token=id_token,
                 ip_address=request.META.get("REMOTE_ADDR", "unknown"),
             )
@@ -603,12 +729,12 @@ class AuthMutations:
         user: strawberry.scalars.JSON | None = None,
     ) -> GoogleOAuthPayload:
         """Authenticate user via Sign in with Apple."""
-        from core.authentication.oauth_service import OAuthService
+        from core.authentication.services import AuthService
         from core.authentication.validators import AuthenticationError
 
         request = info.context.request
         try:
-            result = OAuthService.apple_oauth_login(
+            result = AuthService.apple_oauth_login(
                 identity_token=identity_token,
                 raw_nonce=raw_nonce,
                 nonce=nonce,
@@ -630,7 +756,11 @@ class AuthMutations:
             )
 
     @strawberry.mutation(
-        description="Send one-time password code via email. Supports three purposes: registration, email_verification, password_reset. Rate-limited to 3 requests per 10 minutes."
+        description=(
+            "Send a purpose-scoped OTP via the unified OTP service. "
+            "Use this for generic OTP flows; use register/login/verifyEmail/resendVerificationOtp "
+            "for the password signup verification path."
+        )
     )
     def send_otp(
         self,
@@ -641,8 +771,9 @@ class AuthMutations:
         """
         Send a one-time password (OTP) code via email.
 
-        This is a unified router supporting OTPs for safe registration checkpoints,
-        internal email verification flows, or dedicated password recovery mechanisms.
+        This is a unified router for purpose-scoped OTP flows such as password reset and
+        account actions. Password signup verification has a dedicated GraphQL flow:
+        ``register`` -> ``verifyEmail`` or ``resendVerificationOtp``.
 
         **Authentication:** Not required
         **Parameters:**
@@ -651,12 +782,12 @@ class AuthMutations:
         **Returns:** OTPPayload with execution expiry time blocks
         **Errors:** INVALID_EMAIL, TOO_MANY_REQUESTS, INVALID_PURPOSE
         """
-        from core.authentication.otp_service import OTPService
+        from core.authentication.services import AuthService
         from core.authentication.validators import AuthenticationError
 
         request = info.context.request
         try:
-            result = OTPService.unified_send_otp(
+            result = AuthService.unified_send_otp(
                 email=email,
                 purpose=purpose,
                 ip_address=request.META.get("REMOTE_ADDR", "unknown"),
@@ -676,7 +807,10 @@ class AuthMutations:
             )
 
     @strawberry.mutation(
-        description="Verify OTP code and complete action. For registration/email_verification returns tokens. For password_reset returns resetToken for next step."
+        description=(
+            "Verify a purpose-scoped OTP through the unified OTP service. "
+            "For OTPs issued by password register/login, use verifyEmail instead."
+        )
     )
     def verify_otp(
         self,
@@ -686,11 +820,13 @@ class AuthMutations:
         purpose: str,
     ) -> VerifyOTPPayload:
         """
-        Verify an active OTP code and execute the desired sequence block.
+        Verify an active purpose-scoped OTP code and execute the desired sequence block.
 
-        Takes the user parameters correctly validating exact hash caches. If the purpose
-        is "password_reset", the return object strictly populates `resetToken` for authorization logic explicitly.
-        If it represents successful auth overrides (registration / verification), standard tokens are passed back.
+        This mutation is backed by ``OTPService.unified_verify_otp``. It is appropriate
+        for unified OTP purposes such as ``password_reset`` and explicit
+        ``email_verification`` sends through ``sendOtp``. For OTPs created by the
+        password ``register`` / unverified ``login`` flow, use ``verifyEmail`` instead
+        because those codes are namespaced under the legacy ``verify`` purpose.
 
         **Authentication:** Not required
         **Parameters:**
@@ -700,17 +836,16 @@ class AuthMutations:
         **Returns:** VerifyOTPPayload linking standard properties dynamically
         **Errors:** INVALID_OTP, OTP_EXPIRED, USER_NOT_FOUND, MAX_ATTEMPTS_EXCEEDED
         """
-        from core.authentication.otp_service import OTPService
+        from core.authentication.services import AuthService
         from core.authentication.validators import AuthenticationError
 
         request = info.context.request
         try:
-            result = OTPService.unified_verify_otp(
+            result = AuthService.unified_verify_otp(
                 email=email,
                 code=code,
                 purpose=purpose,
                 ip_address=request.META.get("REMOTE_ADDR", "unknown"),
-                user_agent=request.META.get("HTTP_USER_AGENT", ""),
             )
 
             payload = VerifyOTPPayload(
@@ -735,50 +870,54 @@ class AuthMutations:
             )
 
     @strawberry.mutation(
-        description="Request password reset via email. Sends OTP code to user's email address."
+        description=(
+            "Request a password reset code for the email/password flow. "
+            "Returns a generic success message to avoid exposing account existence."
+        )
     )
     def reset_password(
         self,
         info: strawberry.types.Info,
         email: str,
-    ) -> OTPPayload:
+    ) -> PasswordResetRequestPayload:
         """
         Request password reset via email.
 
-        A convenience wrapper around `sendOtp(purpose: "password_reset")`. Generates
-        and securely transmits a 6-digit recovery code.
+        This mirrors ``AuthService.request_password_reset`` and the REST
+        ``/api/auth/password-reset`` endpoint. The public response is intentionally
+        generic whether or not an account exists for the given email.
 
         **Authentication:** Not required
         **Parameters:**
         - email (String, required) - The user's secure active email mapping
-        **Returns:** OTPPayload matching standard structural timeout blocks
-        **Errors:** INVALID_EMAIL, TOO_MANY_REQUESTS
+        **Returns:** PasswordResetRequestPayload with a generic status message
+        **Errors:** OTP_STORAGE_FAILED, OTP_EMAIL_QUEUE_FAILED
         """
-        from core.authentication.password_service import PasswordService
+        from core.authentication.services import AuthService
         from core.authentication.validators import AuthenticationError
 
         request = info.context.request
         try:
-            result = PasswordService.request_password_reset(
+            AuthService.request_password_reset(
                 email=email,
                 ip_address=request.META.get("REMOTE_ADDR", "unknown"),
             )
-            return OTPPayload(
+            return PasswordResetRequestPayload(
                 success=True,
-                message=result["message"],
-                expires_in=result["expires_in"],
-                purpose="password_reset",
-                resend_after=result["resend_after"],
+                message="If an account with this email exists, a reset code has been sent.",
             )
         except AuthenticationError as e:
-            return OTPPayload(
+            return PasswordResetRequestPayload(
                 success=False,
                 message=e.message,
                 error_code=e.code,
             )
 
     @strawberry.mutation(
-        description="Complete password reset using resetToken from OTP verification. Sets new password and optionally signs out all other devices."
+        description=(
+            "Complete password reset using the resetToken returned by verifyOtp(password_reset). "
+            "Returns the authenticated user and a fresh token pair."
+        )
     )
     def confirm_password_reset(
         self,
@@ -786,37 +925,43 @@ class AuthMutations:
         reset_token: str,
         new_password: str,
         sign_out_all_devices: bool = False,
-    ) -> ChangePasswordPayload:
+    ) -> AuthPayload:
         """
         Complete password reset using resetToken natively.
 
-        Secures external password boundaries by taking the exclusive hashed JSONWebToken (the `resetToken`)
-        output strictly from the `verifyOtp` route mapped to execute a direct model commit dynamically.
+        This mirrors ``AuthService.reset_password_with_token`` exactly. It consumes the
+        reset token emitted by ``verifyOtp(purpose: "password_reset")``, sets the new
+        password, revokes prior sessions, and returns a fresh access/refresh token pair.
 
         **Authentication:** Not required
         **Parameters:**
         - reset_token (String, required) - Short-lived token verifying OTP fulfillment
-        - new_password (String, required) - Safely tested password limits mapped
-        - sign_out_all_devices (Boolean, optional, default: false) - Invalidate prior sessions
-        **Returns:** ChangePasswordPayload highlighting exactly how many device sessions dropped natively.
-        **Errors:** INVALID_TOKEN, TOKEN_EXPIRED, WEAK_PASSWORD
+        - new_password (String, required) - New password meeting password policy requirements
+        - sign_out_all_devices (Boolean, optional, default: false) - Accepted for API compatibility
+        **Returns:** AuthPayload containing the user and fresh JWT tokens
+        **Errors:** INVALID_RESET_TOKEN, TOKEN_VALIDATION_FAILED, WEAK_PASSWORD
         """
-        from core.authentication.password_service import PasswordService
+        from core.authentication.services import AuthService
         from core.authentication.validators import AuthenticationError
 
+        request = info.context.request
+
         try:
-            result = PasswordService.confirm_password_reset(
+            result = AuthService.reset_password_with_token(
                 reset_token=reset_token,
                 new_password=new_password,
                 sign_out_all_devices=sign_out_all_devices,
+                ip_address=request.META.get("REMOTE_ADDR", "unknown"),
             )
-            return ChangePasswordPayload(
+            return AuthPayload(
                 success=True,
-                message=result["message"],
-                signed_out_devices=result.get("signed_out_devices", 0),
+                user=UserType.from_model(result["user"]),
+                access_token=result["access_token"],
+                refresh_token=result["refresh_token"],
+                message="Password reset successfully",
             )
         except AuthenticationError as e:
-            return ChangePasswordPayload(
+            return AuthPayload(
                 success=False,
                 message=e.message,
                 error_code=e.code,
@@ -852,7 +997,7 @@ class AuthMutations:
             return AuthPayload(
                 success=False,
                 message="Authentication required",
-                error_code="UNAUTHORIZED",
+                error_code="UNAUTHENTICATED",
             )
 
         try:
