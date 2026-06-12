@@ -45,7 +45,7 @@ def test_graphql_register_matches_auth_service_contract(mock_email):
                 """,
                 "variables": {
                     "email": "graphql-register@example.com",
-                    "password": "SecureP@ss1",
+                    "password": "SecureP@ss1",  # pragma: allowlist secret
                     "username": "graphql_user",
                     "dateOfBirth": "1995-08-12",
                 },
@@ -77,7 +77,7 @@ def test_graphql_register_returns_service_validation_error_for_taken_username():
     User.objects.create_user(
         email="existing@example.com",
         username="taken_name",
-        password="SecureP@ss1",
+        password="SecureP@ss1",  # pragma: allowlist secret
     )
 
     response = client.post(
@@ -109,7 +109,7 @@ def test_graphql_register_returns_service_validation_error_for_taken_username():
                 """,
                 "variables": {
                     "email": "new-user@example.com",
-                    "password": "SecureP@ss1",
+                    "password": "SecureP@ss1",  # pragma: allowlist secret
                     "username": "taken_name",
                     "dateOfBirth": "1995-08-12",
                 },
@@ -135,7 +135,7 @@ def test_graphql_login_returns_requires_verification_for_unverified_user(mock_em
     user = User.objects.create_user(
         email="unverified@example.com",
         username="unverified_user",
-        password="SecureP@ss1",
+        password="SecureP@ss1",  # pragma: allowlist secret
         is_email_verified=False,
     )
     client = Client()
@@ -161,7 +161,7 @@ def test_graphql_login_returns_requires_verification_for_unverified_user(mock_em
                 """,
                 "variables": {
                     "email": "unverified@example.com",
-                    "password": "SecureP@ss1",
+                    "password": "SecureP@ss1",  # pragma: allowlist secret
                 },
             }
         ),
@@ -187,7 +187,7 @@ def test_graphql_verify_email_matches_auth_service_otp_flow(mock_email):
     client = Client()
     AuthService.register(
         email="verify-flow@example.com",
-        password="SecureP@ss1",
+        password="SecureP@ss1",  # pragma: allowlist secret
         username="verifyflow",
         date_of_birth="1995-08-12",
     )
@@ -277,7 +277,7 @@ def test_graphql_resend_verification_otp_matches_auth_service_flow(mock_email):
     client = Client()
     AuthService.register(
         email="resend-flow@example.com",
-        password="SecureP@ss1",
+        password="SecureP@ss1",  # pragma: allowlist secret
         username="resendflow",
         date_of_birth="1995-08-12",
     )
@@ -353,7 +353,7 @@ def test_graphql_reset_password_matches_public_request_flow(mock_email):
     User.objects.create_user(
         email="reset-request@example.com",
         username="resetrequest",
-        password="SecureP@ss1",
+        password="SecureP@ss1",  # pragma: allowlist secret
     )
     client = Client()
 
@@ -394,7 +394,7 @@ def test_graphql_confirm_password_reset_matches_auth_service_flow(mock_email):
     user = User.objects.create_user(
         email="reset-confirm@example.com",
         username="resetconfirm",
-        password="OldSecureP@ss1",
+        password="OldSecureP@ss1",  # pragma: allowlist secret
     )
     client = Client()
 
@@ -453,7 +453,7 @@ def test_graphql_confirm_password_reset_matches_auth_service_flow(mock_email):
                 """,
                 "variables": {
                     "resetToken": reset_token,
-                    "newPassword": "BrandNewP@ss1",
+                    "newPassword": "BrandNewP@ss1",  # pragma: allowlist secret
                 },
             }
         ),
@@ -478,7 +478,7 @@ def test_graphql_finalize_username_uses_auth_service_and_exposes_flag():
     user = User.objects.create_user(
         email="graphql-finalize@example.com",
         username="temp_graphql_user",
-        password="SecureP@ss1",
+        password="SecureP@ss1",  # pragma: allowlist secret
         needs_username_selection=True,
     )
     access_token = TokenService.generate_access_token(str(user.id), user.role)
@@ -551,7 +551,7 @@ def test_graphql_add_password_uses_auth_service_flow():
                     }
                 """,
                 "variables": {
-                    "password": "FreshSecureP@ss1",
+                    "password": "FreshSecureP@ss1",  # pragma: allowlist secret
                 },
             }
         ),
@@ -576,7 +576,7 @@ def test_graphql_change_password_uses_auth_service_flow():
     user = User.objects.create_user(
         email="graphql-change@example.com",
         username="graphqlchange",
-        password="OldSecureP@ss1",
+        password="OldSecureP@ss1",  # pragma: allowlist secret
         is_email_verified=True,
     )
     access_token = TokenService.generate_access_token(str(user.id), user.role)
@@ -600,8 +600,8 @@ def test_graphql_change_password_uses_auth_service_flow():
                     }
                 """,
                 "variables": {
-                    "currentPassword": "OldSecureP@ss1",
-                    "newPassword": "NewSecureP@ss2",
+                    "currentPassword": "OldSecureP@ss1",  # pragma: allowlist secret
+                    "newPassword": "NewSecureP@ss2",  # pragma: allowlist secret
                 },
             }
         ),
