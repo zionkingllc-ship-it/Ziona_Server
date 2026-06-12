@@ -1,5 +1,6 @@
 """Project-specific checks for the Render blueprint."""
 
+import re
 from pathlib import Path
 
 from django.conf import settings
@@ -7,6 +8,7 @@ from django.core.management.base import BaseCommand, CommandError
 
 REQUIRED_SERVICES = {
     "ziona-api-staging",
+    "ziona-worker-staging",
     "ziona-api-prod",
     "ziona-worker-prod",
     "ziona-cron-check-scheduled-anchors",
@@ -58,6 +60,21 @@ class Command(BaseCommand):
         )
         if missing_env:
             raise CommandError(f"render.yaml missing env vars: {', '.join(missing_env)}")
+
+        missing_checks_pass = []
+        for service in sorted(REQUIRED_SERVICES):
+            service_match = re.search(
+                rf"(?ms)^  - type: [^\n]+\n    name: {re.escape(service)}\n.*?(?=^  - type: |\Z)",
+                text,
+            )
+            if service_match and "autoDeployTrigger: checksPass" not in service_match.group(0):
+                missing_checks_pass.append(service)
+
+        if missing_checks_pass:
+            raise CommandError(
+                "render.yaml services must deploy from Git after checks pass: "
+                + ", ".join(missing_checks_pass)
+            )
 
         if "ziona-beat-prod" in text:
             raise CommandError("render.yaml must use Render cron jobs, not ziona-beat-prod")

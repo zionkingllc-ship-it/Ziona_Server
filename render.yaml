@@ -11,12 +11,13 @@ services:
     region: oregon
     plan: starter
     branch: staging
+    autoDeployTrigger: checksPass
     buildCommand: &buildCommand >-
       pip install -r requirements.txt &&
       python manage.py collectstatic --noinput
     preDeployCommand: python manage.py migrate --noinput
     startCommand: gunicorn config.wsgi:application --bind 0.0.0.0:$PORT --workers 1 --threads 2 --timeout 120 --keep-alive 120
-    envVars:
+    envVars: &stagingEnv
       - key: DJANGO_SETTINGS_MODULE
         value: config.settings.staging
       - key: PYTHON_VERSION
@@ -57,6 +58,23 @@ services:
         value: https://ziona-app-staging.netlify.app,https://ziona-admin-dashboard-git-staging-zionking-llc.vercel.app,https://ziona-admin-dashboard.vercel.app
       - key: GCS_CORS_ALLOWED_ORIGINS
         value: https://ziona-app-staging.netlify.app,https://ziona-admin-dashboard-git-staging-zionking-llc.vercel.app,https://ziona-admin-dashboard.vercel.app
+      - key: GCP_STORAGE_BUCKET
+        value: ziona-media-staging
+      - key: GCP_CREDENTIALS_FILE
+        value: /etc/secrets/gcp-credentials.json
+      - key: FIREBASE_CREDENTIALS_FILE
+        value: /etc/secrets/firebase-credentials.json
+
+  - type: worker
+    name: ziona-worker-staging
+    runtime: python
+    region: oregon
+    plan: starter
+    branch: staging
+    autoDeployTrigger: checksPass
+    buildCommand: *buildCommand
+    startCommand: python manage.py check_media_runtime && celery -A config worker --loglevel=info --concurrency=1
+    envVars: *stagingEnv
 
   - type: web
     name: ziona-api-prod
@@ -64,6 +82,7 @@ services:
     region: oregon
     plan: starter
     branch: main
+    autoDeployTrigger: checksPass
     buildCommand: *buildCommand
     preDeployCommand: python manage.py migrate --noinput
     startCommand: gunicorn config.wsgi:application --bind 0.0.0.0:$PORT --workers 1 --threads 2 --timeout 120 --keep-alive 120
@@ -127,6 +146,7 @@ services:
     region: oregon
     plan: starter
     branch: main
+    autoDeployTrigger: checksPass
     buildCommand: *buildCommand
     startCommand: python manage.py check_media_runtime && celery -A config worker --loglevel=info --concurrency=1
     envVars: *prodEnv
@@ -137,6 +157,7 @@ services:
     region: oregon
     plan: starter
     branch: main
+    autoDeployTrigger: checksPass
     schedule: "* * * * *"
     buildCommand: *buildCommand
     startCommand: python manage.py enqueue_scheduled_task check-scheduled-anchors
@@ -148,6 +169,7 @@ services:
     region: oregon
     plan: starter
     branch: main
+    autoDeployTrigger: checksPass
     schedule: "*/5 * * * *"
     buildCommand: *buildCommand
     startCommand: python manage.py enqueue_scheduled_task refresh-dashboard-cache
@@ -159,6 +181,7 @@ services:
     region: oregon
     plan: starter
     branch: main
+    autoDeployTrigger: checksPass
     schedule: "0 * * * *"
     buildCommand: *buildCommand
     startCommand: python manage.py enqueue_scheduled_task refresh-company-stats
@@ -170,6 +193,7 @@ services:
     region: oregon
     plan: starter
     branch: main
+    autoDeployTrigger: checksPass
     schedule: "0 18 * * *"
     buildCommand: *buildCommand
     startCommand: python manage.py enqueue_scheduled_task send-daily-anchor-notifications
@@ -181,6 +205,7 @@ services:
     region: oregon
     plan: starter
     branch: main
+    autoDeployTrigger: checksPass
     schedule: "0 8 * * *"
     buildCommand: *buildCommand
     startCommand: python manage.py enqueue_scheduled_task send-daily-notification-digest
@@ -192,6 +217,7 @@ services:
     region: oregon
     plan: starter
     branch: main
+    autoDeployTrigger: checksPass
     schedule: "5 0 * * *"
     buildCommand: *buildCommand
     startCommand: python manage.py enqueue_scheduled_task calculate-daily-analytics
@@ -203,6 +229,7 @@ services:
     region: oregon
     plan: starter
     branch: main
+    autoDeployTrigger: checksPass
     schedule: "0 2 * * *"
     buildCommand: *buildCommand
     startCommand: python manage.py enqueue_scheduled_task purge-expired-anchors
@@ -214,6 +241,7 @@ services:
     region: oregon
     plan: starter
     branch: main
+    autoDeployTrigger: checksPass
     schedule: "0 2 * * 0"
     buildCommand: *buildCommand
     startCommand: python manage.py enqueue_scheduled_task cleanup-old-notifications
@@ -225,6 +253,7 @@ services:
     region: oregon
     plan: starter
     branch: main
+    autoDeployTrigger: checksPass
     schedule: "30 2 * * *"
     buildCommand: *buildCommand
     startCommand: python manage.py enqueue_scheduled_task cleanup-stale-media

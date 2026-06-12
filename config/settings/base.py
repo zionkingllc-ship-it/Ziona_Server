@@ -217,6 +217,27 @@ CELERY_TASK_SERIALIZER = "json"
 CELERY_RESULT_SERIALIZER = "json"
 CELERY_TIMEZONE = "UTC"
 CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True
+CELERY_BROKER_POOL_LIMIT = env.int("CELERY_BROKER_POOL_LIMIT", default=2)
+CELERY_WORKER_PREFETCH_MULTIPLIER = env.int("CELERY_WORKER_PREFETCH_MULTIPLIER", default=1)
+CELERY_WORKER_CANCEL_LONG_RUNNING_TASKS_ON_CONNECTION_LOSS = env.bool(
+    "CELERY_WORKER_CANCEL_LONG_RUNNING_TASKS_ON_CONNECTION_LOSS",
+    default=True,
+)
+CELERY_BROKER_TRANSPORT_OPTIONS = {
+    "visibility_timeout": env.int("CELERY_VISIBILITY_TIMEOUT", default=3600),
+    "socket_connect_timeout": env.int("CELERY_REDIS_SOCKET_CONNECT_TIMEOUT", default=10),
+    "socket_timeout": env.int("CELERY_REDIS_SOCKET_TIMEOUT", default=30),
+    "socket_keepalive": True,
+    "retry_on_timeout": True,
+    "health_check_interval": env.int("CELERY_REDIS_HEALTH_CHECK_INTERVAL", default=30),
+}
+CELERY_RESULT_BACKEND_TRANSPORT_OPTIONS = {
+    "socket_connect_timeout": env.int("CELERY_REDIS_SOCKET_CONNECT_TIMEOUT", default=10),
+    "socket_timeout": env.int("CELERY_REDIS_SOCKET_TIMEOUT", default=30),
+    "socket_keepalive": True,
+    "retry_on_timeout": True,
+    "health_check_interval": env.int("CELERY_REDIS_HEALTH_CHECK_INTERVAL", default=30),
+}
 CELERY_TASK_TRACK_STARTED = True
 CELERY_TASK_TIME_LIMIT = 300
 CELERY_BEAT_SCHEDULER = "django_celery_beat.schedulers:DatabaseScheduler"
