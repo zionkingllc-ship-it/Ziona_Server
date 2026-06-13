@@ -8,6 +8,8 @@ from django.utils import timezone
 
 from core.circles.anchor_services import create_anchor, get_anchor_history
 from core.circles.models import Anchor, Circle, CircleMembership, CirclePost, CircleRule
+from core.media.models import MediaFile, MediaStatus
+from core.media.models import MediaType as StoredMediaType
 
 
 def _make_user(email, username=None, full_name="", avatar_url=""):
@@ -37,6 +39,34 @@ def _graphql(query, variables=None, access_token=None):
     assert response.status_code == 200, content
     assert "errors" not in content, content.get("errors")
     return content["data"]
+
+
+def _make_media_file(
+    *,
+    user,
+    storage_path,
+    media_type=StoredMediaType.IMAGE,
+    thumbnail_path="",
+    width=1080,
+    height=1080,
+    duration=None,
+    status=MediaStatus.READY,
+):
+    file_name = storage_path.split("/")[-1]
+    file_type = "video/mp4" if media_type == StoredMediaType.VIDEO else "image/jpeg"
+    return MediaFile.objects.create(
+        user=user,
+        file_name=file_name,
+        file_type=file_type,
+        file_size=0,
+        media_type=media_type,
+        storage_path=storage_path,
+        thumbnail_path=thumbnail_path,
+        width=width,
+        height=height,
+        duration=duration,
+        status=status,
+    )
 
 
 @pytest.mark.django_db
@@ -146,6 +176,9 @@ class TestMobileGraphQLAlignment(TestCase):
         )
         from core.authentication.tokens import TokenService
 
+        self.author_access_token = TokenService.generate_access_token(
+            str(self.author.id), self.author.role
+        )
         self.viewer_access_token = TokenService.generate_access_token(
             str(self.viewer.id), self.viewer.role
         )
@@ -191,16 +224,31 @@ class TestMobileGraphQLAlignment(TestCase):
             published_at=now - timedelta(days=2),
             expires_at=now - timedelta(days=1),
         )
+        self.post_image_media = _make_media_file(
+            user=self.author,
+            storage_path="circle-posts/post-image.jpg",
+            width=1440,
+            height=1440,
+        )
+        self.trending_video_media = _make_media_file(
+            user=self.author,
+            storage_path="circle-posts/trending-video.mp4",
+            media_type=StoredMediaType.VIDEO,
+            thumbnail_path="circle-posts/trending-video-thumb.jpg",
+            width=1920,
+            height=1080,
+            duration=24,
+        )
         self.post = CirclePost.objects.create(
             circle=self.circle,
             user=self.author,
             text="God is so good!",
-            image_url="https://example.com/post.jpg",
             likes_count=24,
             comments_count=5,
             prayed_count=71,
             anchor_liked_count=18,
         )
+        self.post.media_files.set([self.post_image_media])
         self.viewer_post = CirclePost.objects.create(
             circle=self.circle,
             user=self.viewer,
@@ -219,6 +267,7 @@ class TestMobileGraphQLAlignment(TestCase):
             prayed_count=15,
             anchor_liked_count=10,
         )
+        self.trending_post.media_files.set([self.trending_video_media])
 
     def test_circle_query_exposes_mobile_aliases_rules_and_anchor_fields(self):
         data = _graphql(
@@ -377,6 +426,274 @@ class TestMobileGraphQLAlignment(TestCase):
         self.assertEqual(feed_post["user"]["avatar"], "https://example.com/avatar.jpg")
         self.assertEqual(data["circleFeed"]["pageInfo"]["totalCount"], 3)
         self.assertEqual(data["circlePosts"]["pageInfo"]["totalCount"], 3)
+
+    def test_circle_post_queries_expose_unified_media_contract(self):
+        data = _graphql(
+            """
+            query MediaContract($circleId: String!, $postId: String!) {
+              circleFeed(circleId: $circleId) {
+                posts {
+                  id
+                  media { id url thumbnailUrl type width height duration }
+                  mediaUrl
+                  mediaType
+                  image { items { id url type width height } }
+                  video { url thumbnailUrl duration width height }
+                }
+              }
+              circlePosts(circleId: $circleId) {
+                posts {
+                  id
+                  media { id url type }
+                  mediaUrl
+                  mediaType
+                }
+              }
+              circlePost(id: $postId) {
+                id
+                media { id url thumbnailUrl type width height duration }
+                mediaUrl
+                mediaType
+                image { items { id url type width height } }
+                video { url thumbnailUrl duration width height }
+              }
+              circleFeedData(circleId: $circleId) {
+                posts {
+                  id
+                  media { id url thumbnailUrl type width height duration }
+                  mediaUrl
+                  mediaType
+                  image { items { id url type width height } }
+                  video { url thumbnailUrl duration width height }
+                }
+              }
+            }
+            """,
+            {"circleId": str(self.circle.id), "postId": str(self.post.id)},
+        )
+
+        feed_posts = {post["id"]: post for post in data["circleFeed"]["posts"]}
+        alias_posts = {post["id"]: post for post in data["circlePosts"]["posts"]}
+        feed_data_posts = {post["id"]: post for post in data["circleFeedData"]["posts"]}
+        detail_post = data["circlePost"]
+
+        image_post = feed_posts[str(self.post.id)]
+        self.assertEqual(image_post["mediaUrl"], self.post_image_media.url)
+        self.assertEqual(image_post["mediaType"], "image")
+        self.assertEqual(image_post["media"][0]["type"], "IMAGE")
+        self.assertEqual(image_post["image"]["items"][0]["url"], self.post_image_media.url)
+        self.assertIsNone(image_post["video"])
+        self.assertEqual(alias_posts[str(self.post.id)]["mediaUrl"], self.post_image_media.url)
+        self.assertEqual(
+            feed_data_posts[str(self.post.id)]["image"]["items"][0]["id"],
+            str(self.post_image_media.id),
+        )
+
+        video_post = feed_posts[str(self.trending_post.id)]
+        self.assertEqual(video_post["mediaUrl"], self.trending_video_media.url)
+        self.assertEqual(video_post["mediaType"], "video")
+        self.assertEqual(video_post["media"][0]["type"], "VIDEO")
+        self.assertEqual(video_post["video"]["url"], self.trending_video_media.url)
+        self.assertEqual(
+            video_post["video"]["thumbnailUrl"],
+            self.trending_video_media.thumbnail_url,
+        )
+        self.assertEqual(video_post["video"]["duration"], 24)
+        self.assertIsNone(video_post["image"])
+
+        self.assertEqual(detail_post["mediaUrl"], self.post_image_media.url)
+        self.assertEqual(detail_post["image"]["items"][0]["url"], self.post_image_media.url)
+        self.assertIsNone(detail_post["video"])
+
+    def test_create_circle_post_accepts_ready_image_media_ids(self):
+        create_media = _make_media_file(
+            user=self.author,
+            storage_path="circle-posts/new-image.jpg",
+            width=1200,
+            height=900,
+        )
+        data = _graphql(
+            """
+            mutation CreateCirclePost($circleId: String!, $mediaIds: [String!]) {
+              createCirclePost(circleId: $circleId, text: "Shared testimony", mediaIds: $mediaIds) {
+                success
+                error { code message }
+                post {
+                  id
+                  text
+                  media { id url type width height duration }
+                  mediaUrl
+                  mediaType
+                  image { items { id url type width height } }
+                  video { url }
+                }
+              }
+            }
+            """,
+            {"circleId": str(self.circle.id), "mediaIds": [str(create_media.id)]},
+            access_token=self.author_access_token,
+        )
+
+        payload = data["createCirclePost"]
+        self.assertTrue(payload["success"])
+        self.assertIsNone(payload["error"])
+        self.assertEqual(payload["post"]["mediaType"], "image")
+        self.assertEqual(payload["post"]["mediaUrl"], create_media.url)
+        self.assertEqual(payload["post"]["media"][0]["id"], str(create_media.id))
+        self.assertEqual(payload["post"]["image"]["items"][0]["url"], create_media.url)
+        self.assertIsNone(payload["post"]["video"])
+
+        created_post = CirclePost.objects.get(id=payload["post"]["id"])
+        self.assertEqual(created_post.image_url, "")
+        self.assertEqual(created_post.media_url, "")
+        self.assertEqual(
+            list(created_post.media_files.values_list("id", flat=True)), [create_media.id]
+        )
+
+    def test_create_circle_post_accepts_ready_video_media_ids(self):
+        create_media = _make_media_file(
+            user=self.author,
+            storage_path="circle-posts/new-video.mp4",
+            media_type=StoredMediaType.VIDEO,
+            thumbnail_path="circle-posts/new-video-thumb.jpg",
+            width=1280,
+            height=720,
+            duration=31,
+        )
+        data = _graphql(
+            """
+            mutation CreateCirclePost($circleId: String!, $mediaIds: [String!], $mediaType: MediaType) {
+              createCirclePost(
+                circleId: $circleId
+                mediaIds: $mediaIds
+                mediaType: $mediaType
+              ) {
+                success
+                error { code message }
+                post {
+                  id
+                  media { id url thumbnailUrl type width height duration }
+                  mediaUrl
+                  mediaType
+                  image { items { id } }
+                  video { url thumbnailUrl duration width height }
+                }
+              }
+            }
+            """,
+            {
+                "circleId": str(self.circle.id),
+                "mediaIds": [str(create_media.id)],
+                "mediaType": "VIDEO",
+            },
+            access_token=self.author_access_token,
+        )
+
+        payload = data["createCirclePost"]
+        self.assertTrue(payload["success"])
+        self.assertEqual(payload["post"]["mediaType"], "video")
+        self.assertEqual(payload["post"]["video"]["url"], create_media.url)
+        self.assertEqual(payload["post"]["video"]["thumbnailUrl"], create_media.thumbnail_url)
+        self.assertEqual(payload["post"]["video"]["duration"], 31)
+        self.assertIsNone(payload["post"]["image"])
+
+    def test_create_circle_post_accepts_media_urls_fallback(self):
+        fallback_url = "https://cdn.example.com/circle-posts/fallback.jpg"
+        data = _graphql(
+            """
+            mutation CreateCirclePost($circleId: String!, $mediaUrls: [String!], $width: Int, $height: Int) {
+              createCirclePost(
+                circleId: $circleId
+                text: "Fallback URL post"
+                mediaUrls: $mediaUrls
+                width: $width
+                height: $height
+              ) {
+                success
+                error { code message }
+                post {
+                  id
+                  media { id url type width height }
+                  mediaUrl
+                  mediaType
+                  image { items { id url width height } }
+                }
+              }
+            }
+            """,
+            {
+                "circleId": str(self.circle.id),
+                "mediaUrls": [fallback_url],
+                "width": 800,
+                "height": 600,
+            },
+            access_token=self.author_access_token,
+        )
+
+        payload = data["createCirclePost"]
+        self.assertTrue(payload["success"])
+        self.assertEqual(payload["post"]["mediaType"], "image")
+        self.assertEqual(payload["post"]["image"]["items"][0]["width"], 800)
+        created_post = CirclePost.objects.get(id=payload["post"]["id"])
+        attached_media = created_post.media_files.get()
+        self.assertEqual(attached_media.storage_path, fallback_url)
+        self.assertEqual(attached_media.status, MediaStatus.READY)
+
+    def test_create_circle_post_rejects_unready_media_ids(self):
+        mutation = """
+            mutation CreateCirclePost($circleId: String!, $mediaIds: [String!]) {
+              createCirclePost(circleId: $circleId, mediaIds: $mediaIds) {
+                success
+                error { code message }
+                post { id }
+              }
+            }
+        """
+        for status in (MediaStatus.PENDING, MediaStatus.PROCESSING, MediaStatus.FAILED):
+            media_file = _make_media_file(
+                user=self.author,
+                storage_path=f"circle-posts/{status}.jpg",
+                status=status,
+            )
+            with self.subTest(status=status):
+                data = _graphql(
+                    mutation,
+                    {"circleId": str(self.circle.id), "mediaIds": [str(media_file.id)]},
+                    access_token=self.author_access_token,
+                )
+                self.assertFalse(data["createCirclePost"]["success"])
+                self.assertEqual(data["createCirclePost"]["error"]["code"], "VALIDATION_ERROR")
+
+    def test_create_circle_post_rejects_mixed_image_and_video_media(self):
+        image_media = _make_media_file(
+            user=self.author,
+            storage_path="circle-posts/mixed-image.jpg",
+        )
+        video_media = _make_media_file(
+            user=self.author,
+            storage_path="circle-posts/mixed-video.mp4",
+            media_type=StoredMediaType.VIDEO,
+        )
+        data = _graphql(
+            """
+            mutation CreateCirclePost($circleId: String!, $mediaIds: [String!]) {
+              createCirclePost(circleId: $circleId, mediaIds: $mediaIds) {
+                success
+                error { code message }
+                post { id }
+              }
+            }
+            """,
+            {
+                "circleId": str(self.circle.id),
+                "mediaIds": [str(image_media.id), str(video_media.id)],
+            },
+            access_token=self.author_access_token,
+        )
+
+        payload = data["createCirclePost"]
+        self.assertFalse(payload["success"])
+        self.assertEqual(payload["error"]["code"], "VALIDATION_ERROR")
 
     def test_circle_feed_data_matches_mobile_shape(self):
         self.circle.display_member_count = 1247

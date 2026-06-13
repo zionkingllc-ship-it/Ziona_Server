@@ -426,6 +426,11 @@ class CirclePost(models.Model):
     text = models.TextField(blank=True, default="")
     image_url = models.URLField(max_length=500, blank=True, default="")
     media_url = models.URLField(max_length=500, blank=True, default="")
+    media_files = models.ManyToManyField(
+        "media.MediaFile",
+        related_name="circle_posts",
+        blank=True,
+    )
 
     # Denormalized engagement counters — updated atomically via F() expressions
     likes_count = models.PositiveIntegerField(default=0)

@@ -1,6 +1,7 @@
 # ──────────────────────────────────────────────
 #  Enums
 # ──────────────────────────────────────────────
+import dataclasses
 import enum
 from datetime import datetime
 
@@ -22,8 +23,11 @@ from core.circles.services import (
     pray_for_anchor,
     pray_for_circle_post,
 )
+from core.feed.schema import ImageData, VideoData
+from core.media.schema import MediaFileType
 from core.shared.exceptions import ZionaError
 from core.shared.types import ErrorType, PageInfo
+from core.shared.types import MediaType as GraphQLMediaType
 from core.users.schema import UserType, _get_authenticated_user_id
 
 
@@ -495,17 +499,81 @@ class CirclePostAuthorType:
         return instance
 
 
+def _media_file_to_graphql(media_file) -> MediaFileType:
+    return MediaFileType(
+        id=str(media_file.id),
+        url=media_file.url,
+        type=GraphQLMediaType[media_file.media_type.upper()],
+        width=media_file.width,
+        height=media_file.height,
+        thumbnail_url=media_file.thumbnail_url,
+        duration=int(media_file.duration) if media_file.duration is not None else None,
+    )
+
+
 @strawberry.type
 class CirclePostType:
     id: str
     user: CirclePostAuthorType
     created_at: datetime = strawberry.field(name="createdAt")
     text: str | None = None
-    image: str | None = None
     likes_count: int = strawberry.field(name="likesCount", default=0)
     comments_count: int = strawberry.field(name="commentsCount", default=0)
     prayed_count: int = strawberry.field(name="prayedCount", default=0)
     anchor_liked_count: int = strawberry.field(name="anchorLikedCount", default=0)
+    _media_list: strawberry.Private[list[MediaFileType]] = dataclasses.field(default_factory=list)
+
+    def _primary_media(self) -> MediaFileType | None:
+        videos = [media for media in self._media_list if media.type == GraphQLMediaType.VIDEO]
+        if videos:
+            return videos[0]
+        images = [media for media in self._media_list if media.type == GraphQLMediaType.IMAGE]
+        if images:
+            return images[0]
+        return None
+
+    @strawberry.field
+    def media(self) -> list[MediaFileType]:
+        return self._media_list
+
+    @strawberry.field(name="mediaUrl")
+    def media_url(self) -> str | None:
+        primary_media = self._primary_media()
+        return primary_media.url if primary_media else None
+
+    @strawberry.field(name="mediaType")
+    def media_type(self) -> str | None:
+        primary_media = self._primary_media()
+        if not primary_media:
+            return None
+        if primary_media.type == GraphQLMediaType.VIDEO:
+            return "video"
+        if primary_media.type == GraphQLMediaType.IMAGE:
+            return "image"
+        return None
+
+    @strawberry.field(description="Image data array mapping")
+    def image(self) -> ImageData | None:
+        image_items = [media for media in self._media_list if media.type == GraphQLMediaType.IMAGE]
+        if image_items:
+            return ImageData(items=image_items)
+        return None
+
+    @strawberry.field(description="Video metadata mapping")
+    def video(self) -> VideoData | None:
+        video_item = next(
+            (media for media in self._media_list if media.type == GraphQLMediaType.VIDEO),
+            None,
+        )
+        if not video_item:
+            return None
+        return VideoData(
+            url=video_item.url,
+            thumbnail_url=video_item.thumbnail_url,
+            duration=video_item.duration,
+            width=video_item.width,
+            height=video_item.height,
+        )
 
     @strawberry.field
     def likes(self) -> int:
@@ -550,11 +618,13 @@ class CirclePostType:
             user=CirclePostAuthorType.from_user(post.user),
             created_at=post.created_at,
             text=post.text or None,
-            image=post.image_url or None,
             likes_count=post.likes_count,
             comments_count=post.comments_count,
             prayed_count=post.prayed_count,
             anchor_liked_count=post.anchor_liked_count,
+            _media_list=[
+                _media_file_to_graphql(media_file) for media_file in post.media_files.all()
+            ],
         )
         # Carry viewer annotations from the ORM queryset onto the instance
         # so the viewerState resolver can read them without an extra DB call.
@@ -1323,8 +1393,13 @@ class CircleMutations:
         info: Info,
         circle_id: str,
         text: str | None = None,
-        image: str | None = None,
-        media_url: str | None = None,
+        media_ids: list[str] | None = None,
+        media_urls: list[str] | None = None,
+        media_type: GraphQLMediaType | None = None,
+        thumbnail_url: str | None = None,
+        width: int | None = None,
+        height: int | None = None,
+        duration: int | None = None,
     ) -> CreateCirclePostPayload:
         viewer_id = _get_authenticated_user_id(info)
         if not viewer_id:
@@ -1337,8 +1412,13 @@ class CircleMutations:
                 user_id=viewer_id,
                 circle_id=circle_id,
                 text=text or "",
-                image_url=image or "",
-                media_url=media_url or "",
+                media_ids=media_ids,
+                media_urls=media_urls,
+                media_type=media_type.value if media_type else None,
+                thumbnail_url=thumbnail_url,
+                width=width,
+                height=height,
+                duration=duration,
             )
             return CreateCirclePostPayload(success=True, post=CirclePostType.from_db_model(post))
         except ZionaError as e:

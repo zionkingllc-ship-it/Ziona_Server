@@ -7,9 +7,12 @@ from django.db import transaction
 from django.utils import timezone
 
 from core.circles.models import Anchor, AnchorPage, Circle, CircleMembership, CirclePost, CircleRule
+from core.media.models import MediaFile, MediaStatus
+from core.media.models import MediaType as StoredMediaType
 from core.users.models import User
 
 SYSTEM_EMAIL = "circles-sample-admin@ziona.app"
+VIDEO_EXTENSIONS = {".mp4", ".mov", ".webm", ".m4v"}
 
 
 CIRCLES = [
@@ -453,6 +456,31 @@ POSTS = [
 ]
 
 
+def _infer_seed_media_type(url: str) -> str:
+    extension = os.path.splitext(url.split("?")[0])[1].lower()
+    if extension in VIDEO_EXTENSIONS:
+        return StoredMediaType.VIDEO
+    return StoredMediaType.IMAGE
+
+
+def _seed_media_file_for_post(user: User, url: str) -> MediaFile:
+    media_type = _infer_seed_media_type(url)
+    file_name = url.split("/")[-1].split("?")[0] or "seeded-media"
+    file_type = "video/mp4" if media_type == StoredMediaType.VIDEO else "image/jpeg"
+    media_file, _ = MediaFile.objects.get_or_create(
+        user=user,
+        storage_path=url,
+        defaults={
+            "file_name": file_name,
+            "file_type": file_type,
+            "file_size": 0,
+            "media_type": media_type,
+            "status": MediaStatus.READY,
+        },
+    )
+    return media_file
+
+
 class Command(BaseCommand):
     help = "Seed staging/dev with mobile-ready sample Circles, Anchors, and Circle posts."
 
@@ -695,7 +723,8 @@ class Command(BaseCommand):
                 user=users[username],
                 text=text,
                 defaults={
-                    "image_url": image_url,
+                    "image_url": "",
+                    "media_url": "",
                     "likes_count": likes_count,
                     "comments_count": comments_count,
                     "prayed_count": prayed_count,
@@ -703,5 +732,9 @@ class Command(BaseCommand):
                     "deleted_at": None,
                 },
             )
+            if image_url:
+                post.media_files.set([_seed_media_file_for_post(users[username], image_url)])
+            else:
+                post.media_files.clear()
             post.created_at = now - timedelta(hours=hours_ago)
             post.save(update_fields=["created_at"])

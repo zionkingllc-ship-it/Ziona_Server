@@ -7,12 +7,16 @@ Tests for:
 - Error handling for all edge cases
 """
 
+import importlib
+
 import pytest
+from django.apps import apps as django_apps
 from django.test import TestCase
 
-from core.circles.models import Circle, CircleMembership
+from core.circles.models import Circle, CircleMembership, CirclePost
 from core.circles.services import (
     create_circle,
+    create_circle_post,
     ensure_circle_post_liked,
     get_all_circles,
     get_my_circles,
@@ -20,6 +24,8 @@ from core.circles.services import (
     join_circle,
     leave_circle,
 )
+from core.media.models import MediaFile, MediaStatus
+from core.media.models import MediaType as StoredMediaType
 from core.shared.exceptions import ZionaError
 
 
@@ -33,6 +39,26 @@ def _make_user(email, username=None):
         user.username = username
         user.save(update_fields=["username"])
     return user
+
+
+def _make_media_file(
+    *,
+    user,
+    storage_path,
+    media_type=StoredMediaType.IMAGE,
+    status=MediaStatus.READY,
+):
+    file_name = storage_path.split("/")[-1]
+    file_type = "video/mp4" if media_type == StoredMediaType.VIDEO else "image/jpeg"
+    return MediaFile.objects.create(
+        user=user,
+        file_name=file_name,
+        file_type=file_type,
+        file_size=0,
+        media_type=media_type,
+        storage_path=storage_path,
+        status=status,
+    )
 
 
 @pytest.mark.django_db
@@ -167,8 +193,6 @@ class TestCirclePostEngagement(TestCase):
     """Tests for circle post engagement helpers."""
 
     def setUp(self):
-        from core.circles.models import CirclePost
-
         self.user = _make_user("post-liker@test.com", "postliker")
         self.author = _make_user("post-author@test.com", "postauthor")
         self.circle = Circle.objects.create(
@@ -200,6 +224,113 @@ class TestCirclePostEngagement(TestCase):
                 engagement_type="like",
             ).count(),
             1,
+        )
+
+
+@pytest.mark.django_db
+class TestCirclePostMediaCreation(TestCase):
+    def setUp(self):
+        self.author = _make_user("circle-author@test.com", "circleauthor")
+        self.circle = Circle.objects.create(
+            name="Circle Media",
+            description="Circle for media post tests",
+            cover_image="https://example.com/cover.jpg",
+            created_by=self.author,
+        )
+        CircleMembership.objects.create(circle=self.circle, user=self.author, role="admin")
+
+    def test_create_circle_post_accepts_media_urls_fallback(self):
+        post = create_circle_post(
+            user_id=str(self.author.id),
+            circle_id=str(self.circle.id),
+            text="Fallback media",
+            media_urls=["https://cdn.example.com/circle-posts/fallback.jpg"],
+            width=1024,
+            height=768,
+        )
+
+        attached_media = list(post.media_files.all())
+        self.assertEqual(len(attached_media), 1)
+        self.assertEqual(
+            attached_media[0].storage_path, "https://cdn.example.com/circle-posts/fallback.jpg"
+        )
+        self.assertEqual(attached_media[0].status, MediaStatus.READY)
+        self.assertEqual(attached_media[0].width, 1024)
+        self.assertEqual(attached_media[0].height, 768)
+
+    def test_create_circle_post_rejects_mixed_media_types(self):
+        image_media = _make_media_file(user=self.author, storage_path="circle-posts/mixed.jpg")
+        video_media = _make_media_file(
+            user=self.author,
+            storage_path="circle-posts/mixed.mp4",
+            media_type=StoredMediaType.VIDEO,
+        )
+
+        with self.assertRaises(ZionaError) as ctx:
+            create_circle_post(
+                user_id=str(self.author.id),
+                circle_id=str(self.circle.id),
+                media_ids=[str(image_media.id), str(video_media.id)],
+            )
+
+        self.assertEqual(ctx.exception.code, "VALIDATION_ERROR")
+
+    def test_create_circle_post_rejects_unready_media_ids(self):
+        for status in (MediaStatus.PENDING, MediaStatus.PROCESSING, MediaStatus.FAILED):
+            media_file = _make_media_file(
+                user=self.author,
+                storage_path=f"circle-posts/{status}.jpg",
+                status=status,
+            )
+            with self.subTest(status=status):
+                with self.assertRaises(ZionaError) as ctx:
+                    create_circle_post(
+                        user_id=str(self.author.id),
+                        circle_id=str(self.circle.id),
+                        media_ids=[str(media_file.id)],
+                    )
+                self.assertEqual(ctx.exception.code, "VALIDATION_ERROR")
+
+
+@pytest.mark.django_db
+class TestCirclePostMediaMigration(TestCase):
+    def test_backfill_migrates_legacy_circle_post_urls_into_media_files(self):
+        author = _make_user("legacy-circle@test.com", "legacycircle")
+        circle = Circle.objects.create(
+            name="Legacy Circle",
+            description="Legacy media migration",
+            cover_image="https://example.com/cover.jpg",
+            created_by=author,
+        )
+        legacy_post = CirclePost.objects.create(
+            circle=circle,
+            user=author,
+            text="Legacy media",
+            image_url="https://cdn.example.com/circle-posts/legacy-image.jpg",
+            media_url="https://cdn.example.com/circle-posts/legacy-video.mp4",
+        )
+
+        migration_module = importlib.import_module(
+            "core.circles.migrations.0012_circlepost_media_files"
+        )
+        migration_module.backfill_circle_post_media_files(django_apps, None)
+
+        legacy_post.refresh_from_db()
+        attached_media = list(legacy_post.media_files.order_by("storage_path"))
+        self.assertEqual(len(attached_media), 2)
+        self.assertEqual(attached_media[0].status, MediaStatus.READY)
+        self.assertEqual(attached_media[0].duration, None)
+        self.assertEqual(attached_media[1].duration, None)
+        self.assertEqual(
+            {media.storage_path for media in attached_media},
+            {
+                "https://cdn.example.com/circle-posts/legacy-image.jpg",
+                "https://cdn.example.com/circle-posts/legacy-video.mp4",
+            },
+        )
+        self.assertEqual(
+            {media.media_type for media in attached_media},
+            {StoredMediaType.IMAGE, StoredMediaType.VIDEO},
         )
 
 

@@ -1,3 +1,8 @@
+import mimetypes
+import os
+import re
+from urllib.parse import urlparse
+
 from django.db import transaction
 from django.db.models import Count, Exists, F, OuterRef, Prefetch
 
@@ -9,6 +14,8 @@ from core.circles.models import (
     CirclePost,
     CirclePostEngagement,
 )
+from core.media.models import MediaFile, MediaStatus
+from core.media.models import MediaType as StoredMediaType
 from core.shared.exceptions import ZionaError
 
 # Shorthand error codes
@@ -165,6 +172,125 @@ def create_circle(creator_id: str, name: str, description: str, cover_image: str
 CIRCLE_POST_NOT_FOUND = "CIRCLE_POST_NOT_FOUND"
 ANCHOR_NOT_FOUND = "ANCHOR_NOT_FOUND"
 VALIDATION_ERROR = "VALIDATION_ERROR"
+VIDEO_EXTENSIONS = {".mp4", ".mov", ".webm", ".m4v"}
+URL_PATTERN = re.compile(
+    r"^(?:http|ftp)s?://"
+    r"(?:(?:[A-Z0-9](?:[A-Z0-9-]{0,61}[A-Z0-9])?\.)+(?:[A-Z]{2,6}\.?|[A-Z0-9-]{2,}\.?)|"
+    r"localhost|"
+    r"\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})"
+    r"(?::\d+)?"
+    r"(?:/?|[/?]\S+)$",
+    re.IGNORECASE,
+)
+
+
+def _normalize_media_type_hint(media_type: str | None) -> str | None:
+    if not media_type:
+        return None
+    value = getattr(media_type, "value", media_type)
+    return str(value).strip().lower() or None
+
+
+def _infer_media_type_from_url(url: str) -> str:
+    extension = os.path.splitext(urlparse(url).path)[1].lower()
+    if extension in VIDEO_EXTENSIONS:
+        return StoredMediaType.VIDEO
+    return StoredMediaType.IMAGE
+
+
+def _infer_file_type(url: str, media_type: str) -> str:
+    guessed_type, _ = mimetypes.guess_type(url)
+    if guessed_type:
+        return guessed_type
+    return "video/mp4" if media_type == StoredMediaType.VIDEO else "image/jpeg"
+
+
+def _resolve_circle_post_media(
+    *,
+    user_id: str,
+    media_ids: list[str] | None = None,
+    media_urls: list[str] | None = None,
+    media_type: str | None = None,
+    thumbnail_url: str | None = None,
+    width: int | None = None,
+    height: int | None = None,
+    duration: int | None = None,
+) -> tuple[list[MediaFile], str | None]:
+    resolved_media_files: list[MediaFile] = []
+
+    if media_ids:
+        media_lookup = {
+            str(media.id): media for media in MediaFile.objects.filter(id__in=media_ids)
+        }
+        if len(media_lookup) != len(set(media_ids)):
+            raise ZionaError(
+                message="One or more media IDs were not found",
+                code=VALIDATION_ERROR,
+            )
+
+        for media_id in media_ids:
+            media_file = media_lookup[str(media_id)]
+            if str(media_file.user_id) != str(user_id):
+                raise ZionaError(
+                    message="One or more media files do not belong to this user",
+                    code=VALIDATION_ERROR,
+                )
+            if media_file.status == MediaStatus.FAILED:
+                raise ZionaError(
+                    message="One or more media files failed processing",
+                    code=VALIDATION_ERROR,
+                )
+            if media_file.status != MediaStatus.READY:
+                raise ZionaError(
+                    message="One or more media files are still processing",
+                    code=VALIDATION_ERROR,
+                )
+            resolved_media_files.append(media_file)
+
+    if media_urls:
+        for url in media_urls:
+            normalized_url = (url or "").strip()
+            if not normalized_url:
+                continue
+            if not re.match(URL_PATTERN, normalized_url):
+                raise ZionaError(
+                    message=f"Invalid media URL: {normalized_url}",
+                    code=VALIDATION_ERROR,
+                )
+
+            inferred_type = _infer_media_type_from_url(normalized_url)
+            resolved_media_files.append(
+                MediaFile.objects.create(
+                    user_id=user_id,
+                    storage_path=normalized_url,
+                    file_name=os.path.basename(urlparse(normalized_url).path) or "media_url",
+                    file_type=_infer_file_type(normalized_url, inferred_type),
+                    file_size=0,
+                    media_type=inferred_type,
+                    thumbnail_path=thumbnail_url if inferred_type == StoredMediaType.VIDEO else "",
+                    width=width,
+                    height=height,
+                    duration=duration if inferred_type == StoredMediaType.VIDEO else None,
+                    status=MediaStatus.READY,
+                )
+            )
+
+    normalized_hint = _normalize_media_type_hint(media_type)
+    resolved_types = {media_file.media_type for media_file in resolved_media_files}
+    if len(resolved_types) > 1:
+        raise ZionaError(
+            message="Circle posts cannot mix image and video media in one post",
+            code=VALIDATION_ERROR,
+        )
+
+    effective_type = next(iter(resolved_types), None)
+    if normalized_hint and effective_type and normalized_hint != effective_type:
+        raise ZionaError(
+            message="Provided mediaType does not match the attached media",
+            code=VALIDATION_ERROR,
+        )
+
+    return resolved_media_files, normalized_hint or effective_type
 
 
 def get_circle_feed(
@@ -195,8 +321,10 @@ def get_circle_feed(
             message="Circle does not exist or has been deleted", code=CIRCLE_NOT_FOUND
         ) from None
 
-    queryset = CirclePost.objects.filter(circle=circle, deleted_at__isnull=True).select_related(
-        "user"
+    queryset = (
+        CirclePost.objects.filter(circle=circle, deleted_at__isnull=True)
+        .select_related("user")
+        .prefetch_related("media_files")
     )
 
     # ── Author filter ("My Posts" toggle) ──────────────────────────────────
@@ -251,7 +379,11 @@ def get_circle_post(post_id: str, viewer_id: str | None = None) -> CirclePost:
     Fetch a single CirclePost by ID with viewer engagement annotations.
     Raises ZionaError(CIRCLE_POST_NOT_FOUND) if not found or soft-deleted.
     """
-    queryset = CirclePost.objects.filter(id=post_id, deleted_at__isnull=True).select_related("user")
+    queryset = (
+        CirclePost.objects.filter(id=post_id, deleted_at__isnull=True)
+        .select_related("user")
+        .prefetch_related("media_files")
+    )
 
     if viewer_id:
         queryset = queryset.annotate(
@@ -340,8 +472,13 @@ def create_circle_post(
     user_id: str,
     circle_id: str,
     text: str = "",
-    image_url: str = "",
-    media_url: str = "",
+    media_ids: list[str] | None = None,
+    media_urls: list[str] | None = None,
+    media_type: str | None = None,
+    thumbnail_url: str | None = None,
+    width: int | None = None,
+    height: int | None = None,
+    duration: int | None = None,
 ) -> CirclePost:
     """
     Create a post inside a Circle.
@@ -349,7 +486,7 @@ def create_circle_post(
     Raises:
         ZionaError(CIRCLE_NOT_FOUND) if the circle does not exist.
         ZionaError(NOT_MEMBER) if the user is not a circle member.
-        ZionaError(VALIDATION_ERROR) if no content is provided.
+        ZionaError(VALIDATION_ERROR) if no content is provided or media is invalid.
     """
     try:
         circle = Circle.objects.get(id=circle_id, is_active=True, deleted_at__isnull=True)
@@ -364,19 +501,40 @@ def create_circle_post(
             code=NOT_MEMBER,
         )
 
-    if not any([text.strip(), image_url.strip(), media_url.strip()]):
+    trimmed_text = (text or "").strip()
+    normalized_media_ids = [
+        str(media_id).strip() for media_id in (media_ids or []) if str(media_id).strip()
+    ]
+    normalized_media_urls = [
+        (url or "").strip() for url in (media_urls or []) if (url or "").strip()
+    ]
+
+    if not any([trimmed_text, normalized_media_ids, normalized_media_urls]):
         raise ZionaError(
-            message="A post must have at least one of: text, image, or media",
+            message="A post must include text or at least one media attachment",
             code=VALIDATION_ERROR,
         )
 
-    return CirclePost.objects.create(
+    resolved_media_files, _ = _resolve_circle_post_media(
+        user_id=user_id,
+        media_ids=normalized_media_ids,
+        media_urls=normalized_media_urls,
+        media_type=media_type,
+        thumbnail_url=thumbnail_url,
+        width=width,
+        height=height,
+        duration=duration,
+    )
+
+    post = CirclePost.objects.create(
         circle=circle,
         user_id=user_id,
-        text=text.strip(),
-        image_url=image_url.strip(),
-        media_url=media_url.strip(),
+        text=trimmed_text,
     )
+    if resolved_media_files:
+        post.media_files.set(resolved_media_files)
+
+    return CirclePost.objects.select_related("user").prefetch_related("media_files").get(id=post.id)
 
 
 @transaction.atomic
