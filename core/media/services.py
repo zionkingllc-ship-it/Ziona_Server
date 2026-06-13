@@ -16,14 +16,35 @@ from core.shared.utils import normalize_url
 
 logger = logging.getLogger("core.media")
 
+MEGABYTE = 1024 * 1024
+IMAGE_MAX_UPLOAD_BYTES = 10 * MEGABYTE
+VIDEO_MAX_UPLOAD_BYTES = 100 * MEGABYTE
+MAX_VIDEO_DURATION_SECONDS = 90
+MAX_VIDEOS_PER_POST = 1
+ALLOWED_UPLOAD_TYPES = [
+    "image/jpeg",
+    "image/png",
+    "image/jpg",
+    "image/webp",
+    "video/mp4",
+    "video/quicktime",
+]
 
 ALLOWED_TYPES = {
-    "image/jpeg": {"ext": "jpg", "media_type": MediaType.IMAGE, "max_size": 10 * 1024 * 1024},
-    "image/png": {"ext": "png", "media_type": MediaType.IMAGE, "max_size": 10 * 1024 * 1024},
-    "image/jpg": {"ext": "jpg", "media_type": MediaType.IMAGE, "max_size": 10 * 1024 * 1024},
-    "image/webp": {"ext": "webp", "media_type": MediaType.IMAGE, "max_size": 10 * 1024 * 1024},
-    "video/mp4": {"ext": "mp4", "media_type": MediaType.VIDEO, "max_size": 50 * 1024 * 1024},
-    "video/quicktime": {"ext": "mov", "media_type": MediaType.VIDEO, "max_size": 50 * 1024 * 1024},
+    "image/jpeg": {"ext": "jpg", "media_type": MediaType.IMAGE, "max_size": IMAGE_MAX_UPLOAD_BYTES},
+    "image/png": {"ext": "png", "media_type": MediaType.IMAGE, "max_size": IMAGE_MAX_UPLOAD_BYTES},
+    "image/jpg": {"ext": "jpg", "media_type": MediaType.IMAGE, "max_size": IMAGE_MAX_UPLOAD_BYTES},
+    "image/webp": {
+        "ext": "webp",
+        "media_type": MediaType.IMAGE,
+        "max_size": IMAGE_MAX_UPLOAD_BYTES,
+    },
+    "video/mp4": {"ext": "mp4", "media_type": MediaType.VIDEO, "max_size": VIDEO_MAX_UPLOAD_BYTES},
+    "video/quicktime": {
+        "ext": "mov",
+        "media_type": MediaType.VIDEO,
+        "max_size": VIDEO_MAX_UPLOAD_BYTES,
+    },
 }
 
 MAGIC_BYTES = {
@@ -83,10 +104,10 @@ class MediaService:
         """
         if file_type not in ALLOWED_TYPES:
             raise MediaError(
-                f"File type '{file_type}' not allowed. Accepted: JPEG, PNG, WEBP, MP4",
+                f"File type '{file_type}' not allowed. Accepted: JPEG, PNG, WEBP, MP4, MOV",
                 code="INVALID_MEDIA_TYPE",
                 field="fileType",
-                details={"allowedTypes": ["image/jpeg", "image/png", "image/webp", "video/mp4"]},
+                details=build_media_validation_details(),
             )
 
         type_config = ALLOWED_TYPES[file_type]
@@ -97,7 +118,10 @@ class MediaService:
                 f"File size exceeds maximum of {max_mb:.0f} MB",
                 code="MEDIA_TOO_LARGE",
                 field="fileSize",
-                details={"maxSize": type_config["max_size"], "receivedSize": file_size},
+                details=build_media_validation_details(
+                    max_size=type_config["max_size"],
+                    received_size=file_size,
+                ),
             )
 
         if file_size <= 0:
@@ -186,7 +210,10 @@ class MediaService:
         content_type = getattr(file, "content_type", "")
         if content_type not in ALLOWED_TYPES:
             raise MediaError(
-                f"Unsupported file type: {content_type}", code="INVALID_MEDIA_TYPE", field="file"
+                f"Unsupported file type: {content_type}",
+                code="INVALID_MEDIA_TYPE",
+                field="file",
+                details=build_media_validation_details(),
             )
 
         limit = ALLOWED_TYPES[content_type]["max_size"]
@@ -195,6 +222,7 @@ class MediaService:
                 f"File too large. Limit is {limit // (1024 * 1024)}MB",
                 code="MEDIA_TOO_LARGE",
                 field="file",
+                details=build_media_validation_details(max_size=limit, received_size=file.size),
             )
 
         # 2. Save File Temporarily or to Storage
@@ -476,3 +504,29 @@ def validate_magic_bytes(file_content: bytes, declared_type: str) -> bool:
                 return True
 
     return False
+
+
+def build_media_validation_details(
+    *,
+    allowed_types: list[str] | None = None,
+    max_size: int | None = None,
+    received_size: int | None = None,
+    received_duration_seconds: float | int | None = None,
+    received_videos_count: int | None = None,
+) -> dict[str, Any]:
+    """Build a consistent validation details payload for upload/post media errors."""
+    details: dict[str, Any] = {
+        "allowedTypes": allowed_types or list(ALLOWED_UPLOAD_TYPES),
+        "maxVideoSizeBytes": VIDEO_MAX_UPLOAD_BYTES,
+        "maxVideoDurationSeconds": MAX_VIDEO_DURATION_SECONDS,
+        "maxVideosPerPost": MAX_VIDEOS_PER_POST,
+    }
+    if max_size is not None:
+        details["maxSize"] = max_size
+    if received_size is not None:
+        details["receivedSize"] = received_size
+    if received_duration_seconds is not None:
+        details["receivedDurationSeconds"] = received_duration_seconds
+    if received_videos_count is not None:
+        details["receivedVideosCount"] = received_videos_count
+    return details

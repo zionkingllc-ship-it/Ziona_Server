@@ -75,6 +75,13 @@ class TestBookmarkFolders:
         folder = BookmarkService.create_folder(str(user_a.id), "My Folder")
         assert folder.name == "My Folder"
 
+    def test_create_folder_is_idempotent_for_normalized_name(self, user_a):
+        BookmarkService.get_folders(str(user_a.id))
+        first = BookmarkService.create_folder(str(user_a.id), "My Folder")
+        second = BookmarkService.create_folder(str(user_a.id), "  my   folder  ")
+
+        assert first.id == second.id
+
     def test_delete_folder_returns_moved_count(self, user_a, post_text):
         """Delete folder returns dict with moved_posts_count."""
         from core.engagement.services import EngagementService
@@ -112,6 +119,19 @@ class TestBookmarkFolders:
         BookmarkService.delete_folder(str(user_a.id), folder.id)
         result = BookmarkService.get_saved_posts(str(user_a.id))
         assert len(result["posts"]) == 1
+
+    def test_saving_post_seeds_folder_thumbnail(self, user_a, post_image):
+        from core.engagement.models import BookmarkFolder
+        from core.engagement.services import EngagementService
+
+        BookmarkService.get_folders(str(user_a.id))
+        folder = BookmarkService.create_folder(str(user_a.id), "Visuals")
+
+        result = EngagementService.save_post(str(user_a.id), str(post_image.id), folder.id)
+        folder_model = BookmarkFolder.objects.get(id=folder.id)
+
+        assert folder_model.thumbnail_url == post_image.media_files.first().url
+        assert result.folder.thumbnail_url == post_image.media_files.first().url
 
 
 class TestBookmarkFiltering:

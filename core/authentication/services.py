@@ -93,6 +93,7 @@ class AuthService:
             "hideLikeCount": user.hide_like_count,
             "profile": {
                 "bio": profile_dto.bio,
+                "bioLink": profile_dto.bio_link,
                 "avatarUrl": profile_dto.avatar_url,
                 "location": profile_dto.location,
             },

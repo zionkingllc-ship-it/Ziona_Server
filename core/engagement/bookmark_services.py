@@ -6,6 +6,7 @@ Handles folder CRUD and folder-filtered saved post retrieval.
 
 import logging
 
+from core.engagement.hidden_content import exclude_hidden_posts
 from core.engagement.models import BookmarkFolder, Save
 from core.shared.dtos import BookmarkFolderDTO
 from core.shared.exceptions import BookmarkError, ErrorCode
@@ -50,12 +51,9 @@ class BookmarkService:
         )
 
         return [
-            BookmarkFolderDTO(
-                id=str(folder.id),
-                name=folder.name,
+            BookmarkService._build_folder_dto(
+                folder,
                 saved_count=saves_by_folder.get(folder.id, 0),
-                # Populate the timestamp that was previously always left as "".
-                created_at=folder.created_at.isoformat(),
             )
             for folder in folders
         ]
@@ -77,34 +75,34 @@ class BookmarkService:
         Raises:
             BookmarkError: If validation fails.
         """
-        if not name or not name.strip():
+        clean_name = BookmarkService._clean_folder_name(name)
+        if not clean_name:
             raise BookmarkError(
                 message="Folder name is required.",
                 code=ErrorCode.VALIDATION_ERROR,
             )
 
-        if len(name) > 100:
+        if len(clean_name) > 100:
             raise BookmarkError(
                 message="Folder name must be 100 characters or fewer.",
                 code=ErrorCode.VALIDATION_ERROR,
             )
 
-        folder = BookmarkFolder.objects.create(
-            user_id=user_id,
-            name=name.strip(),
-        )
+        existing_folder = BookmarkService._find_folder_by_name(user_id, clean_name)
+        if existing_folder:
+            return BookmarkService._build_folder_dto(
+                existing_folder,
+                saved_count=Save.objects.filter(folder_id=existing_folder.id).count(),
+            )
+
+        folder = BookmarkFolder.objects.create(user_id=user_id, name=clean_name)
 
         logger.info(
             "bookmark_folder_created",
             extra={"user_id": user_id, "folder_id": str(folder.id)},
         )
 
-        return BookmarkFolderDTO(
-            id=str(folder.id),
-            name=folder.name,
-            saved_count=0,
-            created_at=folder.created_at.isoformat(),
-        )
+        return BookmarkService._build_folder_dto(folder, saved_count=0)
 
     @staticmethod
     def delete_folder(user_id: str, folder_id: str) -> dict:
@@ -199,6 +197,7 @@ class BookmarkService:
             # -id tiebreaker on the Save record for deterministic pagination.
             .order_by("-created_at", "-id")
         )
+        qs = exclude_hidden_posts(qs, user_id, target_field="post_id")
 
         if folder_id:
             folder_exists = BookmarkFolder.objects.filter(id=folder_id, user_id=user_id).exists()
@@ -278,6 +277,65 @@ class BookmarkService:
         )
 
         return {"removed_count": deleted_count}
+
+    @staticmethod
+    def _build_folder_dto(folder: BookmarkFolder, saved_count: int) -> BookmarkFolderDTO:
+        """Build a bookmark folder DTO."""
+        return BookmarkFolderDTO(
+            id=str(folder.id),
+            name=folder.name,
+            saved_count=saved_count,
+            created_at=folder.created_at.isoformat(),
+            thumbnail_url=folder.thumbnail_url or None,
+        )
+
+    @staticmethod
+    def _clean_folder_name(name: str | None) -> str:
+        """Normalize user-entered folder names for idempotent creation."""
+        return " ".join((name or "").strip().split())
+
+    @staticmethod
+    def _folder_name_key(name: str | None) -> str:
+        """Case-insensitive comparison key for folder names."""
+        return BookmarkService._clean_folder_name(name).casefold()
+
+    @staticmethod
+    def _get_or_create_folder_record(user_id: str, name: str) -> BookmarkFolder:
+        """Return an existing folder by normalized name or create it."""
+        existing = BookmarkService._find_folder_by_name(user_id, name)
+        if existing:
+            return existing
+
+        return BookmarkFolder.objects.create(
+            user_id=user_id, name=BookmarkService._clean_folder_name(name)
+        )
+
+    @staticmethod
+    def _find_folder_by_name(user_id: str, name: str | None) -> BookmarkFolder | None:
+        """Find a folder by normalized display name."""
+        normalized_name = BookmarkService._folder_name_key(name)
+        existing = BookmarkFolder.objects.filter(user_id=user_id).order_by("created_at", "id")
+        for folder in existing:
+            if BookmarkService._folder_name_key(folder.name) == normalized_name:
+                return folder
+        return None
+
+    @staticmethod
+    def seed_folder_thumbnail(folder: BookmarkFolder, post) -> None:
+        """Persist a folder thumbnail from the first available media on a saved post."""
+        if not folder or folder.thumbnail_url:
+            return
+
+        media = post.media_files.order_by("created_at", "id").first()
+        if not media:
+            return
+
+        thumbnail_url = media.thumbnail_url or media.url
+        if not thumbnail_url:
+            return
+
+        folder.thumbnail_url = thumbnail_url
+        folder.save(update_fields=["thumbnail_url", "updated_at"])
 
     @staticmethod
     def _ensure_default_folders(user_id: str) -> None:

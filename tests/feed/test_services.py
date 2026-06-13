@@ -154,6 +154,29 @@ class TestFollowingFeed:
             for i in range(len(result.posts) - 1):
                 assert result.posts[i].created_at >= result.posts[i + 1].created_at
 
+    def test_following_feed_excludes_unfollowed_authors(self, create_user):
+        from core.follows.services import FollowService
+
+        viewer = create_user(email="viewer-following@test.com", username="viewer_following")
+        followed_author = create_user(email="followed-feed@test.com", username="followed_feed")
+        unfollowed_author = create_user(
+            email="unfollowed-feed@test.com",
+            username="unfollowed_feed",
+        )
+
+        FollowService.follow_user(str(viewer.id), str(followed_author.id))
+
+        followed_post = make_post(followed_author, "Followed post", age_hours=1)
+        unfollowed_post = make_post(unfollowed_author, "Unfollowed post", age_hours=1)
+
+        result = FeedService.get_following_feed(str(viewer.id), limit=10)
+        returned_post_ids = {post.id for post in result.posts}
+        returned_author_ids = {post.author.id for post in result.posts}
+
+        assert str(followed_post.id) in returned_post_ids
+        assert str(unfollowed_post.id) not in returned_post_ids
+        assert returned_author_ids == {str(followed_author.id)}
+
 
 class TestDiscoverFeed:
     """Tests for the Discover feed."""

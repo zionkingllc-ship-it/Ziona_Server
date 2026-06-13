@@ -3,6 +3,7 @@
 from unittest.mock import patch
 
 import pytest
+from django.test import override_settings
 
 from core.engagement.services import EngagementService
 from core.shared.exceptions import EngagementError
@@ -125,7 +126,8 @@ class TestDeleteComment:
             text="My comment",
         )
         result = EngagementService.delete_comment(str(user_b.id), comment.id)
-        assert result is True
+        assert result.success is True
+        assert result.post_id == str(post.id)
 
     def test_delete_other_users_comment(self, user_a, user_b, post):
         comment = EngagementService.create_comment(
@@ -157,6 +159,26 @@ class TestSavePost:
         result = EngagementService.unsave_post(str(user_b.id), str(post.id))
         assert result.success is True
         assert result.saved is False
+
+
+class TestSharePost:
+    """Tests for share URL generation."""
+
+    @override_settings(APP_SHARE_BASE_URL="https://share.ziona.test")
+    def test_share_post_external_uses_configured_base_url(self, user_a, user_b):
+        from core.engagement.share_services import ShareService
+        from core.posts.models import Post
+
+        db_post = Post.objects.create(
+            user=user_a,
+            post_type="text",
+            caption="Share me",
+        )
+
+        result = ShareService.share_post_external(str(user_b.id), str(db_post.id))
+
+        assert result.success is True
+        assert result.share_url == f"https://share.ziona.test/post/{db_post.id}"
 
 
 class TestGetPostComments:

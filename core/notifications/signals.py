@@ -25,7 +25,7 @@ def handle_comment_notifications(sender, instance, created, **kwargs):
 
     try:
         # Extract and notify mentions
-        mentions = MENTION_REGEX.findall(instance.content)
+        mentions = MENTION_REGEX.findall(instance.text or "")
         if mentions:
             mentioned_users = User.objects.filter(username__in=mentions)
             for m_user in mentioned_users:
@@ -39,8 +39,8 @@ def handle_comment_notifications(sender, instance, created, **kwargs):
                     )
 
         # Notify post/comment author
-        if instance.parent_id:
-            parent = Comment.objects.get(id=instance.parent_id)
+        if instance.parent_comment_id:
+            parent = Comment.objects.get(id=instance.parent_comment_id)
             if parent.user_id != instance.user_id:
                 create_notification(
                     user_id=parent.user_id,

@@ -7,11 +7,13 @@ Handles:
 - /post/<post_id>/ (Share preview with OG meta tags)
 """
 
+from django.conf import settings
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import render
 from django.views.decorators.cache import cache_control
 
 from core.posts.models import Post
+from core.shared.utils import build_post_share_url
 
 
 @cache_control(max_age=86400)
@@ -78,7 +80,7 @@ def share_preview(request: HttpRequest, post_id: str) -> HttpResponse:
         "author": post.user,
         "preview_image": preview_image,
         "caption": post.caption or "Check out this post on Ziona!",
-        "post_url": f"https://ziona.app/post/{post_id}",
+        "post_url": build_post_share_url(settings.APP_SHARE_BASE_URL, post_id),
         "app_name": "Ziona",
     }
 

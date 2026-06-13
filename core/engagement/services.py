@@ -12,6 +12,11 @@ from django.db import IntegrityError
 from django.db.models import Count, Q
 
 from core.engagement.cache import EngagementCache
+from core.engagement.hidden_content import (
+    exclude_hidden_comments,
+    hide_post_for_user,
+    unhide_post_for_user,
+)
 from core.engagement.models import (
     BookmarkFolder,
     Comment,
@@ -24,6 +29,7 @@ from core.posts.models import Post
 from core.shared.decorators import rate_limit
 from core.shared.dtos import (
     AuthorDTO,
+    CommentDeleteResponseDTO,
     CommentResponseDTO,
     CommentsResponseDTO,
     CommentStatsDTO,
@@ -212,7 +218,7 @@ class EngagementService:
         return EngagementService._build_comment_dto(comment, viewer_id=user_id)
 
     @staticmethod
-    def delete_comment(user_id: str, comment_id: str) -> bool:
+    def delete_comment(user_id: str, comment_id: str) -> CommentDeleteResponseDTO:
         """Soft-delete a comment.
 
         Args:
@@ -220,7 +226,7 @@ class EngagementService:
             comment_id: UUID of the comment to delete.
 
         Returns:
-            True if successfully deleted.
+            CommentDeleteResponseDTO containing success state and owning post ID.
 
         Raises:
             EngagementError: If comment not found or permission denied.
@@ -246,7 +252,7 @@ class EngagementService:
             extra={"user_id": user_id, "comment_id": comment_id},
         )
 
-        return True
+        return CommentDeleteResponseDTO(success=True, post_id=str(comment.post_id))
 
     @staticmethod
     @rate_limit(max_requests=30, window_seconds=60)
@@ -310,26 +316,31 @@ class EngagementService:
             CommentsResponseDTO with paginated comments.
         """
         limit = min(limit, 50)
+        if viewer_id and EngagementCache.is_post_hidden(viewer_id, post_id):
+            return CommentsResponseDTO(
+                comments=[],
+                next_cursor=None,
+                has_more=False,
+                total_count=0,
+            )
 
-        qs = (
-            Comment.objects.select_related("user")
-            .filter(
-                post_id=post_id,
-                deleted_at__isnull=True,
-                parent_comment__isnull=True,
-            )
-            .annotate(
-                likes_count=Count("comment_likes", distinct=True),
-                replies_count=Count(
-                    "replies",
-                    filter=Q(replies__deleted_at__isnull=True),
-                    distinct=True,
-                ),
-            )
-            # -id tiebreaker ensures deterministic keyset pagination when two
-            # comments share an identical created_at timestamp.
-            .order_by("-created_at", "-id")
+        qs = Comment.objects.select_related("user").filter(
+            post_id=post_id,
+            deleted_at__isnull=True,
+            parent_comment__isnull=True,
         )
+        qs = exclude_hidden_comments(qs, viewer_id)
+        qs = qs.annotate(
+            likes_count=Count("comment_likes", distinct=True),
+            replies_count=Count(
+                "replies",
+                filter=Q(replies__deleted_at__isnull=True),
+                distinct=True,
+            ),
+        )
+        # -id tiebreaker ensures deterministic keyset pagination when two
+        # comments share an identical created_at timestamp.
+        qs = qs.order_by("-created_at", "-id")
 
         # Compute total_count BEFORE applying the cursor filter so we always
         # return the true post comment count, not just the remaining page count.
@@ -387,25 +398,42 @@ class EngagementService:
             CommentsResponseDTO with paginated reply comments, oldest-first.
         """
         limit = min(limit, 50)
+        parent_comment = Comment.objects.filter(id=comment_id, deleted_at__isnull=True).first()
+        if not parent_comment:
+            return CommentsResponseDTO(
+                comments=[],
+                next_cursor=None,
+                has_more=False,
+                total_count=0,
+            )
 
-        qs = (
-            Comment.objects.select_related("user")
-            .filter(
-                parent_comment_id=comment_id,
-                deleted_at__isnull=True,
+        if viewer_id and (
+            EngagementCache.is_post_hidden(viewer_id, str(parent_comment.post_id))
+            or EngagementCache.is_comment_hidden(viewer_id, comment_id)
+        ):
+            return CommentsResponseDTO(
+                comments=[],
+                next_cursor=None,
+                has_more=False,
+                total_count=0,
             )
-            .annotate(
-                likes_count=Count("comment_likes", distinct=True),
-                replies_count=Count(
-                    "replies",
-                    filter=Q(replies__deleted_at__isnull=True),
-                    distinct=True,
-                ),
-            )
-            # Oldest-first chronological order with id tiebreaker for
-            # deterministic ascending keyset pagination.
-            .order_by("created_at", "id")
+
+        qs = Comment.objects.select_related("user").filter(
+            parent_comment_id=comment_id,
+            deleted_at__isnull=True,
         )
+        qs = exclude_hidden_comments(qs, viewer_id)
+        qs = qs.annotate(
+            likes_count=Count("comment_likes", distinct=True),
+            replies_count=Count(
+                "replies",
+                filter=Q(replies__deleted_at__isnull=True),
+                distinct=True,
+            ),
+        )
+        # Oldest-first chronological order with id tiebreaker for
+        # deterministic ascending keyset pagination.
+        qs = qs.order_by("created_at", "id")
 
         total_count = qs.count()
 
@@ -475,8 +503,12 @@ class EngagementService:
         EngagementService._ensure_default_folders(user_id)
 
         folder = None
+        bookmark_service = None
         if folder_name and not folder_id:
-            folder, _ = BookmarkFolder.objects.get_or_create(user_id=user_id, name=folder_name)
+            from core.engagement.bookmark_services import BookmarkService
+
+            bookmark_service = BookmarkService
+            folder = BookmarkService._get_or_create_folder_record(user_id, folder_name)
         elif folder_id:
             folder = BookmarkFolder.objects.filter(id=folder_id, user_id=user_id).first()
             if not folder:
@@ -498,15 +530,14 @@ class EngagementService:
             # Rehydrate Full Pointers correctly
             folder_dto = None
             if folder:
-                folder_count = Save.objects.filter(folder_id=folder.id).count()
-                from core.shared.dtos import BookmarkFolderDTO
+                if bookmark_service is None:
+                    from core.engagement.bookmark_services import BookmarkService
 
-                folder_dto = BookmarkFolderDTO(
-                    id=str(folder.id),
-                    name=folder.name,
-                    saved_count=folder_count,
-                    created_at=folder.created_at.isoformat(),
-                )
+                    bookmark_service = BookmarkService
+                bookmark_service.seed_folder_thumbnail(folder, post)
+                folder_count = Save.objects.filter(folder_id=folder.id).count()
+                folder.refresh_from_db(fields=["thumbnail_url", "updated_at"])
+                folder_dto = bookmark_service._build_folder_dto(folder, saved_count=folder_count)
 
             from core.posts.services import PostService
 
@@ -620,19 +651,19 @@ class EngagementService:
         # Replies are built with include_replies=False to stop recursion at one level.
         reply_previews = []
         if include_replies and replies_count > 0:
-            preview_qs = (
-                Comment.objects.select_related("user")
-                .filter(parent_comment_id=comment.id, deleted_at__isnull=True)
-                .annotate(
-                    likes_count=Count("comment_likes", distinct=True),
-                    replies_count=Count(
-                        "replies",
-                        filter=Q(replies__deleted_at__isnull=True),
-                        distinct=True,
-                    ),
-                )
-                .order_by("created_at")[:3]
+            preview_qs = Comment.objects.select_related("user").filter(
+                parent_comment_id=comment.id, deleted_at__isnull=True
             )
+            preview_qs = exclude_hidden_comments(preview_qs, viewer_id)
+            preview_qs = preview_qs.annotate(
+                likes_count=Count("comment_likes", distinct=True),
+                replies_count=Count(
+                    "replies",
+                    filter=Q(replies__deleted_at__isnull=True),
+                    distinct=True,
+                ),
+            )
+            preview_qs = preview_qs.order_by("created_at")[:3]
             reply_previews = [
                 EngagementService._build_comment_dto(r, viewer_id=viewer_id, include_replies=False)
                 for r in preview_qs
@@ -663,33 +694,12 @@ class EngagementService:
         Enforces a 1,000 post limit per user, using a sliding window
         to automatically delete the oldest constraint.
         """
-        post = Post.objects.filter(id=post_id, deleted_at__isnull=True).first()
-        if not post:
-            raise EngagementError("Post not found.", ErrorCode.POST_NOT_FOUND)
-
-        count = HiddenPost.objects.filter(user_id=user_id).count()
-        if count >= 1000:
-            oldest = HiddenPost.objects.filter(user_id=user_id).order_by("created_at").first()
-            if oldest:
-                EngagementCache.unmark_post_hidden(user_id, str(oldest.post_id))
-                oldest.delete()
-
-        try:
-            HiddenPost.objects.create(user_id=user_id, post_id=post_id)
-            EngagementCache.mark_post_hidden(user_id, post_id)
-            return True
-        except IntegrityError:
-            # Already hidden
-            return True
+        return hide_post_for_user(user_id, post_id)
 
     @staticmethod
     def unhide_post(user_id: str, post_id: str) -> bool:
         """Unhide a previously hidden post."""
-        deleted, _ = HiddenPost.objects.filter(user_id=user_id, post_id=post_id).delete()
-        if deleted > 0:
-            EngagementCache.unmark_post_hidden(user_id, post_id)
-            return True
-        return False
+        return unhide_post_for_user(user_id, post_id)
 
     @staticmethod
     def get_hidden_posts(

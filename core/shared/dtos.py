@@ -187,6 +187,13 @@ class CommentResponseDTO(CamelCaseModel):
 CommentResponseDTO.model_rebuild()
 
 
+class CommentDeleteResponseDTO(CamelCaseModel):
+    """Internal result for comment deletion flows."""
+
+    success: bool
+    post_id: str
+
+
 class CommentsResponseDTO(CamelCaseModel):
     """Paginated comments list response."""
 
@@ -221,6 +228,7 @@ class BookmarkFolderDTO(CamelCaseModel):
     name: str
     saved_count: int = 0
     created_at: str = ""
+    thumbnail_url: str | None = None
 
 
 class BookmarkFoldersResponseDTO(CamelCaseModel):
@@ -319,6 +327,7 @@ class UserProfileDTO(CamelCaseModel):
     username: str
     full_name: str = ""
     bio: str = ""
+    bio_link: str | None = None
     avatar_url: str | None = None
     location: str = ""
     hide_like_count: bool = False

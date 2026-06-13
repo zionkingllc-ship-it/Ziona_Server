@@ -69,6 +69,7 @@ class User(AbstractBaseUser, PermissionsMixin):
     )
     full_name = models.CharField(max_length=150, blank=True)
     bio = models.TextField(max_length=500, blank=True)
+    bio_link = models.URLField(max_length=500, blank=True)
     avatar_url = models.URLField(max_length=500, blank=True)
 
     role = models.CharField(

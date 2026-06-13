@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from enum import Enum
 
 import strawberry
@@ -425,6 +427,8 @@ class AdminContactType:
     name: str
     email: str
     message: str
+    topic: str = ""
+    requester_username: str = strawberry.field(name="requesterUsername", default="")
     source: str
     brand: str
     status: str
@@ -485,6 +489,64 @@ class SubmitContactPayload:
     success: bool
     contact_id: str | None = strawberry.field(name="contactId", default=None)
     message: str | None = None
+    contact: HelpConversationType | None = None
+    error: ErrorType | None = None
+
+
+@strawberry.type
+class HelpArticleType:
+    """A public help-center article."""
+
+    id: str
+    slug: str
+    title: str
+    summary: str
+    content: str
+    category_slug: str = strawberry.field(name="categorySlug")
+    category_title: str = strawberry.field(name="categoryTitle")
+
+
+@strawberry.type
+class HelpCategoryType:
+    """A public help-center category."""
+
+    id: str
+    slug: str
+    title: str
+    description: str
+    article_count: int = strawberry.field(name="articleCount")
+    articles: list[HelpArticleType]
+
+
+@strawberry.type
+class HelpConversationMessageType:
+    """A single viewer/admin message inside a support thread."""
+
+    id: str
+    message: str
+    sent_at: str = strawberry.field(name="sentAt")
+    sender_type: str = strawberry.field(name="senderType")
+    sender_name: str = strawberry.field(name="senderName")
+
+
+@strawberry.type
+class HelpConversationType:
+    """Mobile-facing help/support conversation thread."""
+
+    id: str
+    topic: str
+    status: str
+    created_at: str = strawberry.field(name="createdAt")
+    replied_at: str | None = strawberry.field(name="repliedAt", default=None)
+    messages: list[HelpConversationMessageType]
+
+
+@strawberry.type
+class HelpConversationPayload:
+    """Response for support-thread mutations."""
+
+    success: bool
+    contact: HelpConversationType | None = None
     error: ErrorType | None = None
 
 
@@ -638,6 +700,8 @@ def _map_contact(data: dict) -> AdminContactType:
         name=data["name"],
         email=data["email"],
         message=data["message"],
+        topic=data.get("topic", ""),
+        requester_username=data.get("requester_username", ""),
         source=data.get("source", ""),
         brand=data.get("brand", ""),
         status=data["status"],
@@ -942,6 +1006,61 @@ class AdminDashboardQueries:
             total_pages=result["total_pages"],
             summary=ContactSummaryType(**result["summary"]),
         )
+
+    @strawberry.field(name="helpCategories", description="List public help-center categories.")
+    def help_categories(
+        self,
+        info: Info,
+        search: str = "",
+    ) -> list[HelpCategoryType]:
+        from core.admin_dashboard.help_center import list_help_categories
+
+        categories = list_help_categories(search=search)
+        return [_map_help_category(category) for category in categories]
+
+    @strawberry.field(name="helpArticles", description="List public help-center articles.")
+    def help_articles(
+        self,
+        info: Info,
+        category_slug: str | None = None,
+        search: str = "",
+    ) -> list[HelpArticleType]:
+        from core.admin_dashboard.help_center import list_help_articles
+
+        return [
+            _map_help_article_record(article_record)
+            for article_record in list_help_articles(category_slug=category_slug, search=search)
+        ]
+
+    @strawberry.field(
+        name="myHelpConversations",
+        description="List support conversations for the authenticated user.",
+    )
+    def my_help_conversations(
+        self,
+        info: Info,
+        status: str = "",
+    ) -> list[HelpConversationType]:
+        from core.admin_dashboard.contact_services import ContactService
+        from core.shared.exceptions import AuthenticationError
+        from core.users.models import User
+        from core.users.schema import _get_authenticated_user_id
+
+        user_id = _get_authenticated_user_id(info)
+        if not user_id:
+            raise AuthenticationError("Authentication required", "UNAUTHENTICATED")
+
+        user = User.objects.filter(id=user_id, deleted_at__isnull=True).first()
+        if not user:
+            raise AuthenticationError("Authentication required", "UNAUTHENTICATED")
+
+        return [
+            _map_help_conversation(conversation)
+            for conversation in ContactService.list_help_conversations(
+                user=user,
+                status_filter=status,
+            )
+        ]
 
 
 # ──────────────────────────────────────────────
@@ -1583,28 +1702,127 @@ class AdminDashboardMutations:
     def submit_contact_message(
         self,
         info: Info,
-        name: str,
-        email: str,
         message: str,
+        name: str | None = None,
+        email: str | None = None,
+        category_slug: str | None = None,
     ) -> SubmitContactPayload:
         from core.admin_dashboard.contact_services import ContactService
         from core.shared.exceptions import AdminError
+        from core.users.models import User
+        from core.users.schema import _get_authenticated_user_id
 
         try:
             ip_address = info.context.request.META.get("REMOTE_ADDR", "")
-            result = ContactService.submit_message(
-                name=name,
-                email=email,
-                message=message,
-                ip_address=ip_address,
-            )
+            user_id = _get_authenticated_user_id(info)
+            user = None
+            if user_id:
+                user = User.objects.filter(id=user_id, deleted_at__isnull=True).first()
+
+            if user or category_slug:
+                result = ContactService.submit_help_message(
+                    message=message,
+                    category_slug=category_slug or "",
+                    ip_address=ip_address,
+                    user=user,
+                    name=name or "",
+                    email=email or "",
+                )
+            else:
+                result = ContactService.submit_message(
+                    name=name or "",
+                    email=email or "",
+                    message=message,
+                    ip_address=ip_address,
+                )
             return SubmitContactPayload(
                 success=True,
                 contact_id=result["contact_id"],
                 message=result["message"],
+                contact=_map_help_conversation(result["contact"])
+                if result.get("contact")
+                else None,
             )
         except AdminError as e:
             return SubmitContactPayload(
+                success=False,
+                error=ErrorType(code=e.code, message=e.message),
+            )
+
+    @strawberry.mutation(
+        name="submitHelpMessage",
+        description="Authenticated in-app help/support submission.",
+    )
+    def submit_help_message(
+        self,
+        info: Info,
+        message: str,
+        category_slug: str | None = None,
+        name: str | None = None,
+        email: str | None = None,
+    ) -> HelpConversationPayload:
+        from core.admin_dashboard.contact_services import ContactService
+        from core.shared.exceptions import AdminError
+        from core.users.models import User
+        from core.users.schema import _get_authenticated_user_id
+
+        try:
+            user_id = _get_authenticated_user_id(info)
+            user = (
+                User.objects.filter(id=user_id, deleted_at__isnull=True).first()
+                if user_id
+                else None
+            )
+            result = ContactService.submit_help_message(
+                message=message,
+                category_slug=category_slug or "",
+                ip_address=info.context.request.META.get("REMOTE_ADDR", ""),
+                user=user,
+                name=name or "",
+                email=email or "",
+            )
+            return HelpConversationPayload(
+                success=True,
+                contact=_map_help_conversation(result["contact"]),
+            )
+        except AdminError as e:
+            return HelpConversationPayload(
+                success=False,
+                error=ErrorType(code=e.code, message=e.message),
+            )
+
+    @strawberry.mutation(
+        name="resolveHelpConversation",
+        description="Mark a support conversation as resolved for the authenticated user.",
+    )
+    def resolve_help_conversation(
+        self,
+        info: Info,
+        contact_id: str,
+    ) -> HelpConversationPayload:
+        from core.admin_dashboard.contact_services import ContactService
+        from core.shared.exceptions import AdminError
+        from core.users.models import User
+        from core.users.schema import _get_authenticated_user_id
+
+        try:
+            user_id = _get_authenticated_user_id(info)
+            user = (
+                User.objects.filter(id=user_id, deleted_at__isnull=True).first()
+                if user_id
+                else None
+            )
+            result = ContactService.resolve_help_conversation(
+                contact_id=contact_id,
+                user=user,
+                email=user.email if user else "",
+            )
+            return HelpConversationPayload(
+                success=True,
+                contact=_map_help_conversation(result["contact"]),
+            )
+        except AdminError as e:
+            return HelpConversationPayload(
                 success=False,
                 error=ErrorType(code=e.code, message=e.message),
             )
@@ -1621,4 +1839,61 @@ def _to_chart_data(data: dict) -> ChartDataType:
         labels=data.get("labels", []),
         datasets=[DatasetType(**d) for d in data.get("datasets", [])],
         summary=data.get("summary", {}),
+    )
+
+
+def _map_help_article(category, article) -> HelpArticleType:
+    """Convert static help content into GraphQL shape."""
+    return HelpArticleType(
+        id=article.slug,
+        slug=article.slug,
+        title=article.title,
+        summary=article.summary,
+        content=article.content,
+        category_slug=category.slug,
+        category_title=category.title,
+    )
+
+
+def _map_help_category(category) -> HelpCategoryType:
+    """Convert a help category into GraphQL shape."""
+    return HelpCategoryType(
+        id=category.slug,
+        slug=category.slug,
+        title=category.title,
+        description=category.description,
+        article_count=len(category.articles),
+        articles=[_map_help_article(category, article) for article in category.articles],
+    )
+
+
+def _map_help_article_record(article) -> HelpArticleType:
+    """Lookup the parent category for a help article and map it."""
+    from core.admin_dashboard.help_center import get_help_article
+
+    record = get_help_article(article.slug)
+    if not record:
+        raise ValueError(f"Help article '{article.slug}' is missing its category mapping.")
+    category, article = record
+    return _map_help_article(category, article)
+
+
+def _map_help_conversation(conversation: dict) -> HelpConversationType:
+    """Convert service-layer help conversation dict to GraphQL type."""
+    return HelpConversationType(
+        id=conversation["id"],
+        topic=conversation.get("topic", ""),
+        status=conversation["status"],
+        created_at=conversation["created_at"],
+        replied_at=conversation.get("replied_at"),
+        messages=[
+            HelpConversationMessageType(
+                id=message["id"],
+                message=message["message"],
+                sent_at=message["sent_at"],
+                sender_type=message["sender_type"],
+                sender_name=message["sender_name"],
+            )
+            for message in conversation.get("messages", [])
+        ],
     )

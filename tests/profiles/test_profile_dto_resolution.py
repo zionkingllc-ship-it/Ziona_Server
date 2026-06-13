@@ -18,6 +18,7 @@ def test_dto_to_profile_conversion():
         username="testuser",
         full_name="Test User",
         bio="Test Bio",
+        bio_link="https://ziona.app/testuser",
         avatar_url=None,
         location="Test Location",
         stats=stats,
@@ -30,6 +31,7 @@ def test_dto_to_profile_conversion():
     gql = _dto_to_profile(dto)
 
     assert gql.id == "user-123"
+    assert gql.bio_link == "https://ziona.app/testuser"
     # Verify formatted stats
     assert gql.stats.followers_count() == "1.2k"
     assert gql.stats.following_count() == "500"

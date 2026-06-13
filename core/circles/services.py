@@ -14,6 +14,7 @@ from core.circles.models import (
     CirclePost,
     CirclePostEngagement,
 )
+from core.engagement.hidden_content import exclude_hidden_circle_content
 from core.media.models import MediaFile, MediaStatus
 from core.media.models import MediaType as StoredMediaType
 from core.shared.exceptions import ZionaError
@@ -23,6 +24,17 @@ CIRCLE_NOT_FOUND = "CIRCLE_NOT_FOUND"
 CIRCLE_INACTIVE = "CIRCLE_INACTIVE"
 ALREADY_MEMBER = "ALREADY_MEMBER"
 NOT_MEMBER = "NOT_MEMBER"
+
+
+def _exclude_hidden_circles(queryset, viewer_id: str | None):
+    return exclude_hidden_circle_content(queryset, viewer_id, target_type="circle")
+
+
+def get_circle_by_id(circle_id: str, viewer_id: str | None = None) -> Circle | None:
+    """Fetch a single visible circle for the viewer."""
+    queryset = Circle.objects.filter(id=circle_id, is_active=True, deleted_at__isnull=True)
+    queryset = _exclude_hidden_circles(queryset, viewer_id)
+    return queryset.first()
 
 
 def get_all_circles(
@@ -48,6 +60,7 @@ def get_all_circles(
         )
         .order_by("-created_at")
     )
+    queryset = _exclude_hidden_circles(queryset, viewer_id)
 
     # 2. Pagination (cursor assumes created_at string for now)
     if cursor:
@@ -82,6 +95,7 @@ def get_my_circles(user_id: str, limit: int = 20, cursor: str | None = None) -> 
         .annotate(member_count=Count("memberships"))
         .order_by("-memberships__joined_at")
     )
+    queryset = _exclude_hidden_circles(queryset, user_id)
 
     if cursor:
         # Assuming cursor is joined_at for my_circles
@@ -100,6 +114,7 @@ def get_suggested_circles(user_id: str | None = None, limit: int = 10) -> list[C
 
     if user_id:
         queryset = queryset.exclude(memberships__user_id=user_id)
+    queryset = _exclude_hidden_circles(queryset, user_id)
 
     circles = list(
         queryset.annotate(member_count=Count("memberships")).order_by("-member_count")[:limit]
@@ -314,12 +329,9 @@ def get_circle_feed(
     Returns:
         (posts, has_next_page, total_count)
     """
-    try:
-        circle = Circle.objects.get(id=circle_id, is_active=True, deleted_at__isnull=True)
-    except Circle.DoesNotExist:
-        raise ZionaError(
-            message="Circle does not exist or has been deleted", code=CIRCLE_NOT_FOUND
-        ) from None
+    circle = get_circle_by_id(circle_id, viewer_id=viewer_id)
+    if not circle:
+        raise ZionaError(message="Circle does not exist or has been deleted", code=CIRCLE_NOT_FOUND)
 
     queryset = (
         CirclePost.objects.filter(circle=circle, deleted_at__isnull=True)
@@ -383,6 +395,12 @@ def get_circle_post(post_id: str, viewer_id: str | None = None) -> CirclePost:
         CirclePost.objects.filter(id=post_id, deleted_at__isnull=True)
         .select_related("user")
         .prefetch_related("media_files")
+    )
+    queryset = exclude_hidden_circle_content(
+        queryset,
+        viewer_id,
+        target_type="circle",
+        target_field="circle_id",
     )
 
     if viewer_id:

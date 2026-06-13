@@ -182,6 +182,14 @@ class ContactMessage(models.Model):
     name = models.CharField(max_length=255)
     email = models.EmailField()
     message = models.TextField()
+    requester_user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="contact_messages",
+    )
+    topic = models.CharField(max_length=100, blank=True, default="")
     source = models.CharField(max_length=50, default="mobile_app", db_index=True)
     brand = models.CharField(max_length=50, blank=True, default="")
     ip_address = models.GenericIPAddressField(null=True, blank=True)
@@ -200,6 +208,10 @@ class ContactMessage(models.Model):
         indexes = [
             models.Index(fields=["status", "-created_at"], name="idx_contact_status_created"),
             models.Index(fields=["source", "-created_at"], name="idx_contact_source_created"),
+            models.Index(
+                fields=["requester_user", "-created_at"],
+                name="idx_contact_requester_created",
+            ),
         ]
 
     def __str__(self) -> str:

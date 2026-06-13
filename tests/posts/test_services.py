@@ -1,6 +1,7 @@
 """Tests for PostService — creation, validation, update, and deletion."""
 
 import pytest
+from django.test import override_settings
 
 from core.posts.models import Post
 from core.shared.exceptions import PostError
@@ -93,6 +94,80 @@ class TestCreatePost:
             )
 
         assert "still processing" in excinfo.value.message
+
+    @override_settings(APP_SHARE_BASE_URL="https://share.ziona.test")
+    def test_create_post_uses_configured_share_base_url(self, user_a):
+        from core.posts.services import PostService
+
+        result = PostService.create_post(
+            user_id=str(user_a.id),
+            post_type="text",
+            caption="Shared post",
+        )
+
+        assert result.share_url == f"https://share.ziona.test/post/{result.id}"
+
+    def test_create_post_rejects_multiple_videos(self, user_a):
+        from core.media.models import MediaFile
+        from core.posts.services import PostService
+
+        first_video = MediaFile.objects.create(
+            user=user_a,
+            file_name="first.mp4",
+            storage_path="uploads/test/videos/first.mp4",
+            file_type="video/mp4",
+            file_size=1024,
+            media_type="video",
+            duration=30,
+            status="ready",
+        )
+        second_video = MediaFile.objects.create(
+            user=user_a,
+            file_name="second.mp4",
+            storage_path="uploads/test/videos/second.mp4",
+            file_type="video/mp4",
+            file_size=1024,
+            media_type="video",
+            duration=45,
+            status="ready",
+        )
+
+        with pytest.raises(PostError) as excinfo:
+            PostService.create_post(
+                user_id=str(user_a.id),
+                post_type="video",
+                caption="Too many videos",
+                media_ids=[str(first_video.id), str(second_video.id)],
+            )
+
+        assert excinfo.value.code == "MULTIPLE_VIDEOS_NOT_ALLOWED"
+        assert excinfo.value.extensions["maxVideosPerPost"] == 1
+
+    def test_create_post_rejects_video_longer_than_ninety_seconds(self, user_a):
+        from core.media.models import MediaFile
+        from core.posts.services import PostService
+
+        media = MediaFile.objects.create(
+            user=user_a,
+            file_name="long.mp4",
+            storage_path="uploads/test/videos/long.mp4",
+            file_type="video/mp4",
+            file_size=1024,
+            media_type="video",
+            duration=91,
+            status="ready",
+        )
+
+        with pytest.raises(PostError) as excinfo:
+            PostService.create_post(
+                user_id=str(user_a.id),
+                post_type="video",
+                caption="Too long",
+                media_ids=[str(media.id)],
+            )
+
+        assert excinfo.value.code == "VIDEO_TOO_LONG"
+        assert excinfo.value.extensions["maxVideoDurationSeconds"] == 90
 
 
 class TestPostViewerState:

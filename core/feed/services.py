@@ -36,7 +36,6 @@ from datetime import timedelta
 from django.db.models import (
     Case,
     Count,
-    Exists,
     ExpressionWrapper,
     F,
     FloatField,
@@ -51,6 +50,7 @@ from django.db.models.functions import Coalesce
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 
+from core.engagement.hidden_content import exclude_hidden_posts
 from core.follows.selectors import FollowSelector
 from core.posts.models import Post
 from core.shared.dtos import (
@@ -151,13 +151,7 @@ class FeedService:
     @staticmethod
     def _exclude_hidden_posts(qs, user_id: str | None):
         """Exclude posts hidden by the user using a performant NOT EXISTS subquery."""
-        if not user_id:
-            return qs
-
-        from core.engagement.models import HiddenPost
-
-        hidden_subquery = Exists(HiddenPost.objects.filter(user_id=user_id, post_id=OuterRef("pk")))
-        return qs.annotate(is_hidden=hidden_subquery).filter(is_hidden=False)
+        return exclude_hidden_posts(qs, user_id)
 
     @staticmethod
     def _base_post_queryset():

@@ -18,6 +18,7 @@ class UserType:
     username: str | None
     full_name: str
     bio: str
+    bio_link: str | None = None
     avatar_url: str
     role: str
     is_email_verified: bool
@@ -34,6 +35,7 @@ class UserType:
             username=user.username,
             full_name=user.full_name,
             bio=user.bio,
+            bio_link=user.bio_link or None,
             avatar_url=user.avatar_url,
             role=user.role,
             is_email_verified=user.is_email_verified,
@@ -199,6 +201,7 @@ class UserQueries:
                 username=data["username"],
                 full_name=data["displayName"],
                 bio=data["profile"]["bio"],
+                bio_link=data["profile"].get("bioLink"),
                 avatar_url=data["profile"]["avatarUrl"],
                 location=data["profile"]["location"],
                 stats=ProfileStatsType(

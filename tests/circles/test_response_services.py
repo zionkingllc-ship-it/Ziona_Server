@@ -12,6 +12,7 @@ from datetime import timedelta
 import pytest
 from django.utils import timezone
 
+from core.circles.anchor_services import get_active_anchor
 from core.circles.models import (
     Anchor,
     AnchorResponse,
@@ -25,6 +26,7 @@ from core.circles.response_services import (
     get_anchor_responses,
     toggle_reaction,
 )
+from core.circles.services import get_all_circles, get_circle_by_id
 from core.shared.exceptions import ZionaError
 from core.users.models import User
 
@@ -203,3 +205,50 @@ def test_moderation_auto_hide(circle_with_anchor, test_users):
 
     response.refresh_from_db()
     assert response.deleted_at is not None  # Soft deleted
+
+
+def test_reported_response_hidden_for_reporter_only(circle_with_anchor, test_users):
+    circle, anchor = circle_with_anchor
+    author, reporter, _ = test_users
+
+    response = create_response(
+        user_id=author.id,
+        anchor_id=anchor.id,
+        response_type="reflection",
+        content="Keep going.",
+    )
+
+    report_circle_content(reporter.id, "response", response.id, "Spam", circle.id)
+
+    reporter_visible_ids = [
+        item.id for item in get_anchor_responses(anchor.id, viewer_id=reporter.id)
+    ]
+    author_visible_ids = [item.id for item in get_anchor_responses(anchor.id, viewer_id=author.id)]
+
+    assert response.id not in reporter_visible_ids
+    assert response.id in author_visible_ids
+
+
+def test_reported_anchor_hidden_for_reporter_only(circle_with_anchor, test_users):
+    circle, anchor = circle_with_anchor
+    author, reporter, _ = test_users
+
+    report_circle_content(reporter.id, "anchor", anchor.id, "Spam", circle.id)
+
+    assert get_active_anchor(circle.id, viewer_id=reporter.id) is None
+    assert get_active_anchor(circle.id, viewer_id=author.id).id == anchor.id
+
+
+def test_reported_circle_hidden_for_reporter_only(circle_with_anchor, test_users):
+    circle, _ = circle_with_anchor
+    author, reporter, _ = test_users
+
+    report_circle_content(reporter.id, "circle", circle.id, "Spam", circle.id)
+
+    reporter_circle_ids = [str(item.id) for item in get_all_circles(viewer_id=reporter.id)]
+    author_circle_ids = [str(item.id) for item in get_all_circles(viewer_id=author.id)]
+
+    assert str(circle.id) not in reporter_circle_ids
+    assert str(circle.id) in author_circle_ids
+    assert get_circle_by_id(circle.id, viewer_id=reporter.id) is None
+    assert get_circle_by_id(circle.id, viewer_id=author.id).id == circle.id

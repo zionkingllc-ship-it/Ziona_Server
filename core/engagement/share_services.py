@@ -7,10 +7,13 @@ sharing, plus friends list for the share picker.
 
 import logging
 
+from django.conf import settings
+
 from core.engagement.models import Share
 from core.posts.models import Post
 from core.shared.dtos import AuthorDTO, ShareResponseDTO
 from core.shared.exceptions import ErrorCode, ShareError
+from core.shared.utils import build_post_share_url
 
 logger = logging.getLogger("core.engagement")
 
@@ -105,7 +108,7 @@ class ShareService:
             share_type="external",
         )
 
-        share_url = f"https://ziona.app/post/{post_id}"
+        share_url = build_post_share_url(settings.APP_SHARE_BASE_URL, post_id)
 
         logger.info(
             "post_shared_external",

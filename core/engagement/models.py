@@ -156,6 +156,7 @@ class BookmarkFolder(TimestampedModel):
         related_name="bookmark_folders",
     )
     name = models.CharField(max_length=100)
+    thumbnail_url = models.CharField(max_length=500, blank=True, default="")
 
     class Meta:
         db_table = "bookmark_folders"
@@ -297,3 +298,35 @@ class HiddenPost(TimestampedModel):
     def __str__(self) -> str:
         """Return string representation."""
         return f"Post {self.post_id} hidden by User {self.user_id}"
+
+
+class HiddenComment(TimestampedModel):
+    """A record of a comment hidden by a user."""
+
+    user = models.ForeignKey(
+        "users.User",
+        on_delete=models.CASCADE,
+        related_name="hidden_comments",
+    )
+    comment = models.ForeignKey(
+        Comment,
+        on_delete=models.CASCADE,
+        related_name="hidden_by_users",
+    )
+
+    class Meta:
+        db_table = "hidden_comments"
+        ordering = ["-created_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["user", "comment"],
+                name="uq_hidden_user_comment",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["user", "created_at"], name="idx_hidden_comment_user_time"),
+        ]
+
+    def __str__(self) -> str:
+        """Return string representation."""
+        return f"Comment {self.comment_id} hidden by User {self.user_id}"

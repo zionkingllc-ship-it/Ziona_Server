@@ -1,5 +1,9 @@
+from datetime import timedelta
+
+import jwt
 import pytest
 from django.conf import settings
+from django.utils import timezone
 
 from core.authentication.tokens import TokenError, TokenService
 
@@ -34,6 +38,24 @@ class TestAccessToken:
         assert payload["user_id"] == str(user.id)
         assert payload["role"] == "user"
         assert payload["type"] == "access"
+
+    def test_validate_access_token_allows_small_iat_clock_skew(self, create_user):
+        """Small clock skew should not reject a freshly issued mobile token."""
+        user = create_user()
+        now = timezone.now()
+        payload = {
+            "user_id": str(user.id),
+            "role": user.role,
+            "type": "access",
+            "iat": now + timedelta(seconds=settings.JWT_LEEWAY_SECONDS - 1),
+            "exp": now + settings.JWT_ACCESS_TOKEN_LIFETIME,
+            "jti": "clock-skew-test",
+        }
+        token = jwt.encode(payload, settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
+
+        decoded = TokenService.validate_access_token(token)
+
+        assert decoded["user_id"] == str(user.id)
 
     def test_invalid_access_token(self):
         """Invalid token should raise TokenError."""

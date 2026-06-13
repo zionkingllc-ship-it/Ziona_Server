@@ -173,12 +173,18 @@ class RateLimitMiddleware:
 
     def _rate_limit_response(self, retry_after: int) -> JsonResponse:
         """Return a 429 Too Many Requests response."""
+        user_message = f"Too many requests. Please try again in {retry_after} seconds."
         response = JsonResponse(
             {
                 "success": False,
+                "retryAfter": retry_after,
+                "userMessage": user_message,
                 "error": {
                     "code": "RATE_LIMIT_EXCEEDED",
-                    "message": f"Rate limit exceeded. Try again in {retry_after} seconds.",
+                    "message": user_message,
+                    "details": {
+                        "retryAfter": retry_after,
+                    },
                 },
             },
             status=429,

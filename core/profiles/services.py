@@ -7,7 +7,10 @@ and profile updates with validation.
 
 import logging
 import re
+from urllib.parse import urlparse
 
+from django.core.exceptions import ValidationError
+from django.core.validators import URLValidator
 from django.db.models import Count, Q
 
 from core.follows.selectors import FollowSelector
@@ -23,6 +26,7 @@ logger = logging.getLogger("core.profiles")
 BIO_MAX_LENGTH = 150
 DISPLAY_NAME_MAX_LENGTH = 150
 AVATAR_URL_MAX_LENGTH = 500
+BIO_LINK_MAX_LENGTH = 500
 
 # Only allow public http/https URLs — rejects local device paths (file://, content://)
 _AVATAR_URL_PATTERN = re.compile(
@@ -33,6 +37,8 @@ _AVATAR_URL_PATTERN = re.compile(
     r"(?::\d+)?(?:/?|[/?]\S+)$",
     re.IGNORECASE,
 )
+
+_BIO_LINK_SCHEME_PATTERN = re.compile(r"^[a-zA-Z][a-zA-Z0-9+.-]*://")
 
 
 class ProfileService:
@@ -67,6 +73,51 @@ class ProfileService:
                 ),
                 code=ErrorCode.VALIDATION_ERROR,
             )
+
+    @staticmethod
+    def _normalize_bio_link(bio_link: str) -> str:
+        """Normalize and validate the optional profile link.
+
+        Accepts a plain string from mobile. If the user omits a scheme,
+        the backend stores it as an https URL.
+        """
+        cleaned_link = (bio_link or "").strip()
+        if not cleaned_link:
+            return ""
+
+        if len(cleaned_link) > BIO_LINK_MAX_LENGTH:
+            raise ProfileError(
+                message=f"Bio link must be {BIO_LINK_MAX_LENGTH} characters or fewer.",
+                code=ErrorCode.VALIDATION_ERROR,
+            )
+
+        normalized_link = cleaned_link
+        if not _BIO_LINK_SCHEME_PATTERN.match(normalized_link):
+            normalized_link = f"https://{normalized_link}"
+
+        validator = URLValidator(schemes=["http", "https"])
+        try:
+            validator(normalized_link)
+        except ValidationError as exc:
+            raise ProfileError(
+                message=(
+                    "Invalid bio link. Enter a valid public http:// or https:// URL, "
+                    "or a domain like ziona.app."
+                ),
+                code=ErrorCode.VALIDATION_ERROR,
+            ) from exc
+
+        parsed_link = urlparse(normalized_link)
+        if not parsed_link.netloc:
+            raise ProfileError(
+                message=(
+                    "Invalid bio link. Enter a valid public http:// or https:// URL, "
+                    "or a domain like ziona.app."
+                ),
+                code=ErrorCode.VALIDATION_ERROR,
+            )
+
+        return normalized_link
 
     @staticmethod
     def get_user_profile(
@@ -145,6 +196,7 @@ class ProfileService:
             username=user.username or "",
             full_name=user.full_name or "",
             bio=user.bio or "",
+            bio_link=user.bio_link or None,
             avatar_url=user.avatar_url or None,
             location=user.location or "",
             hide_like_count=getattr(user, "hide_like_count", False),
@@ -160,6 +212,7 @@ class ProfileService:
     def update_profile(
         user_id: str,
         bio: str | None = None,
+        bio_link: str | None = None,
         full_name: str | None = None,
         avatar_url: str | None = None,
         location: str | None = None,
@@ -170,6 +223,7 @@ class ProfileService:
         Args:
             user_id: UUID of the user.
             bio: New bio text (max 150 chars).
+            bio_link: New optional public link.
             full_name: New display name.
             avatar_url: New avatar URL.
             location: New location string.
@@ -200,6 +254,10 @@ class ProfileService:
                 )
             user.bio = bio
             update_fields.append("bio")
+
+        if bio_link is not None:
+            user.bio_link = ProfileService._normalize_bio_link(bio_link)
+            update_fields.append("bio_link")
 
         if full_name is not None and full_name != user.full_name:
             if len(full_name) > DISPLAY_NAME_MAX_LENGTH:

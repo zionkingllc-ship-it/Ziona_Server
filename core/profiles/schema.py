@@ -51,6 +51,7 @@ class UserProfileType:
     username: str
     full_name: str
     bio: str
+    bio_link: str | None = None
     avatar_url: str | None = None
     location: str
     hide_like_count: bool = False
@@ -99,6 +100,7 @@ def _dto_to_profile(dto) -> UserProfileType:
         username=dto.username,
         full_name=dto.full_name,
         bio=dto.bio,
+        bio_link=getattr(dto, "bio_link", None),
         avatar_url=dto.avatar_url,
         location=dto.location,
         hide_like_count=getattr(dto, "hide_like_count", False),
@@ -244,6 +246,7 @@ class ProfileMutations:
         self,
         info: strawberry.types.Info,
         bio: str | None = None,
+        bio_link: str | None = None,
         full_name: str | None = None,
         avatar_url: str | None = None,
         location: str | None = None,
@@ -258,6 +261,7 @@ class ProfileMutations:
         **Authentication:** Required
         **Parameters:**
         - bio (String, optional) - Public profile blurb
+        - bio_link (String, optional) - Optional public link shown under the bio
         - full_name (String, optional) - Display label
         - avatar_url (String, optional) - Public bucket URL
         - location (String, optional) - Global location label
@@ -279,6 +283,7 @@ class ProfileMutations:
             result = ProfileService.update_profile(
                 user_id=user_id,
                 bio=bio,
+                bio_link=bio_link,
                 full_name=full_name,
                 avatar_url=avatar_url,
                 location=location,

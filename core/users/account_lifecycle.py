@@ -41,11 +41,13 @@ def remove_or_hide_user_data(user, now: datetime) -> None:
         CirclePostCommentLike,
         CirclePostEngagement,
         CircleReport,
+        HiddenCircleContent,
     )
     from core.engagement.models import (
         BookmarkFolder,
         Comment,
         CommentLike,
+        HiddenComment,
         HiddenPost,
         Like,
         Save,
@@ -68,7 +70,9 @@ def remove_or_hide_user_data(user, now: datetime) -> None:
     BookmarkFolder.objects.filter(user=user).delete()
     Share.objects.filter(Q(user=user) | Q(post__user=user)).delete()
     Share.objects.filter(recipient=user).update(recipient=None)
+    HiddenComment.objects.filter(Q(user=user) | Q(comment__user=user)).delete()
     HiddenPost.objects.filter(Q(user=user) | Q(post__user=user)).delete()
+    HiddenCircleContent.objects.filter(user=user).delete()
 
     AnchorEngagement.objects.filter(Q(user=user) | Q(anchor__created_by=user)).delete()
     AnchorResponseReaction.objects.filter(Q(user=user) | Q(response__user=user)).delete()
@@ -136,6 +140,7 @@ def anonymize_user_for_permanent_delete(user, now: datetime) -> None:
     user.username = f"deleted_{id_token[:22]}"
     user.full_name = ""
     user.bio = ""
+    user.bio_link = ""
     user.avatar_url = ""
     user.role = UserRole.USER
     user.is_email_verified = False
@@ -162,6 +167,7 @@ def anonymize_user_for_permanent_delete(user, now: datetime) -> None:
             "username",
             "full_name",
             "bio",
+            "bio_link",
             "avatar_url",
             "role",
             "is_email_verified",

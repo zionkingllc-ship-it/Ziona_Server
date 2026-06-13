@@ -290,7 +290,11 @@ class FollowQueries:
                 username=s["user"].username,
                 avatar_url=s["user"].avatar_url,
                 bio=s.get("bio"),
-                stats=ProfileStatsType(followers_count=s.get("followers_count", 0)),
+                stats=ProfileStatsType(
+                    _followers=s.get("followers_count", 0),
+                    _following=s.get("following_count", 0),
+                    _posts=s.get("posts_count", 0),
+                ),
             )
             for s in suggestions
         ]

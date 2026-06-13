@@ -10,6 +10,8 @@ from django.utils import timezone
 
 from core.circles.models import Anchor, AnchorResponse, AnchorResponseReaction, CircleMembership
 from core.circles.validators import validate_response_media
+from core.engagement.cache import EngagementCache
+from core.engagement.hidden_content import exclude_hidden_circle_content
 from core.shared.exceptions import ZionaError
 
 # ──────────────────────────────────────────────
@@ -159,11 +161,24 @@ def get_anchor_responses(
       - TRENDING: annotation based formula -> (reaction_count * 2) - hours_since
     Returns N+1 optimized queryset.
     """
+    anchor = (
+        Anchor.objects.filter(id=anchor_id, deleted_at__isnull=True).values("circle_id").first()
+    )
+    if not anchor:
+        return []
+
+    if viewer_id and (
+        EngagementCache.is_circle_content_hidden(viewer_id, "circle", anchor["circle_id"])
+        or EngagementCache.is_circle_content_hidden(viewer_id, "anchor", anchor_id)
+    ):
+        return []
+
     queryset = AnchorResponse.objects.filter(
         anchor_id=anchor_id,
         parent_response__isnull=True,
         deleted_at__isnull=True,
     ).select_related("user")
+    queryset = exclude_hidden_circle_content(queryset, viewer_id, target_type="response")
 
     if my_posts_only and viewer_id:
         queryset = queryset.filter(user_id=viewer_id)
@@ -202,11 +217,27 @@ def get_anchor_responses(
 
 def get_response_replies(response_id: str, viewer_id: str, limit: int = 50) -> list[AnchorResponse]:
     """Get replies to a specific response, ordered oldest-to-newest."""
+    parent = (
+        AnchorResponse.objects.filter(id=response_id, deleted_at__isnull=True)
+        .select_related("anchor")
+        .first()
+    )
+    if not parent:
+        return []
+
+    if viewer_id and (
+        EngagementCache.is_circle_content_hidden(viewer_id, "circle", parent.anchor.circle_id)
+        or EngagementCache.is_circle_content_hidden(viewer_id, "anchor", parent.anchor_id)
+        or EngagementCache.is_circle_content_hidden(viewer_id, "response", response_id)
+    ):
+        return []
+
     queryset = (
         AnchorResponse.objects.filter(parent_response_id=response_id, deleted_at__isnull=True)
         .select_related("user")
         .order_by("created_at")
     )
+    queryset = exclude_hidden_circle_content(queryset, viewer_id, target_type="response")
 
     viewer_reaction = AnchorResponseReaction.objects.filter(
         response=OuterRef("pk"), user_id=viewer_id

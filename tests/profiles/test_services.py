@@ -57,14 +57,28 @@ class TestUpdateProfile:
         result = ProfileService.update_profile(str(user_a.id), full_name="New Name")
         assert result.full_name == "New Name"
 
+    def test_update_bio_link(self, user_a):
+        result = ProfileService.update_profile(str(user_a.id), bio_link="https://ziona.app/about")
+        assert result.bio_link == "https://ziona.app/about"
+
+    def test_update_bio_link_normalizes_missing_scheme(self, user_a):
+        result = ProfileService.update_profile(str(user_a.id), bio_link="ziona.app/about")
+        assert result.bio_link == "https://ziona.app/about"
+
+    def test_invalid_bio_link_raises(self, user_a):
+        with pytest.raises(ProfileError):
+            ProfileService.update_profile(str(user_a.id), bio_link="not a valid link")
+
     def test_update_multiple_fields(self, user_a):
         result = ProfileService.update_profile(
             str(user_a.id),
             bio="Updated bio",
+            bio_link="https://ziona.app/profile",
             full_name="Updated Name",
             location="New York",
         )
         assert result.bio == "Updated bio"
+        assert result.bio_link == "https://ziona.app/profile"
         assert result.full_name == "Updated Name"
         assert result.location == "New York"
 

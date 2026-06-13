@@ -36,6 +36,50 @@ def test_generate_upload_url_returns_signed_and_public_urls(
 
 
 @pytest.mark.django_db
+def test_generate_upload_url_accepts_video_at_hundred_mb(settings, authenticated_user, monkeypatch):
+    settings.GCP_STORAGE_BUCKET = "ziona-media-test"
+    monkeypatch.setattr(
+        "core.media.services._generate_gcp_signed_url",
+        lambda **kwargs: "https://storage.googleapis.com/signed-upload-url",
+    )
+
+    result = MediaService.generate_upload_url(
+        user_id=str(authenticated_user["user"].id),
+        file_name="clip.mp4",
+        file_type="video/mp4",
+        file_size=100 * 1024 * 1024,
+    )
+
+    assert result["media_id"]
+    assert result["media_url"].endswith(".mp4")
+
+
+@pytest.mark.django_db
+def test_generate_upload_url_rejects_video_above_hundred_mb_with_standard_details(
+    settings, authenticated_user, monkeypatch
+):
+    settings.GCP_STORAGE_BUCKET = "ziona-media-test"
+    monkeypatch.setattr(
+        "core.media.services._generate_gcp_signed_url",
+        lambda **kwargs: "https://storage.googleapis.com/signed-upload-url",
+    )
+
+    with pytest.raises(MediaError) as exc:
+        MediaService.generate_upload_url(
+            user_id=str(authenticated_user["user"].id),
+            file_name="too-large.mp4",
+            file_type="video/mp4",
+            file_size=(100 * 1024 * 1024) + 1,
+        )
+
+    assert exc.value.code == "MEDIA_TOO_LARGE"
+    assert exc.value.details["maxVideoSizeBytes"] == 100 * 1024 * 1024
+    assert exc.value.details["receivedSize"] == (100 * 1024 * 1024) + 1
+    assert exc.value.details["maxVideoDurationSeconds"] == 90
+    assert exc.value.details["maxVideosPerPost"] == 1
+
+
+@pytest.mark.django_db
 def test_generate_upload_url_signing_failure_does_not_create_orphan_media(
     settings, authenticated_user, monkeypatch
 ):

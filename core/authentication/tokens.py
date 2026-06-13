@@ -134,6 +134,7 @@ class TokenService:
                 token,
                 settings.JWT_SECRET_KEY,
                 algorithms=[settings.JWT_ALGORITHM],
+                leeway=settings.JWT_LEEWAY_SECONDS,
             )
         except jwt.ExpiredSignatureError:
             raise TokenError("Access token has expired") from None
@@ -163,6 +164,7 @@ class TokenService:
                 token,
                 settings.JWT_SECRET_KEY,
                 algorithms=[settings.JWT_ALGORITHM],
+                leeway=settings.JWT_LEEWAY_SECONDS,
             )
         except jwt.ExpiredSignatureError:
             raise TokenError("Refresh token has expired") from None

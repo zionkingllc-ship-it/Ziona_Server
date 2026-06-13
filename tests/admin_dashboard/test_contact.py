@@ -37,6 +37,7 @@ def test_landing_contact_is_visible_in_admin_contact_queue(authenticated_admin, 
         "core.emails.services.EmailService.send_internal_contact_notification",
         lambda *args, **kwargs: None,
     )
+    monkeypatch.setattr("core.landing.services._check_rate_limit", lambda *args, **kwargs: None)
 
     LandingContactService.submit(
         brand="ziona",

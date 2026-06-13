@@ -12,6 +12,7 @@ from core.circles.services import (
     create_circle_post,
     ensure_circle_post_liked,
     get_all_circles,
+    get_circle_by_id,
     get_circle_feed,
     get_circle_post,
     get_my_circles,
@@ -432,20 +433,30 @@ class CircleType:
         return _circle_rules_for(self._dto)
 
     @strawberry.field(name="activeAnchor")
-    def active_anchor(self) -> AnchorType | None:
+    def active_anchor(self, info: Info) -> AnchorType | None:
         from core.circles.anchor_services import get_active_anchor
 
-        anchor = get_active_anchor(str(self._dto.id))
+        viewer_id = _get_authenticated_user_id(info)
+        anchor = get_active_anchor(str(self._dto.id), viewer_id=viewer_id)
         return AnchorType.from_db_model(anchor)
 
     @strawberry.field(name="anchorDates")
-    def anchor_dates(self) -> list[str]:
+    def anchor_dates(self, info: Info) -> list[str]:
         from core.circles.models import Anchor
+        from core.engagement.cache import EngagementCache
+        from core.engagement.hidden_content import exclude_hidden_circle_content
+
+        viewer_id = _get_authenticated_user_id(info)
+        if viewer_id and EngagementCache.is_circle_content_hidden(
+            viewer_id, "circle", str(self._dto.id)
+        ):
+            return []
 
         anchors = Anchor.objects.filter(
             circle_id=self._dto.id,
             deleted_at__isnull=True,
         ).order_by("-published_at")
+        anchors = exclude_hidden_circle_content(anchors, viewer_id, target_type="anchor")
         return _unique_anchor_dates(list(anchors))
 
     @strawberry.field(name="bannerImage")
@@ -800,25 +811,23 @@ class CircleQueries:
         return [CircleType.from_db_model(c) for c in circles]
 
     @strawberry.field
-    def circle(self, id: str) -> CircleType | None:
-        from core.circles.models import Circle
-
-        try:
-            circle = Circle.objects.get(id=id, is_active=True, deleted_at__isnull=True)
-            return CircleType.from_db_model(circle)
-        except Circle.DoesNotExist:
-            return None
+    def circle(self, info: Info, id: str) -> CircleType | None:
+        viewer_id = _get_authenticated_user_id(info)
+        circle = get_circle_by_id(id, viewer_id=viewer_id)
+        return CircleType.from_db_model(circle)
 
     @strawberry.field(name="activeAnchor")
-    def active_anchor(self, circle_id: str) -> AnchorType | None:
+    def active_anchor(self, info: Info, circle_id: str) -> AnchorType | None:
         from core.circles.anchor_services import get_active_anchor
 
-        anchor = get_active_anchor(circle_id)
+        viewer_id = _get_authenticated_user_id(info)
+        anchor = get_active_anchor(circle_id, viewer_id=viewer_id)
         return AnchorType.from_db_model(anchor)
 
     @strawberry.field(name="anchorHistory")
     def anchor_history(
         self,
+        info: Info,
         circle_id: str,
         limit: int = 20,
         cursor: str | None = None,
@@ -826,7 +835,14 @@ class CircleQueries:
     ) -> list[AnchorType]:
         from core.circles.anchor_services import get_anchor_history
 
-        anchors = get_anchor_history(circle_id, limit, cursor, include_active=include_active)
+        viewer_id = _get_authenticated_user_id(info)
+        anchors = get_anchor_history(
+            circle_id,
+            limit,
+            cursor,
+            include_active=include_active,
+            viewer_id=viewer_id,
+        )
         return [AnchorType.from_db_model(a) for a in anchors]
 
     @strawberry.field(name="circleFeed")
@@ -925,7 +941,7 @@ class CircleQueries:
         from core.shared.exceptions import ZionaError
 
         try:
-            anchor = get_anchor_by_id(anchor_id=id)
+            anchor = get_anchor_by_id(anchor_id=id, viewer_id=_get_authenticated_user_id(info))
             return AnchorType.from_db_model(anchor)
         except ZionaError:
             return None
@@ -943,14 +959,11 @@ class CircleQueries:
         circle_filter: CirclePostFilterEnum | None = None,
     ) -> CircleFeedDataType | None:
         from core.circles.anchor_services import get_active_anchor, get_anchor_history
-        from core.circles.models import Circle
-
-        try:
-            circle = Circle.objects.get(id=circle_id, is_active=True, deleted_at__isnull=True)
-        except Circle.DoesNotExist:
-            return None
 
         viewer_id = _get_authenticated_user_id(info)
+        circle = get_circle_by_id(circle_id, viewer_id=viewer_id)
+        if not circle:
+            return None
         sort_by, author_id = _resolve_circle_feed_filters(
             viewer_id=viewer_id,
             sort_by=sort_by,
@@ -975,8 +988,9 @@ class CircleQueries:
             limit=history_limit,
             include_active=False,
             max_age_days=5,
+            viewer_id=viewer_id,
         )
-        active_anchor = get_active_anchor(circle_id)
+        active_anchor = get_active_anchor(circle_id, viewer_id=viewer_id)
         circle_type = CircleType.from_db_model(circle)
         return CircleFeedDataType(
             banner_image=circle_type.banner_image(),
@@ -998,7 +1012,7 @@ class CircleQueries:
         )
 
     @strawberry.field(name="anchorByDate")
-    def anchor_by_date(self, circle_id: str, date: str) -> AnchorType | None:
+    def anchor_by_date(self, info: Info, circle_id: str, date: str) -> AnchorType | None:
         from datetime import date as date_type
 
         from core.circles.anchor_services import get_anchor_by_date
@@ -1007,7 +1021,11 @@ class CircleQueries:
             parsed_date = date_type.fromisoformat(date)
         except ValueError:
             return None
-        anchor = get_anchor_by_date(circle_id, parsed_date)
+        anchor = get_anchor_by_date(
+            circle_id,
+            parsed_date,
+            viewer_id=_get_authenticated_user_id(info),
+        )
         return AnchorType.from_db_model(anchor)
 
     @strawberry.field(name="anchorResponses")

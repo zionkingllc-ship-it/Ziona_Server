@@ -245,13 +245,15 @@ class TestAccountDetailsGraphQL:
     def test_rest_me_includes_account_details(self, api_client, authenticated_user):
         user = authenticated_user["user"]
         user.location = "Lagos, Nigeria"
-        user.save(update_fields=["location", "updated_at"])
+        user.bio_link = "https://ziona.app/welcome"
+        user.save(update_fields=["location", "bio_link", "updated_at"])
         api_client.defaults["HTTP_AUTHORIZATION"] = f"Bearer {authenticated_user['access_token']}"
 
         response = api_client.get("/api/auth/me")
         data = response.json()["data"]
 
         assert response.status_code == 200
+        assert data["profile"]["bioLink"] == "https://ziona.app/welcome"
         assert data["accountDetails"]["memberSince"] == user.created_at.strftime("%B %Y")
         assert data["accountDetails"]["memberSinceDate"] == user.created_at.isoformat()
         assert data["accountDetails"]["location"] == "Lagos, Nigeria"

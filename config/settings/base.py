@@ -202,6 +202,7 @@ JWT_ACCESS_TOKEN_LIFETIME = timedelta(days=1)
 JWT_REFRESH_TOKEN_LIFETIME = timedelta(days=30)
 JWT_REFRESH_ROTATION_GRACE_SECONDS = env.int("JWT_REFRESH_ROTATION_GRACE_SECONDS", default=30)
 JWT_ALGORITHM = "HS256"
+JWT_LEEWAY_SECONDS = env.int("JWT_LEEWAY_SECONDS", default=30)
 
 
 # Celery broker and result backend are intentionally separated from REDIS_URL.
@@ -297,6 +298,7 @@ ENSEND_API_KEY = env("ENSEND_API_KEY", default="")
 ENSEND_API_URL = env("ENSEND_API_URL", default="https://api.smtpexpress.com/send")
 ENSEND_SENDER_NAME = env("ENSEND_SENDER_NAME", default="Ziona Team")
 DEFAULT_FROM_EMAIL = env("DEFAULT_FROM_EMAIL", default="noreply@ziona.app")
+APP_SHARE_BASE_URL = env("APP_SHARE_BASE_URL", default="https://ziona.app")
 EMAIL_ASSET_BASE_URL = env(
     "EMAIL_ASSET_BASE_URL",
     default="https://storage.googleapis.com/ziona-media-dev/email-assets",

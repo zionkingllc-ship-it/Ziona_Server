@@ -5,6 +5,8 @@ from django.core.validators import MinLengthValidator
 from django.db import models
 from django.db.models import Q
 
+from core.shared.models import TimestampedModel
+
 User = settings.AUTH_USER_MODEL
 
 
@@ -410,6 +412,42 @@ class CircleReport(models.Model):
 
     def __str__(self):
         return f"Report {self.id} on {self.target_type} {self.target_id}"
+
+
+class HiddenCircleContent(TimestampedModel):
+    """A record of circle content hidden by a specific user."""
+
+    user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name="hidden_circle_content",
+    )
+    target_type = models.CharField(
+        max_length=20,
+        choices=CircleReport.TARGET_TYPE_CHOICES,
+        db_index=True,
+    )
+    target_id = models.UUIDField(db_index=True)
+
+    class Meta:
+        db_table = "hidden_circle_content"
+        ordering = ["-created_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["user", "target_type", "target_id"],
+                name="uq_hidden_circle_content_user_target",
+            )
+        ]
+        indexes = [
+            models.Index(fields=["user", "created_at"], name="idx_hidden_circle_user_time"),
+            models.Index(
+                fields=["user", "target_type", "target_id"],
+                name="idx_hidden_circle_lookup",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.target_type}:{self.target_id} hidden by {self.user_id}"
 
 
 # ──────────────────────────────────────────────

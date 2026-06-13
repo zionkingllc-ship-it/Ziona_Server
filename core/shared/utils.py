@@ -5,6 +5,7 @@ Provides common helper functions used across all modules.
 """
 
 import logging
+from urllib.parse import quote
 
 logger = logging.getLogger("core.shared")
 
@@ -30,6 +31,20 @@ def normalize_url(url: str) -> str:
         return "https://" + parts[-1]
 
     return url
+
+
+def build_post_share_url(base_url: str, post_id: str) -> str:
+    """Build the canonical public share URL for a post.
+
+    Args:
+        base_url: App share base URL, e.g. "https://ziona.app".
+        post_id: Post UUID/string identifier.
+
+    Returns:
+        Canonical post share URL.
+    """
+    normalized_base = (base_url or "https://ziona.app").rstrip("/")
+    return f"{normalized_base}/post/{quote(str(post_id), safe='')}"
 
 
 def format_count(count: int) -> str:

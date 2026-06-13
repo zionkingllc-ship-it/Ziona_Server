@@ -10,6 +10,8 @@ from django.db import transaction
 from django.utils import timezone
 
 from core.circles.models import Anchor, AnchorPage, Circle, CircleMembership
+from core.engagement.cache import EngagementCache
+from core.engagement.hidden_content import exclude_hidden_circle_content
 from core.shared.exceptions import ZionaError
 
 # ──────────────────────────────────────────────
@@ -40,11 +42,14 @@ def calculate_time_remaining(expires_at) -> str:
 # ──────────────────────────────────────────────
 
 
-def get_active_anchor(circle_id: str) -> Anchor | None:
+def get_active_anchor(circle_id: str, viewer_id: str | None = None) -> Anchor | None:
     """
     Get the currently active anchor for a circle.
     Cached for 5 minutes. Invalidated on create/delete/expire.
     """
+    if viewer_id and EngagementCache.is_circle_content_hidden(viewer_id, "circle", circle_id):
+        return None
+
     cache_key = f"active_anchor:{circle_id}"
     anchor = cache.get(cache_key)
 
@@ -64,6 +69,13 @@ def get_active_anchor(circle_id: str) -> Anchor | None:
         if anchor:
             cache.set(cache_key, anchor, timeout=300)  # 5 minutes
 
+    if (
+        anchor
+        and viewer_id
+        and EngagementCache.is_circle_content_hidden(viewer_id, "anchor", anchor.id)
+    ):
+        return None
+
     return anchor
 
 
@@ -72,20 +84,21 @@ def invalidate_active_anchor_cache(circle_id: str) -> None:
     cache.delete(f"active_anchor:{circle_id}")
 
 
-def get_anchor_by_date(circle_id: str, date) -> Anchor | None:
+def get_anchor_by_date(circle_id: str, date, viewer_id: str | None = None) -> Anchor | None:
     """Get anchor that was active on a specific date."""
-    return (
-        Anchor.objects.filter(
-            circle_id=circle_id,
-            published_at__date=date,
-            deleted_at__isnull=True,
-        )
-        .select_related("created_by", "circle")
-        .first()
-    )
+    if viewer_id and EngagementCache.is_circle_content_hidden(viewer_id, "circle", circle_id):
+        return None
+
+    queryset = Anchor.objects.filter(
+        circle_id=circle_id,
+        published_at__date=date,
+        deleted_at__isnull=True,
+    ).select_related("created_by", "circle")
+    queryset = exclude_hidden_circle_content(queryset, viewer_id, target_type="anchor")
+    return queryset.first()
 
 
-def get_anchor_by_id(anchor_id: str) -> Anchor:
+def get_anchor_by_id(anchor_id: str, viewer_id: str | None = None) -> Anchor:
     """
     Fetch a single Anchor by its UUID.
 
@@ -95,12 +108,22 @@ def get_anchor_by_id(anchor_id: str) -> Anchor:
     """
     from core.shared.exceptions import ZionaError
 
-    try:
-        return Anchor.objects.select_related("created_by", "circle").get(
-            id=anchor_id, deleted_at__isnull=True
-        )
-    except Anchor.DoesNotExist:
+    queryset = Anchor.objects.select_related("created_by", "circle").filter(
+        id=anchor_id,
+        deleted_at__isnull=True,
+    )
+    queryset = exclude_hidden_circle_content(queryset, viewer_id, target_type="anchor")
+    queryset = exclude_hidden_circle_content(
+        queryset,
+        viewer_id,
+        target_type="circle",
+        target_field="circle_id",
+    )
+
+    anchor = queryset.first()
+    if not anchor:
         raise ZionaError(message="Anchor not found", code="ANCHOR_NOT_FOUND") from None
+    return anchor
 
 
 def get_anchor_history(
@@ -109,6 +132,7 @@ def get_anchor_history(
     cursor: str | None = None,
     include_active: bool = True,
     max_age_days: int | None = None,
+    viewer_id: str | None = None,
 ) -> list[Anchor]:
     """Get past anchors for a circle, ordered by published_at DESC.
 
@@ -117,6 +141,9 @@ def get_anchor_history(
                       many days in the past are returned. This enforces the
                       5-day display window without waiting for the purge task.
     """
+    if viewer_id and EngagementCache.is_circle_content_hidden(viewer_id, "circle", circle_id):
+        return []
+
     queryset = (
         Anchor.objects.filter(
             circle_id=circle_id,
@@ -125,6 +152,7 @@ def get_anchor_history(
         .select_related("created_by", "circle")
         .order_by("-published_at")
     )
+    queryset = exclude_hidden_circle_content(queryset, viewer_id, target_type="anchor")
 
     if not include_active:
         queryset = queryset.filter(expires_at__lte=timezone.now())

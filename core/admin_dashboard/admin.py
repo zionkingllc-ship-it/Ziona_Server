@@ -42,8 +42,9 @@ class DailyAnalyticsAdmin(admin.ModelAdmin):
 
 @admin.register(ContactMessage)
 class ContactMessageAdmin(admin.ModelAdmin):
-    list_display = ("name", "email", "status", "created_at")
-    list_filter = ("status",)
+    list_display = ("name", "email", "topic", "source", "status", "created_at")
+    list_filter = ("status", "source")
+    search_fields = ("name", "email", "message", "topic")
     ordering = ("-created_at",)
 
 

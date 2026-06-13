@@ -6,6 +6,7 @@ Handles post-upload file validation and processing.
 
 import logging
 import os
+import re
 import subprocess
 import tempfile
 from pathlib import Path
@@ -153,10 +154,16 @@ def _optimize_video_media(media_file: MediaFile) -> None:
         _download_blob(media_file.storage_path, original_path)
         _optimize_video_file(original_path, optimized_path)
         _upload_blob(media_file.storage_path, optimized_path, "video/mp4")
+        width, height, duration = _extract_video_metadata(optimized_path)
 
         media_file.file_type = "video/mp4"
         media_file.file_size = optimized_path.stat().st_size
-        media_file.save(update_fields=["file_type", "file_size", "updated_at"])
+        media_file.width = width
+        media_file.height = height
+        media_file.duration = duration
+        media_file.save(
+            update_fields=["file_type", "file_size", "width", "height", "duration", "updated_at"]
+        )
 
 
 def _optimize_image_file(
@@ -245,6 +252,42 @@ def _optimize_video_file(input_path: Path, output_path: Path) -> None:
     if result.returncode != 0:
         stderr = result.stderr.decode("utf-8", errors="replace")
         raise RuntimeError(f"FFmpeg video optimization failed: {stderr[:500]}")
+
+
+def _extract_video_metadata(video_path: Path) -> tuple[int | None, int | None, float | None]:
+    """Extract normalized video width, height, and duration using bundled FFmpeg."""
+    import imageio_ffmpeg
+
+    ffmpeg_bin = imageio_ffmpeg.get_ffmpeg_exe()
+    result = subprocess.run(
+        [ffmpeg_bin, "-i", str(video_path)],  # noqa: S603
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+    stderr = result.stderr or ""
+
+    width = height = None
+    duration = None
+
+    duration_match = re.search(r"Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)", stderr)
+    if duration_match:
+        hours = int(duration_match.group(1))
+        minutes = int(duration_match.group(2))
+        seconds = float(duration_match.group(3))
+        duration = round((hours * 3600) + (minutes * 60) + seconds, 3)
+
+    for line in stderr.splitlines():
+        if "Video:" not in line:
+            continue
+        dimensions_match = re.search(r"(\d{2,5})x(\d{2,5})", line)
+        if dimensions_match:
+            width = int(dimensions_match.group(1))
+            height = int(dimensions_match.group(2))
+            break
+
+    return width, height, duration
 
 
 def _has_alpha(image) -> bool:

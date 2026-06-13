@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 
 from django.db import IntegrityError
 
+from core.engagement.hidden_content import hide_comment_for_user, hide_post_for_user
 from core.moderation.models import ModerationActionChoice, Report, ReportReason, ReportStatus
 from core.shared.decorators import rate_limit
 from core.shared.exceptions import ErrorCode, ModerationError
@@ -105,6 +106,11 @@ class ReportService:
             # unique_user_report constraint fired — this user already reported
             # this content for the same reason.  Return the existing report id
             # so the caller gets a clean response without creating a duplicate.
+            _hide_reported_content_for_reporter(
+                reporter_id=reporter_id,
+                post_id=post_id,
+                comment_id=comment_id,
+            )
             existing = Report.objects.filter(
                 reporter_id=reporter_id,
                 target_type=target_type,
@@ -131,6 +137,12 @@ class ReportService:
                 "post_id": post_id,
                 "comment_id": comment_id,
             },
+        )
+
+        _hide_reported_content_for_reporter(
+            reporter_id=reporter_id,
+            post_id=post_id,
+            comment_id=comment_id,
         )
 
         # ── Issue #1: Auto-hide content that has reached the report threshold ──
@@ -336,6 +348,16 @@ def _apply_auto_hide(post_id: str | None, comment_id: str | None) -> None:
                     "comment_auto_hidden",
                     extra={"comment_id": str(comment_id), "report_count": report_count},
                 )
+
+
+def _hide_reported_content_for_reporter(
+    *, reporter_id: str, post_id: str | None = None, comment_id: str | None = None
+) -> None:
+    """Immediately suppress newly reported content for the reporting user only."""
+    if post_id:
+        hide_post_for_user(reporter_id, str(post_id))
+    elif comment_id:
+        hide_comment_for_user(reporter_id, str(comment_id))
 
 
 def _execute_report_action(report: Report, action: str) -> None:

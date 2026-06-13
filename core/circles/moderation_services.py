@@ -7,6 +7,7 @@ implements the auto-hide threshold logic (3 distinct reports).
 from django.db import transaction
 
 from core.circles.models import Anchor, AnchorResponse, Circle, CircleReport
+from core.engagement.hidden_content import hide_circle_content_for_user
 from core.shared.exceptions import ZionaError
 
 
@@ -43,7 +44,7 @@ def report_circle_content(
         ).exists()
     ):
         raise ZionaError(message="Response not found in this circle", code="TARGET_NOT_FOUND")
-    if target_type == "circle" and str(circle.id) != target_id:
+    if target_type == "circle" and str(circle.id) != str(target_id):
         raise ZionaError(message="Target ID must match Circle ID", code="TARGET_MISMATCH")
 
     # ── Prevent duplicate reports ──
@@ -52,6 +53,11 @@ def report_circle_content(
     ).first()
 
     if existing_report:
+        hide_circle_content_for_reporter(
+            reporter_id=reporter_id,
+            target_type=target_type,
+            target_id=target_id,
+        )
         raise ZionaError(message="You have already reported this content", code="ALREADY_REPORTED")
 
     # ── Create Report ──
@@ -61,6 +67,12 @@ def report_circle_content(
         target_type=target_type,
         target_id=target_id,
         reason=reason,
+    )
+
+    hide_circle_content_for_reporter(
+        reporter_id=reporter_id,
+        target_type=target_type,
+        target_id=target_id,
     )
 
     # ── Check Auto-Hide Threshold (3 distinct reporters) ──
@@ -103,3 +115,12 @@ def _auto_hide_content(target_type: str, target_id: str):
         # Circles require manual admin review before deletion, just flag them
         # (A production app might notify global admins here)
         pass
+
+
+def hide_circle_content_for_reporter(reporter_id: str, target_type: str, target_id: str) -> None:
+    """Immediately suppress reported circle content for the reporting user only."""
+    hide_circle_content_for_user(
+        user_id=str(reporter_id),
+        target_type=target_type,
+        target_id=str(target_id),
+    )

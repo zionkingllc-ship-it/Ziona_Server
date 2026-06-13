@@ -7,6 +7,8 @@ Validates post type rules, manages media attachments, and handles cache invalida
 import logging
 from datetime import datetime, timedelta, timezone
 
+from django.conf import settings
+
 from core.engagement.models import Like, Save
 from core.follows.models import Follow
 from core.posts.models import Post, PostType
@@ -24,6 +26,7 @@ from core.shared.dtos import (
     ViewerStateDTO,
 )
 from core.shared.exceptions import ErrorCode, PostError
+from core.shared.utils import build_post_share_url
 
 logger = logging.getLogger("core.posts")
 
@@ -31,9 +34,17 @@ TEXT_POST_MAX_CAPTION = 500
 MEDIA_POST_MAX_CAPTION = 2200
 IMAGE_MIN_COUNT = 1
 IMAGE_MAX_COUNT = 5
-VIDEO_MIN_DURATION = 60
-VIDEO_MAX_DURATION = 80
+VIDEO_MAX_DURATION = 90
+MAX_VIDEOS_PER_POST = 1
 POST_EDIT_WINDOW_HOURS = 24
+POST_ALLOWED_MEDIA_TYPES = ["image", "video"]
+
+
+def _build_post_media_validation_details(**kwargs) -> dict:
+    """Build consistent post media validation details."""
+    from core.media.services import build_media_validation_details
+
+    return build_media_validation_details(allowed_types=POST_ALLOWED_MEDIA_TYPES, **kwargs)
 
 
 class PostService:
@@ -177,6 +188,28 @@ class PostService:
                     status="ready",
                 )
                 resolved_media_files.append(media_file)
+
+        video_media_files = [m for m in resolved_media_files if m.media_type == "video"]
+        if len(video_media_files) > MAX_VIDEOS_PER_POST:
+            raise PostError(
+                message="Only one video is allowed per post.",
+                code="MULTIPLE_VIDEOS_NOT_ALLOWED",
+                extensions=_build_post_media_validation_details(
+                    received_videos_count=len(video_media_files),
+                ),
+            )
+
+        for media_file in video_media_files:
+            if media_file.duration is None:
+                continue
+            if media_file.duration > VIDEO_MAX_DURATION:
+                raise PostError(
+                    message=f"Video duration exceeds the {VIDEO_MAX_DURATION}-second limit.",
+                    code=ErrorCode.VIDEO_TOO_LONG,
+                    extensions=_build_post_media_validation_details(
+                        received_duration_seconds=media_file.duration,
+                    ),
+                )
 
         # 2. Handle Scripture
         scripture_fields = {}
@@ -645,6 +678,6 @@ class PostService:
             media=media,
             stats=stats,
             viewer_state=viewer_state,
-            share_url=f"https://ziona.app/post/{post.id}",
+            share_url=build_post_share_url(settings.APP_SHARE_BASE_URL, str(post.id)),
             scripture=scripture,
         )

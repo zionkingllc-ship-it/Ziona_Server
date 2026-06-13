@@ -88,6 +88,7 @@ class CommentPayload:
 
     success: bool
     comment: CommentType | None = None
+    stats: PostStats | None = None
     error: ErrorType | None = None
     message: str | None = None
     error_code: str | None = None
@@ -111,6 +112,7 @@ class BookmarkFolderType:
     name: str
     saved_count: int = 0
     created_at: str
+    thumbnail_url: str | None = None
 
 
 @strawberry.type
@@ -227,6 +229,16 @@ def _dto_to_comment(dto) -> CommentType:
     )
 
 
+def _dto_to_post_stats(dto) -> PostStats:
+    """Convert a post DTO into canonical GraphQL post stats."""
+    return PostStats(
+        likes_count=dto.stats.likes_count,
+        comments_count=dto.stats.comments_count,
+        shares_count=dto.stats.shares_count,
+        saves_count=dto.stats.saves_count,
+    )
+
+
 @strawberry.type
 class EngagementMutations:
     """Engagement domain GraphQL mutations."""
@@ -245,6 +257,7 @@ class EngagementMutations:
         **Errors:** UNAUTHENTICATED, NOT_FOUND
         """
         from core.engagement.services import EngagementService
+        from core.posts.services import PostService
         from core.shared.exceptions import EngagementError
 
         user_id = _get_authenticated_user_id(info)
@@ -368,6 +381,7 @@ class EngagementMutations:
         **Errors:** UNAUTHENTICATED, VALIDATION_ERROR native limits.
         """
         from core.engagement.services import EngagementService
+        from core.posts.services import PostService
         from core.shared.exceptions import EngagementError
 
         user_id = _get_authenticated_user_id(info)
@@ -386,7 +400,12 @@ class EngagementMutations:
                 text=text,
                 parent_comment_id=parent_comment_id,
             )
-            return CommentPayload(success=True, comment=_dto_to_comment(result))
+            post = PostService.get_post(post_id, user_id)
+            return CommentPayload(
+                success=True,
+                comment=_dto_to_comment(result),
+                stats=_dto_to_post_stats(post),
+            )
         except EngagementError as e:
             return CommentPayload(
                 success=False,
@@ -407,6 +426,7 @@ class EngagementMutations:
     def delete_comment(self, info: strawberry.types.Info, comment_id: str) -> CommentPayload:
         """Delete a comment (soft delete)."""
         from core.engagement.services import EngagementService
+        from core.posts.services import PostService
         from core.shared.exceptions import EngagementError
 
         user_id = _get_authenticated_user_id(info)
@@ -418,8 +438,9 @@ class EngagementMutations:
             )
 
         try:
-            EngagementService.delete_comment(user_id, comment_id)
-            return CommentPayload(success=True)
+            result = EngagementService.delete_comment(user_id, comment_id)
+            post = PostService.get_post(result.post_id, user_id)
+            return CommentPayload(success=True, stats=_dto_to_post_stats(post))
         except EngagementError as e:
             return CommentPayload(success=False, message=e.message, error_code=e.code)
 
@@ -487,6 +508,7 @@ class EngagementMutations:
                     name=result.folder.name,
                     saved_count=result.folder.saved_count,
                     created_at=result.folder.created_at,
+                    thumbnail_url=result.folder.thumbnail_url,
                 )
 
             from core.posts.services import PostService
@@ -569,6 +591,7 @@ class EngagementMutations:
                     name=result.name,
                     saved_count=result.saved_count,
                     created_at=result.created_at,
+                    thumbnail_url=result.thumbnail_url,
                 ),
             )
         except BookmarkError as e:
@@ -846,6 +869,7 @@ class EngagementQueries:
                 name=f.name,
                 saved_count=f.saved_count,
                 created_at=f.created_at,
+                thumbnail_url=f.thumbnail_url,
             )
             for f in folders
         ]
