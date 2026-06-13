@@ -33,6 +33,13 @@ from core.users.models import User
 logger = logging.getLogger("core.authentication")
 
 
+DELETION_ACKNOWLEDGEMENT_KEYS = (
+    "acknowledgePermanentDeletion",
+    "acknowledge_permanent_deletion",
+    "permanentDeletionAcknowledged",
+)
+
+
 def _get_client_ip(request: HttpRequest) -> str:
     """Extract client IP from request."""
     x_forwarded_for = request.META.get("HTTP_X_FORWARDED_FOR")
@@ -43,6 +50,9 @@ def _get_client_ip(request: HttpRequest) -> str:
 
 def _parse_json_body(request: HttpRequest) -> dict:
     """Parse JSON body from request."""
+    if not request.body:
+        return {}
+
     try:
         return json.loads(request.body)
     except (json.JSONDecodeError, ValueError):
@@ -67,6 +77,7 @@ def _auth_error_response(
         "ACCOUNT_DEACTIVATED": 403,
         "REAUTHENTICATION_REQUIRED": 400,
         "DELETION_ACKNOWLEDGEMENT_REQUIRED": 400,
+        "INVALID_DELETION_ACKNOWLEDGEMENT": 400,
         "PASSWORD_AUTH_UNAVAILABLE": 400,
         "APPLE_KEYS_TIMEOUT": 503,
         "APPLE_KEYS_UNAVAILABLE": 503,
@@ -118,13 +129,57 @@ def _authenticated_user_id_from_request(request: HttpRequest) -> str:
 
 def _account_action_payload(data: dict) -> dict[str, object]:
     """Normalize account lifecycle body fields from mobile/web clients."""
+    acknowledge_permanent_deletion = False
+    for key in DELETION_ACKNOWLEDGEMENT_KEYS:
+        if key in data:
+            acknowledge_permanent_deletion = _parse_deletion_acknowledgement(data.get(key))
+            break
+
     return {
         "password": data.get("password") or "",
         "otp": data.get("otp") or data.get("code") or "",
-        "acknowledge_permanent_deletion": bool(
-            data.get("acknowledge_permanent_deletion") or data.get("acknowledgePermanentDeletion")
-        ),
+        "acknowledge_permanent_deletion": acknowledge_permanent_deletion,
     }
+
+
+def _parse_deletion_acknowledgement(value: object) -> bool:
+    """Parse the permanent-deletion acknowledgement as a strict boolean."""
+    if isinstance(value, bool):
+        return value
+
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"true", "1"}:
+            return True
+        if normalized in {"false", "0"}:
+            return False
+
+    raise AuthenticationError(
+        "acknowledgePermanentDeletion must be a boolean true or false.",
+        code="INVALID_DELETION_ACKNOWLEDGEMENT",
+        details={
+            "field": "acknowledgePermanentDeletion",
+            "expected": "boolean",
+            "acceptedFields": list(DELETION_ACKNOWLEDGEMENT_KEYS),
+        },
+    )
+
+
+def _account_action_payload_from_request(
+    request: HttpRequest,
+    *,
+    allow_query_acknowledgement: bool = False,
+) -> dict[str, object]:
+    """Build account-action payload from JSON body and optional DELETE query ack."""
+    data = _parse_json_body(request)
+
+    if allow_query_acknowledgement:
+        for key in DELETION_ACKNOWLEDGEMENT_KEYS:
+            if key not in data and key in request.GET:
+                data[key] = request.GET.get(key)
+                break
+
+    return _account_action_payload(data)
 
 
 class BaseAuthView(View):
@@ -758,12 +813,15 @@ class MeView(BaseAuthView):
     def delete(self, request: HttpRequest) -> JsonResponse:
         try:
             user_id = _authenticated_user_id_from_request(request)
-            payload = _account_action_payload(_parse_json_body(request))
+            payload = _account_action_payload_from_request(
+                request,
+                allow_query_acknowledgement=True,
+            )
             AuthService.delete_account(
                 user_id=user_id,
                 password=payload["password"],
                 otp=payload["otp"],
-                acknowledge_permanent_deletion=bool(payload["acknowledge_permanent_deletion"]),
+                acknowledge_permanent_deletion=payload["acknowledge_permanent_deletion"],
                 ip_address=_get_client_ip(request),
             )
 
@@ -787,7 +845,7 @@ class DeactivateAccountView(BaseAuthView):
     def post(self, request: HttpRequest) -> JsonResponse:
         try:
             user_id = _authenticated_user_id_from_request(request)
-            payload = _account_action_payload(_parse_json_body(request))
+            payload = _account_action_payload_from_request(request)
             AuthService.deactivate_account(
                 user_id=user_id,
                 password=payload["password"],
@@ -812,12 +870,12 @@ class DeleteAccountView(BaseAuthView):
     def post(self, request: HttpRequest) -> JsonResponse:
         try:
             user_id = _authenticated_user_id_from_request(request)
-            payload = _account_action_payload(_parse_json_body(request))
+            payload = _account_action_payload_from_request(request)
             AuthService.delete_account(
                 user_id=user_id,
                 password=payload["password"],
                 otp=payload["otp"],
-                acknowledge_permanent_deletion=bool(payload["acknowledge_permanent_deletion"]),
+                acknowledge_permanent_deletion=payload["acknowledge_permanent_deletion"],
                 ip_address=_get_client_ip(request),
             )
             return success_response(data={"message": "Account permanently deleted."})

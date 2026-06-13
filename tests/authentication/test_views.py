@@ -402,6 +402,70 @@ class TestDeleteAccountEndpoint:
         body = response.json()
         assert body["success"] is False
         assert body["error"]["code"] == "DELETION_ACKNOWLEDGEMENT_REQUIRED"
+        assert body["error"]["details"]["field"] == "acknowledgePermanentDeletion"
+        assert body["error"]["details"]["expected"] is True
+
+    def test_delete_account_rejects_non_boolean_acknowledgement(
+        self, api_client: Client, authenticated_user
+    ):
+        """Deletion acknowledgement must be an explicit boolean-style value."""
+        response = api_client.delete(
+            "/api/auth/me",
+            data=json.dumps(
+                {
+                    "password": "TestPass123!",
+                    "acknowledgePermanentDeletion": "yes",
+                }
+            ),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {authenticated_user['access_token']}",
+        )
+
+        assert response.status_code == 400
+        body = response.json()
+        assert body["success"] is False
+        assert body["error"]["code"] == "INVALID_DELETION_ACKNOWLEDGEMENT"
+        assert body["error"]["details"]["field"] == "acknowledgePermanentDeletion"
+
+    def test_delete_account_string_false_does_not_acknowledge(
+        self, api_client: Client, authenticated_user
+    ):
+        """String false must not be treated as truthy by Python bool coercion."""
+        from core.users.models import User
+
+        user_id = authenticated_user["user"].id
+
+        response = api_client.delete(
+            "/api/auth/me",
+            data=json.dumps(
+                {
+                    "password": "TestPass123!",
+                    "acknowledgePermanentDeletion": "false",
+                }
+            ),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {authenticated_user['access_token']}",
+        )
+
+        assert response.status_code == 400
+        body = response.json()
+        assert body["success"] is False
+        assert body["error"]["code"] == "DELETION_ACKNOWLEDGEMENT_REQUIRED"
+        assert User.objects.filter(id=user_id).exists()
+
+    def test_delete_account_accepts_delete_query_acknowledgement(
+        self, api_client: Client, authenticated_user
+    ):
+        """DELETE clients without body support can pass acknowledgement in the query string."""
+        response = api_client.delete(
+            "/api/auth/me?acknowledgePermanentDeletion=true",
+            HTTP_AUTHORIZATION=f"Bearer {authenticated_user['access_token']}",
+        )
+
+        assert response.status_code == 400
+        body = response.json()
+        assert body["success"] is False
+        assert body["error"]["code"] == "REAUTHENTICATION_REQUIRED"
 
     def test_delete_account_requires_reauthentication(self, api_client: Client, authenticated_user):
         """Authenticated DELETE requires password or OTP."""

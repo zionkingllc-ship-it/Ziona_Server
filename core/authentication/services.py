@@ -366,6 +366,16 @@ class AuthService:
             raise AuthenticationError(
                 "You must acknowledge that account deletion is permanent.",
                 code="DELETION_ACKNOWLEDGEMENT_REQUIRED",
+                details={
+                    "field": "acknowledgePermanentDeletion",
+                    "expected": True,
+                    "received": acknowledge_permanent_deletion,
+                    "acceptedFields": [
+                        "acknowledgePermanentDeletion",
+                        "acknowledge_permanent_deletion",
+                        "permanentDeletionAcknowledged",
+                    ],
+                },
             )
 
         user = (
