@@ -4,6 +4,7 @@ ScriptureImporter Service
 A production-grade, fault-tolerant data pipeline for importing
 Bible translations into Ziona's PostgreSQL database.
 """
+
 import logging
 import time
 from typing import Any
@@ -287,7 +288,7 @@ class ScriptureImporter:
 
             except (requests.Timeout, requests.ConnectionError) as e:
                 logger.warning(
-                    f"Network error fetching {url} (attempt {attempt+1}/{max_retries}): {e}"
+                    f"Network error fetching {url} (attempt {attempt + 1}/{max_retries}): {e}"
                 )
                 if attempt == max_retries - 1:
                     logger.error(f"Fatal error fetching {url} after {max_retries} attempts.")

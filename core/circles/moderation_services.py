@@ -3,6 +3,7 @@ Phase 4: Moderation Service Layer.
 Handles reporting of Circle content (anchors, responses, circles) and
 implements the auto-hide threshold logic (3 distinct reports).
 """
+
 from django.db import transaction
 
 from core.circles.models import Anchor, AnchorResponse, Circle, CircleReport

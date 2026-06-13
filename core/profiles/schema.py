@@ -1,6 +1,5 @@
 """GraphQL types, queries, and mutations for the profiles domain."""
 
-
 import strawberry
 
 from core.feed.schema import FeedPost, _dto_to_feed_post

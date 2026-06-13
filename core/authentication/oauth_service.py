@@ -86,36 +86,55 @@ class OAuthService:
                 code="INVALID_OAUTH_TOKEN",
             ) from e
 
-        existing_user = User.all_objects.filter(email=email).first()
+        existing_user = User.all_objects.filter(google_id=google_id).first()
+        if not existing_user:
+            existing_user = User.all_objects.filter(email=email).first()
         is_new_user = False
+        name = google_user_info.get("name", "")
+        picture = google_user_info.get("picture", "")
 
         if existing_user:
             ensure_account_can_authenticate(existing_user)
 
-            if existing_user.social_auth_provider is None:
+            if existing_user.google_id and existing_user.google_id != google_id:
                 raise AuthenticationError(
-                    "This email is already registered with a password. Please sign in with your password instead, or use 'Forgot Password' to reset it.",
-                    code="EMAIL_REGISTERED_WITH_PASSWORD",
+                    "This email is already linked to a different Google account.",
+                    code="GOOGLE_ACCOUNT_MISMATCH",
                 )
 
-            if existing_user.social_auth_provider != "google":
+            if (
+                existing_user.social_auth_provider not in (None, "google")
+                and not existing_user.google_id
+            ):
                 raise AuthenticationError(
                     f"This email is already registered via {existing_user.social_auth_provider}. "
                     f"Please sign in with {existing_user.social_auth_provider} instead.",
                     code="EMAIL_REGISTERED_WITH_DIFFERENT_PROVIDER",
                 )
 
-            user = existing_user
+            if (
+                existing_user.social_auth_provider is None
+                and not existing_user.google_id
+                and existing_user.is_email_verified
+            ):
+                raise AuthenticationError(
+                    "This email is already registered with a password. Please sign in with your password instead, or use 'Forgot Password' to reset it.",
+                    code="EMAIL_REGISTERED_WITH_PASSWORD",
+                )
 
-            if not user.google_id:
-                user.google_id = google_id
-                user.save(update_fields=["google_id"])
+            user = existing_user
+            _link_google_account(
+                user,
+                google_id=google_id,
+                is_verified=is_verified,
+                name=name,
+                picture=picture,
+                ip_address=ip_address,
+            )
         else:
             import secrets
 
             temp_username = f"user_{secrets.token_hex(4)}"
-            name = google_user_info.get("name", "")
-            picture = google_user_info.get("picture", "")
 
             user = User.objects.create_user(
                 email=email,
@@ -124,6 +143,7 @@ class OAuthService:
                 avatar_url=picture,
                 is_email_verified=is_verified,
                 needs_username_selection=True,
+                auth_provider="google",
                 social_auth_provider="google",
                 google_id=google_id,
                 last_login_ip=ip_address,
@@ -191,6 +211,13 @@ class OAuthService:
 
         if user:
             ensure_account_can_authenticate(user)
+            _link_apple_account(
+                user,
+                apple_sub=apple_sub,
+                email_verified=email_verified,
+                full_name=full_name,
+                ip_address=ip_address,
+            )
         else:
             if not email:
                 raise AuthenticationError(
@@ -202,32 +229,40 @@ class OAuthService:
             if existing_user:
                 ensure_account_can_authenticate(existing_user)
 
-                if existing_user.social_auth_provider is None:
-                    raise AuthenticationError(
-                        "This email is already registered with a password. Please sign in with your password instead, or use 'Forgot Password' to reset it.",
-                        code="EMAIL_REGISTERED_WITH_PASSWORD",
-                    )
-
-                if existing_user.social_auth_provider != "apple":
-                    raise AuthenticationError(
-                        f"This email is already registered via {existing_user.social_auth_provider}. "
-                        f"Please sign in with {existing_user.social_auth_provider} instead.",
-                        code="EMAIL_REGISTERED_WITH_DIFFERENT_PROVIDER",
-                    )
-
                 if existing_user.apple_sub and existing_user.apple_sub != apple_sub:
                     raise AuthenticationError(
                         "This email is already linked to a different Apple account.",
                         code="APPLE_ACCOUNT_MISMATCH",
                     )
 
+                if (
+                    existing_user.social_auth_provider not in (None, "apple")
+                    and not existing_user.apple_sub
+                ):
+                    raise AuthenticationError(
+                        f"This email is already registered via {existing_user.social_auth_provider}. "
+                        f"Please sign in with {existing_user.social_auth_provider} instead.",
+                        code="EMAIL_REGISTERED_WITH_DIFFERENT_PROVIDER",
+                    )
+
+                if (
+                    existing_user.social_auth_provider is None
+                    and not existing_user.apple_sub
+                    and existing_user.is_email_verified
+                ):
+                    raise AuthenticationError(
+                        "This email is already registered with a password. Please sign in with your password instead, or use 'Forgot Password' to reset it.",
+                        code="EMAIL_REGISTERED_WITH_PASSWORD",
+                    )
+
                 user = existing_user
-                user.apple_sub = apple_sub
-                update_fields = ["apple_sub", "updated_at"]
-                if full_name and not user.full_name:
-                    user.full_name = full_name
-                    update_fields.append("full_name")
-                user.save(update_fields=update_fields)
+                _link_apple_account(
+                    user,
+                    apple_sub=apple_sub,
+                    email_verified=email_verified,
+                    full_name=full_name,
+                    ip_address=ip_address,
+                )
             else:
                 import secrets
 
@@ -275,6 +310,103 @@ def _get_google_client_ids() -> list[str]:
 
     legacy_client_id = getattr(settings, "GOOGLE_CLIENT_ID", "")
     return [legacy_client_id] if legacy_client_id else []
+
+
+def _save_user_updates(user: User, update_fields: list[str]) -> None:
+    normalized_fields = list(dict.fromkeys([*update_fields, "updated_at"]))
+    if normalized_fields:
+        user.save(update_fields=normalized_fields)
+
+
+def _link_google_account(
+    user: User,
+    *,
+    google_id: str,
+    is_verified: bool,
+    name: str,
+    picture: str,
+    ip_address: str | None,
+) -> None:
+    update_fields: list[str] = []
+
+    if user.google_id and user.google_id != google_id:
+        raise AuthenticationError(
+            "This email is already linked to a different Google account.",
+            code="GOOGLE_ACCOUNT_MISMATCH",
+        )
+
+    if not user.google_id:
+        user.google_id = google_id
+        update_fields.append("google_id")
+
+    if is_verified and not user.is_email_verified:
+        user.is_email_verified = True
+        update_fields.append("is_email_verified")
+
+    if name and not user.full_name:
+        user.full_name = name
+        update_fields.append("full_name")
+
+    if picture and not user.avatar_url:
+        user.avatar_url = picture
+        update_fields.append("avatar_url")
+
+    if ip_address and user.last_login_ip != ip_address:
+        user.last_login_ip = ip_address
+        update_fields.append("last_login_ip")
+
+    if not user.has_usable_password():
+        if user.auth_provider != "google":
+            user.auth_provider = "google"
+            update_fields.append("auth_provider")
+        if user.social_auth_provider != "google":
+            user.social_auth_provider = "google"
+            update_fields.append("social_auth_provider")
+
+    _save_user_updates(user, update_fields)
+
+
+def _link_apple_account(
+    user: User,
+    *,
+    apple_sub: str,
+    email_verified: bool,
+    full_name: str,
+    ip_address: str | None,
+) -> None:
+    update_fields: list[str] = []
+
+    if user.apple_sub and user.apple_sub != apple_sub:
+        raise AuthenticationError(
+            "This email is already linked to a different Apple account.",
+            code="APPLE_ACCOUNT_MISMATCH",
+        )
+
+    if not user.apple_sub:
+        user.apple_sub = apple_sub
+        update_fields.append("apple_sub")
+
+    if email_verified and not user.is_email_verified:
+        user.is_email_verified = True
+        update_fields.append("is_email_verified")
+
+    if full_name and not user.full_name:
+        user.full_name = full_name
+        update_fields.append("full_name")
+
+    if ip_address and user.last_login_ip != ip_address:
+        user.last_login_ip = ip_address
+        update_fields.append("last_login_ip")
+
+    if not user.has_usable_password():
+        if user.auth_provider != "apple":
+            user.auth_provider = "apple"
+            update_fields.append("auth_provider")
+        if user.social_auth_provider != "apple":
+            user.social_auth_provider = "apple"
+            update_fields.append("social_auth_provider")
+
+    _save_user_updates(user, update_fields)
 
 
 def _apple_email_from_claims_or_user(claims: dict[str, Any], apple_user: dict[str, Any]) -> str:

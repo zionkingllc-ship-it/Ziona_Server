@@ -37,6 +37,13 @@ class AnchorTypeEnum(enum.Enum):
     IMAGE_TEXT = "image_text"
 
 
+@strawberry.enum
+class CirclePostFilterEnum(enum.Enum):
+    NEW = "NEW"
+    TRENDING = "TRENDING"
+    VIEWER_POSTS = "VIEWER_POSTS"
+
+
 # ──────────────────────────────────────────────
 #  Strawberry Types
 # ──────────────────────────────────────────────
@@ -587,7 +594,24 @@ def _build_circle_feed_response(
     viewer_id: str | None = None,
     sort_by: str = "NEW",
     author_id: str | None = None,
+    circle_filter: CirclePostFilterEnum | None = None,
 ) -> CircleFeedResponse:
+    sort_by, author_id = _resolve_circle_feed_filters(
+        viewer_id=viewer_id,
+        sort_by=sort_by,
+        author_id=author_id,
+        circle_filter=circle_filter,
+    )
+    if circle_filter == CirclePostFilterEnum.VIEWER_POSTS and not viewer_id:
+        return CircleFeedResponse(
+            posts=[],
+            page_info=PageInfo(
+                has_next_page=False,
+                total_count=0,
+                current_page=page,
+            ),
+        )
+
     posts, has_next_page, total_count = get_circle_feed(
         circle_id,
         page,
@@ -604,6 +628,25 @@ def _build_circle_feed_response(
             current_page=page,
         ),
     )
+
+
+def _resolve_circle_feed_filters(
+    *,
+    viewer_id: str | None,
+    sort_by: str,
+    author_id: str | None,
+    circle_filter: CirclePostFilterEnum | None,
+) -> tuple[str, str | None]:
+    if circle_filter is None:
+        return sort_by, author_id
+
+    if circle_filter == CirclePostFilterEnum.TRENDING:
+        return "TRENDING", None
+
+    if circle_filter == CirclePostFilterEnum.VIEWER_POSTS:
+        return "NEW", viewer_id
+
+    return "NEW", None
 
 
 def _circle_rules_for(circle) -> list[CircleRule]:
@@ -725,10 +768,17 @@ class CircleQueries:
         page_size: int = 20,
         sort_by: str = "NEW",
         author_id: str | None = None,
+        circle_filter: CirclePostFilterEnum | None = None,
     ) -> CircleFeedResponse:
         viewer_id = _get_authenticated_user_id(info)
         return _build_circle_feed_response(
-            circle_id, page, page_size, viewer_id, sort_by=sort_by, author_id=author_id
+            circle_id,
+            page,
+            page_size,
+            viewer_id,
+            sort_by=sort_by,
+            author_id=author_id,
+            circle_filter=circle_filter,
         )
 
     @strawberry.field(name="circlePosts")
@@ -740,10 +790,17 @@ class CircleQueries:
         page_size: int = 20,
         sort_by: str = "NEW",
         author_id: str | None = None,
+        circle_filter: CirclePostFilterEnum | None = None,
     ) -> CircleFeedResponse:
         viewer_id = _get_authenticated_user_id(info)
         return _build_circle_feed_response(
-            circle_id, page, page_size, viewer_id, sort_by=sort_by, author_id=author_id
+            circle_id,
+            page,
+            page_size,
+            viewer_id,
+            sort_by=sort_by,
+            author_id=author_id,
+            circle_filter=circle_filter,
         )
 
     @strawberry.field(
@@ -813,6 +870,7 @@ class CircleQueries:
         history_limit: int = 5,
         sort_by: str = "NEW",
         author_id: str | None = None,
+        circle_filter: CirclePostFilterEnum | None = None,
     ) -> CircleFeedDataType | None:
         from core.circles.anchor_services import get_active_anchor, get_anchor_history
         from core.circles.models import Circle
@@ -823,14 +881,23 @@ class CircleQueries:
             return None
 
         viewer_id = _get_authenticated_user_id(info)
-        posts, _, _ = get_circle_feed(
-            circle_id,
-            page,
-            page_size,
+        sort_by, author_id = _resolve_circle_feed_filters(
             viewer_id=viewer_id,
             sort_by=sort_by,
             author_id=author_id,
+            circle_filter=circle_filter,
         )
+        if circle_filter == CirclePostFilterEnum.VIEWER_POSTS and not viewer_id:
+            posts = []
+        else:
+            posts, _, _ = get_circle_feed(
+                circle_id,
+                page,
+                page_size,
+                viewer_id=viewer_id,
+                sort_by=sort_by,
+                author_id=author_id,
+            )
         # Only return anchors within the 5-day window so the mobile app
         # naturally stops showing older ones once the purge task removes them.
         past_anchors = get_anchor_history(

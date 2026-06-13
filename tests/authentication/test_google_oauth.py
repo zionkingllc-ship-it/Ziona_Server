@@ -154,8 +154,9 @@ class TestGoogleOAuth:
         User.objects.create_user(
             email="conflict@gmail.com",
             username="conflict_user",
-            password="StrongPassword123!",
+            password="StrongPassword123!",  # pragma: allowlist secret
             social_auth_provider=None,  # Standard registration
+            is_email_verified=True,
         )
 
         mock_google_verify.return_value = {
@@ -176,6 +177,54 @@ class TestGoogleOAuth:
         assert data["success"] is False
         assert data["error"]["code"] == "EMAIL_REGISTERED_WITH_PASSWORD"
         assert "sign in with your password instead" in data["error"]["message"]
+
+    def test_unverified_password_signup_can_continue_with_google_oauth(
+        self, api_client, mock_google_verify
+    ):
+        """Unverified email/password signups can be safely continued with Google."""
+        User.objects.create_user(
+            email="pending@gmail.com",
+            username="pending_user",
+            password="StrongPassword123!",  # pragma: allowlist secret
+            social_auth_provider=None,
+            is_email_verified=False,
+        )
+
+        check_email_response = api_client.post(
+            reverse("authentication:check-email"),
+            data=json.dumps({"email": "pending@gmail.com"}),
+            content_type="application/json",
+        )
+        assert check_email_response.status_code == 200
+        assert check_email_response.json()["data"]["exists"] is False
+
+        mock_google_verify.return_value = {
+            "aud": settings.GOOGLE_CLIENT_ID,
+            "email": "pending@gmail.com",
+            "sub": "pending_google_id",
+            "email_verified": True,
+            "name": "Pending Google User",
+            "picture": "http://example.com/pending.jpg",
+        }
+
+        response = api_client.post(
+            self.url,
+            data=json.dumps({"id_token": "valid_mock_token_pending"}),
+            content_type="application/json",
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["success"] is True
+        assert data["data"]["isNewUser"] is False
+
+        user = User.objects.get(email="pending@gmail.com")
+        assert user.google_id == "pending_google_id"
+        assert user.is_email_verified is True
+        assert user.has_usable_password() is True
+        assert user.social_auth_provider is None
+        assert user.full_name == "Pending Google User"
+        assert user.avatar_url == "http://example.com/pending.jpg"
 
     def test_invalid_google_token(self, api_client, mock_google_verify):
         """Scenario 4: Invalid Google Token."""

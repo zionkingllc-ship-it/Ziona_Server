@@ -1,0 +1,66 @@
+name: Sync Render Deployments to GitHub
+
+on:
+  workflow_run:
+    workflows:
+      - Ziona CI/CD
+      - Ziona Vulnerability Scanner
+    types:
+      - completed
+
+permissions:
+  actions: read
+  contents: read
+  deployments: write
+
+jobs:
+  sync-render-web-deployment:
+    name: Sync Render Web Deployment
+    if: >
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'main'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: render-deployment-sync-${{ github.event.workflow_run.head_branch }}-${{ github.event.workflow_run.head_sha }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Resolve Render target
+        id: target
+        env:
+          PROD_SERVICE_ID: ${{ vars.RENDER_PRODUCTION_WEB_SERVICE_ID }}
+        run: |
+          echo "service_id=$PROD_SERVICE_ID" >> "$GITHUB_OUTPUT"
+          echo "environment=production - ziona-api-prod" >> "$GITHUB_OUTPUT"
+          echo "environment_url=https://api.ziona.app" >> "$GITHUB_OUTPUT"
+
+      - name: Validate deployment sync configuration
+        env:
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+          RENDER_SERVICE_ID: ${{ steps.target.outputs.service_id }}
+        run: |
+          if [ -z "$RENDER_API_KEY" ]; then
+            echo "::error::RENDER_API_KEY is not configured"
+            exit 1
+          fi
+          if [ -z "$RENDER_SERVICE_ID" ]; then
+            echo "::error::RENDER_PRODUCTION_WEB_SERVICE_ID is not configured in GitHub repository variables."
+            exit 1
+          fi
+
+      - name: Sync Render deployment status
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+          RENDER_API_URL: https://api.render.com/v1
+        run: |
+          python scripts/sync_render_github_deployment.py \
+            --service-id "${{ steps.target.outputs.service_id }}" \
+            --environment "${{ steps.target.outputs.environment }}" \
+            --environment-url "${{ steps.target.outputs.environment_url }}" \
+            --sha "${{ github.event.workflow_run.head_sha }}" \
+            --ref "${{ github.event.workflow_run.head_branch }}"

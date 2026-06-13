@@ -66,7 +66,7 @@ def test_upload_media_graphql_returns_media_url(settings, authenticated_user, mo
         lambda **kwargs: "https://storage.googleapis.com/signed-upload-url",
     )
     client = Client()
-    client.defaults["HTTP_AUTHORIZATION"] = f'Bearer {authenticated_user["access_token"]}'
+    client.defaults["HTTP_AUTHORIZATION"] = f"Bearer {authenticated_user['access_token']}"
 
     response = client.post(
         "/graphql/",
@@ -118,7 +118,7 @@ def test_upload_media_graphql_preserves_mobile_public_url_workaround(
 
     monkeypatch.setattr("core.media.services._generate_gcp_signed_url", signed_url)
     client = Client()
-    client.defaults["HTTP_AUTHORIZATION"] = f'Bearer {authenticated_user["access_token"]}'
+    client.defaults["HTTP_AUTHORIZATION"] = f"Bearer {authenticated_user['access_token']}"
 
     response = client.post(
         "/graphql/",
@@ -183,7 +183,7 @@ def test_confirm_upload_graphql_queues_processing(settings, authenticated_user, 
     )
 
     client = Client()
-    client.defaults["HTTP_AUTHORIZATION"] = f'Bearer {authenticated_user["access_token"]}'
+    client.defaults["HTTP_AUTHORIZATION"] = f"Bearer {authenticated_user['access_token']}"
     response = client.post(
         "/graphql/",
         data=json.dumps(
@@ -228,7 +228,7 @@ def test_media_status_query_returns_processing_state(settings, authenticated_use
     )
 
     client = Client()
-    client.defaults["HTTP_AUTHORIZATION"] = f'Bearer {authenticated_user["access_token"]}'
+    client.defaults["HTTP_AUTHORIZATION"] = f"Bearer {authenticated_user['access_token']}"
     response = client.post(
         "/graphql/",
         data=json.dumps(
@@ -268,7 +268,7 @@ def test_upload_media_graphql_returns_signing_error(settings, authenticated_user
 
     monkeypatch.setattr("core.media.services._generate_gcp_signed_url", fail_signing)
     client = Client()
-    client.defaults["HTTP_AUTHORIZATION"] = f'Bearer {authenticated_user["access_token"]}'
+    client.defaults["HTTP_AUTHORIZATION"] = f"Bearer {authenticated_user['access_token']}"
 
     response = client.post(
         "/graphql/",

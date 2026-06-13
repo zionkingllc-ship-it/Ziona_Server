@@ -20,7 +20,7 @@ def test_circle_post_comments_query_is_registered(authenticated_user):
         text="Post for comment query",
     )
     client = Client()
-    client.defaults["HTTP_AUTHORIZATION"] = f'Bearer {authenticated_user["access_token"]}'
+    client.defaults["HTTP_AUTHORIZATION"] = f"Bearer {authenticated_user['access_token']}"
 
     response = client.post(
         "/graphql/",

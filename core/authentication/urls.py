@@ -13,6 +13,7 @@ from core.authentication.otp_views import (
 from core.authentication.views import (
     AppleNonceView,
     AppleOAuthView,
+    ChangePasswordView,
     CheckEmailView,
     DeactivateAccountView,
     DeleteAccountView,
@@ -37,6 +38,7 @@ urlpatterns = [
     path("otp/verify", UnifiedVerifyOTPView.as_view(), name="otp-verify"),
     path("register", RegisterView.as_view(), name="register"),
     path("login", LoginView.as_view(), name="login"),
+    path("change-password", ChangePasswordView.as_view(), name="change-password"),
     path("refresh", TokenRefreshView.as_view(), name="token-refresh"),
     path("logout", LogoutView.as_view(), name="logout"),
     path("verify-email", VerifyEmailView.as_view(), name="verify-email"),

@@ -22,11 +22,16 @@ def _make_user(email, username=None, full_name="", avatar_url=""):
     return user
 
 
-def _graphql(query, variables=None):
+def _graphql(query, variables=None, access_token=None):
+    request_kwargs = {}
+    if access_token:
+        request_kwargs["HTTP_AUTHORIZATION"] = f"Bearer {access_token}"
+
     response = Client().post(
         "/graphql/",
         data=json.dumps({"query": query, "variables": variables or {}}),
         content_type="application/json",
+        **request_kwargs,
     )
     content = json.loads(response.content)
     assert response.status_code == 200, content
@@ -133,6 +138,17 @@ class TestMobileGraphQLAlignment(TestCase):
             "Post Author",
             "https://example.com/avatar.jpg",
         )
+        self.viewer = _make_user(
+            "viewer@test.com",
+            "viewer_user",
+            "Viewer User",
+            "https://example.com/viewer.jpg",
+        )
+        from core.authentication.tokens import TokenService
+
+        self.viewer_access_token = TokenService.generate_access_token(
+            str(self.viewer.id), self.viewer.role
+        )
         self.circle = Circle.objects.create(
             name="Faith, Work & Purpose",
             description="A community where Christians discuss career and purpose.",
@@ -184,6 +200,24 @@ class TestMobileGraphQLAlignment(TestCase):
             comments_count=5,
             prayed_count=71,
             anchor_liked_count=18,
+        )
+        self.viewer_post = CirclePost.objects.create(
+            circle=self.circle,
+            user=self.viewer,
+            text="This one is mine.",
+            likes_count=3,
+            comments_count=1,
+            prayed_count=2,
+            anchor_liked_count=1,
+        )
+        self.trending_post = CirclePost.objects.create(
+            circle=self.circle,
+            user=self.author,
+            text="This one should trend first.",
+            likes_count=80,
+            comments_count=20,
+            prayed_count=15,
+            anchor_liked_count=10,
         )
 
     def test_circle_query_exposes_mobile_aliases_rules_and_anchor_fields(self):
@@ -253,6 +287,48 @@ class TestMobileGraphQLAlignment(TestCase):
             "Whatever you do, work at it with all your heart.",
         )
 
+    def test_circle_feed_supports_explicit_circle_filter_values(self):
+        data = _graphql(
+            """
+            query CircleFeed($circleId: String!, $filter: CirclePostFilterEnum!) {
+              circleFeed(circleId: $circleId, circleFilter: $filter) {
+                posts {
+                  id
+                  text
+                  user { id }
+                }
+              }
+            }
+            """,
+            {"circleId": str(self.circle.id), "filter": "TRENDING"},
+            access_token=self.viewer_access_token,
+        )
+
+        posts = data["circleFeed"]["posts"]
+        self.assertEqual(posts[0]["id"], str(self.trending_post.id))
+
+    def test_circle_feed_supports_viewer_posts_without_author_workaround(self):
+        data = _graphql(
+            """
+            query CircleFeed($circleId: String!, $filter: CirclePostFilterEnum!) {
+              circleFeed(circleId: $circleId, circleFilter: $filter) {
+                posts {
+                  id
+                  text
+                  user { id }
+                }
+              }
+            }
+            """,
+            {"circleId": str(self.circle.id), "filter": "VIEWER_POSTS"},
+            access_token=self.viewer_access_token,
+        )
+
+        posts = data["circleFeed"]["posts"]
+        self.assertEqual(len(posts), 1)
+        self.assertEqual(posts[0]["id"], str(self.viewer_post.id))
+        self.assertEqual(posts[0]["user"]["id"], str(self.viewer.id))
+
     def test_circle_posts_alias_matches_circle_feed_and_post_aliases(self):
         data = _graphql(
             """
@@ -283,8 +359,12 @@ class TestMobileGraphQLAlignment(TestCase):
             {"circleId": str(self.circle.id)},
         )
 
-        feed_post = data["circleFeed"]["posts"][0]
-        alias_post = data["circlePosts"]["posts"][0]
+        feed_post = next(
+            post for post in data["circleFeed"]["posts"] if post["id"] == str(self.post.id)
+        )
+        alias_post = next(
+            post for post in data["circlePosts"]["posts"] if post["id"] == str(self.post.id)
+        )
         self.assertEqual(feed_post["id"], alias_post["id"])
         self.assertEqual(feed_post["likes"], 24)
         self.assertEqual(feed_post["likesCount"], 24)
@@ -295,8 +375,8 @@ class TestMobileGraphQLAlignment(TestCase):
         self.assertEqual(feed_post["savedCount"], 0)
         self.assertEqual(feed_post["sharedCount"], 0)
         self.assertEqual(feed_post["user"]["avatar"], "https://example.com/avatar.jpg")
-        self.assertEqual(data["circleFeed"]["pageInfo"]["totalCount"], 1)
-        self.assertEqual(data["circlePosts"]["pageInfo"]["totalCount"], 1)
+        self.assertEqual(data["circleFeed"]["pageInfo"]["totalCount"], 3)
+        self.assertEqual(data["circlePosts"]["pageInfo"]["totalCount"], 3)
 
     def test_circle_feed_data_matches_mobile_shape(self):
         self.circle.display_member_count = 1247

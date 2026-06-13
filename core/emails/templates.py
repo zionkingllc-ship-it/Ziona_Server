@@ -82,7 +82,7 @@ def _wrap_layout(brand_key: str, inner_html: str) -> str:
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>{b['name']}</title>
+  <title>{b["name"]}</title>
 </head>
 <body style="margin:0;padding:0;background:#0F0F0F;font-family:'Segoe UI',Arial,sans-serif;">
   <table width="100%" cellpadding="0" cellspacing="0" style="background:#0F0F0F;">
@@ -92,12 +92,12 @@ def _wrap_layout(brand_key: str, inner_html: str) -> str:
 
         <!-- Header -->
         <tr>
-          <td style="background:linear-gradient(135deg,{b['primary']},{b['accent']});
+          <td style="background:linear-gradient(135deg,{b["primary"]},{b["accent"]});
                      padding:32px;text-align:center;">
             <h1 style="margin:0;color:#FFFFFF;font-size:28px;letter-spacing:4px;
-                       font-weight:900;">{b['logo_text']}</h1>
+                       font-weight:900;">{b["logo_text"]}</h1>
             <p style="margin:8px 0 0;color:rgba(255,255,255,0.8);font-size:13px;">
-              {b['tagline']}
+              {b["tagline"]}
             </p>
           </td>
         </tr>
@@ -114,7 +114,7 @@ def _wrap_layout(brand_key: str, inner_html: str) -> str:
           <td style="padding:24px 40px;border-top:1px solid rgba(255,255,255,0.08);
                      text-align:center;">
             <p style="margin:0;color:rgba(255,255,255,0.4);font-size:12px;">
-              &copy; 2025 {b['name']}. All rights reserved.
+              &copy; 2025 {b["name"]}. All rights reserved.
             </p>
           </td>
         </tr>
@@ -467,7 +467,7 @@ def render_contact_internal_notification(
                       padding:16px;margin-bottom:16px;">
   <tr>
     <td style="color:rgba(255,255,255,0.5);font-size:13px;padding:4px 0;width:80px;">Brand</td>
-    <td style="color:#FFFFFF;font-size:14px;font-weight:600;">{b['name']}</td>
+    <td style="color:#FFFFFF;font-size:14px;font-weight:600;">{b["name"]}</td>
   </tr>
   <tr>
     <td style="color:rgba(255,255,255,0.5);font-size:13px;padding:4px 0;">Name</td>

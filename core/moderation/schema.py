@@ -1,6 +1,5 @@
 """GraphQL types, queries, and mutations for the moderation domain."""
 
-
 import strawberry
 
 from core.shared.types import ErrorType

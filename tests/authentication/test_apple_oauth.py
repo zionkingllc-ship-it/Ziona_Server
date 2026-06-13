@@ -193,7 +193,7 @@ class TestAppleOAuth:
         User.objects.create_user(
             email="password.apple@example.com",
             username="passwordapple",
-            password="SecurePass1!",
+            password="SecurePass1!",  # pragma: allowlist secret
             is_email_verified=True,
         )
         raw_nonce = "password-conflict-nonce"
@@ -219,6 +219,51 @@ class TestAppleOAuth:
             data["error"]["message"]
             == "This email is already registered with a password. Please sign in with your password instead, or use 'Forgot Password' to reset it."
         )
+
+    def test_unverified_password_signup_can_continue_with_apple_oauth(
+        self, api_client, apple_private_key
+    ):
+        User.objects.create_user(
+            email="pending.apple@example.com",
+            username="pendingapple",
+            password="SecurePass1!",  # pragma: allowlist secret
+            is_email_verified=False,
+        )
+        raw_nonce = "pending-apple-nonce"
+        _cache_nonce(raw_nonce)
+        token = _apple_token(
+            apple_private_key,
+            sub="apple-pending-sub",
+            raw_nonce=raw_nonce,
+            email="pending.apple@example.com",
+        )
+
+        response = api_client.post(
+            self.url,
+            data=json.dumps(
+                {
+                    "identityToken": token,
+                    "rawNonce": raw_nonce,
+                    "user": {
+                        "name": {"firstName": "Pending", "lastName": "Apple"},
+                        "email": "pending.apple@example.com",
+                    },
+                }
+            ),
+            content_type="application/json",
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["success"] is True
+        assert data["data"]["isNewUser"] is False
+
+        user = User.objects.get(email="pending.apple@example.com")
+        assert user.apple_sub == "apple-pending-sub"
+        assert user.is_email_verified is True
+        assert user.has_usable_password() is True
+        assert user.social_auth_provider is None
+        assert user.full_name == "Pending Apple"
 
     def test_rejects_unconfigured_apple_audience(self, api_client, apple_private_key):
         raw_nonce = "bad-audience-nonce"

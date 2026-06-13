@@ -1,6 +1,5 @@
 """GraphQL types and queries for the feed domain."""
 
-
 import dataclasses
 import logging
 import typing
@@ -171,9 +170,12 @@ class FeedPost:
     share_url: str
     created_at: str
     scripture: FeedPostScripture | None = None
-    saved_in_folders: list[
-        typing.Annotated["BookmarkFolderType", strawberry.lazy("core.engagement.schema")]  # noqa: F821
-    ] | None = None
+    saved_in_folders: (
+        list[
+            typing.Annotated["BookmarkFolderType", strawberry.lazy("core.engagement.schema")]  # noqa: F821
+        ]
+        | None
+    ) = None
 
     _media_list: strawberry.Private[list[MediaFileType]] = dataclasses.field(default_factory=list)
 

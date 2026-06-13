@@ -12,7 +12,7 @@ class TestSchemaAlignment:
     @pytest.fixture
     def auth_client(self, authenticated_user):
         client = Client()
-        client.defaults["HTTP_AUTHORIZATION"] = f'Bearer {authenticated_user["access_token"]}'
+        client.defaults["HTTP_AUTHORIZATION"] = f"Bearer {authenticated_user['access_token']}"
         return client
 
     @pytest.fixture

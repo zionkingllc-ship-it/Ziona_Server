@@ -192,7 +192,7 @@ class MediaService:
         limit = ALLOWED_TYPES[content_type]["max_size"]
         if file.size > limit:
             raise MediaError(
-                f"File too large. Limit is {limit // (1024*1024)}MB",
+                f"File too large. Limit is {limit // (1024 * 1024)}MB",
                 code="MEDIA_TOO_LARGE",
                 field="file",
             )

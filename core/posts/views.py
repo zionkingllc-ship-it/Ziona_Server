@@ -7,7 +7,6 @@ Handles:
 - /post/<post_id>/ (Share preview with OG meta tags)
 """
 
-
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import render
 from django.views.decorators.cache import cache_control

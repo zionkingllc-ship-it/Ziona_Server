@@ -6,6 +6,7 @@ Tests for:
 - toggle_reaction
 - Trending sort algorithm
 """
+
 from datetime import timedelta
 
 import pytest

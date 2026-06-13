@@ -2,6 +2,7 @@
 Phase 2: Anchor Service Layer
 Handles retrieval, creation, caching, and time calculations for circle anchors.
 """
+
 from datetime import timedelta
 
 from django.core.cache import cache

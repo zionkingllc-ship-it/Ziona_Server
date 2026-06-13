@@ -170,7 +170,7 @@ class TestDateOfBirth:
 class TestAccountDetailsGraphQL:
     def _auth_client(self, authenticated_user):
         client = Client()
-        client.defaults["HTTP_AUTHORIZATION"] = f'Bearer {authenticated_user["access_token"]}'
+        client.defaults["HTTP_AUTHORIZATION"] = f"Bearer {authenticated_user['access_token']}"
         return client
 
     def test_account_details_query_returns_settings_card_data(self, authenticated_user):
@@ -246,7 +246,7 @@ class TestAccountDetailsGraphQL:
         user = authenticated_user["user"]
         user.location = "Lagos, Nigeria"
         user.save(update_fields=["location", "updated_at"])
-        api_client.defaults["HTTP_AUTHORIZATION"] = f'Bearer {authenticated_user["access_token"]}'
+        api_client.defaults["HTTP_AUTHORIZATION"] = f"Bearer {authenticated_user['access_token']}"
 
         response = api_client.get("/api/auth/me")
         data = response.json()["data"]

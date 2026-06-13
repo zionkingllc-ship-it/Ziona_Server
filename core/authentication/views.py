@@ -363,6 +363,77 @@ class LogoutView(BaseAuthView):
 
 
 @method_decorator(csrf_exempt, name="dispatch")
+class ChangePasswordView(BaseAuthView):
+    """Authenticated password change endpoint.
+
+    POST /api/auth/change-password
+    Headers: Authorization: Bearer <access_token>
+    Body: { currentPassword, newPassword, signOutOtherDevices? }
+    """
+
+    def post(self, request: HttpRequest) -> JsonResponse:
+        try:
+            user_id = _authenticated_user_id_from_request(request)
+        except AuthenticationError as e:
+            return _auth_error_response(e)
+
+        data = _parse_json_body(request)
+        current_password = data.get("currentPassword") or data.get("current_password") or ""
+        new_password = data.get("newPassword") or data.get("new_password") or ""
+        sign_out_other_devices = bool(
+            data.get("signOutOtherDevices") or data.get("sign_out_other_devices")
+        )
+
+        if not current_password or not new_password:
+            return error_response(
+                message="Current password and new password are required",
+                code="MISSING_FIELDS",
+            )
+
+        current_jti = None
+        if sign_out_other_devices:
+            from core.authentication.tokens import TokenError, TokenService
+
+            auth_header = request.META.get("HTTP_AUTHORIZATION", "")
+            access_token = auth_header[7:] if auth_header.startswith("Bearer ") else ""
+            try:
+                payload = TokenService.validate_access_token(access_token)
+            except TokenError:
+                return error_response(
+                    message="Invalid or expired token. Please re-login.",
+                    code="INVALID_TOKEN",
+                    status=401,
+                )
+
+            current_jti = payload.get("jti")
+            if not current_jti:
+                return error_response(
+                    message="Invalid token payload. Please re-login.",
+                    code="INVALID_TOKEN",
+                    status=401,
+                )
+
+        try:
+            result = AuthService.change_password(
+                user_id=user_id,
+                current_password=current_password,
+                new_password=new_password,
+                sign_out_other_devices=sign_out_other_devices,
+                current_jti=current_jti,
+                ip_address=_get_client_ip(request),
+            )
+            return success_response(
+                data={
+                    "message": result["message"],
+                    "signedOutDevices": result["signed_out_devices"],
+                }
+            )
+        except AuthenticationError as e:
+            logger.warning("Password change failed: code=%s", e.code)
+            return _auth_error_response(e)
+
+
+@method_decorator(csrf_exempt, name="dispatch")
 class VerifyEmailView(BaseAuthView):
     """Email verification via OTP endpoint.
 

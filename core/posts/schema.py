@@ -412,9 +412,12 @@ class Post:
     post_type: PostType = strawberry.field(name="type")
     created_at: str
     share_url: str
-    saved_in_folders: list[
-        typing.Annotated["BookmarkFolderType", strawberry.lazy("core.engagement.schema")]  # noqa: F821
-    ] | None = None
+    saved_in_folders: (
+        list[
+            typing.Annotated["BookmarkFolderType", strawberry.lazy("core.engagement.schema")]  # noqa: F821
+        ]
+        | None
+    ) = None
 
     _category_id: strawberry.Private[str | None] = None
     _dto: strawberry.Private[object] = None

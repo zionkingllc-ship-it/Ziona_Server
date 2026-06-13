@@ -7,6 +7,7 @@ Mirrors the architecture of response_services.py for consistency.
 All counter updates use F() expressions so concurrent requests never
 create race conditions on the denormalized counts.
 """
+
 import logging
 
 from django.db import IntegrityError, transaction

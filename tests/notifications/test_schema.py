@@ -7,7 +7,7 @@ from django.test import Client
 @pytest.mark.django_db
 def test_notification_preferences_accepts_bearer_token(authenticated_user):
     client = Client()
-    client.defaults["HTTP_AUTHORIZATION"] = f'Bearer {authenticated_user["access_token"]}'
+    client.defaults["HTTP_AUTHORIZATION"] = f"Bearer {authenticated_user['access_token']}"
 
     response = client.post(
         "/graphql/",
@@ -46,7 +46,7 @@ def test_notification_preferences_accepts_bearer_token(authenticated_user):
 @pytest.mark.django_db
 def test_update_notification_preferences_accepts_bearer_token(authenticated_user):
     client = Client()
-    client.defaults["HTTP_AUTHORIZATION"] = f'Bearer {authenticated_user["access_token"]}'
+    client.defaults["HTTP_AUTHORIZATION"] = f"Bearer {authenticated_user['access_token']}"
 
     response = client.post(
         "/graphql/",

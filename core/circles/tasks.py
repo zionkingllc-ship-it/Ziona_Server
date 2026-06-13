@@ -7,6 +7,7 @@ Scheduled tasks:
 - batched_reaction_notifications → hourly    — batches Amen/Encouraged notifications
 - purge_expired_anchors        → nightly 02:00 UTC — hard-deletes anchors > 5 days old
 """
+
 import logging
 from datetime import timedelta
 

@@ -7,7 +7,6 @@ Documentation: https://docs.api.bible
 # DEACTIVATED FOR LAUNCH. See ROADMAP.md for Pro feature plan.
 """
 
-
 import logging
 from typing import Any
 

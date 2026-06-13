@@ -202,6 +202,75 @@ class TestLogoutEndpoint:
         assert response.json()["success"] is True
 
 
+class TestChangePasswordEndpoint:
+    """Test POST /api/auth/change-password."""
+
+    def test_change_password_success(self, api_client: Client, authenticated_user):
+        """Authenticated users can change password through REST."""
+        payload = {
+            "currentPassword": "TestPass123!",  # pragma: allowlist secret
+            "newPassword": "NewPass456!",  # pragma: allowlist secret
+        }
+        response = api_client.post(
+            "/api/auth/change-password",
+            data=json.dumps(payload),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {authenticated_user['access_token']}",
+        )
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["success"] is True
+        assert body["data"]["message"] == "Password changed successfully."
+        assert body["data"]["signedOutDevices"] == 0
+
+        login_response = api_client.post(
+            "/api/auth/login",
+            data=json.dumps(
+                {
+                    "email": authenticated_user["user"].email,
+                    "password": "NewPass456!",  # pragma: allowlist secret
+                }
+            ),
+            content_type="application/json",
+        )
+        assert login_response.status_code == 200
+        assert login_response.json()["success"] is True
+
+    def test_change_password_requires_authentication(self, api_client: Client):
+        payload = {
+            "currentPassword": "TestPass123!",  # pragma: allowlist secret
+            "newPassword": "NewPass456!",  # pragma: allowlist secret
+        }
+        response = api_client.post(
+            "/api/auth/change-password",
+            data=json.dumps(payload),
+            content_type="application/json",
+        )
+
+        assert response.status_code == 401
+        assert response.json()["error"]["code"] == "UNAUTHENTICATED"
+
+    def test_change_password_rejects_wrong_current_password(
+        self, api_client: Client, authenticated_user
+    ):
+        payload = {
+            "currentPassword": "WrongPass123!",  # pragma: allowlist secret
+            "newPassword": "NewPass456!",  # pragma: allowlist secret
+        }
+        response = api_client.post(
+            "/api/auth/change-password",
+            data=json.dumps(payload),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {authenticated_user['access_token']}",
+        )
+
+        assert response.status_code == 400
+        body = response.json()
+        assert body["success"] is False
+        assert body["error"]["code"] == "CURRENT_PASSWORD_INCORRECT"
+
+
 class TestSuggestUsernamesEndpoint:
     """Test POST /api/auth/suggest-usernames."""
 

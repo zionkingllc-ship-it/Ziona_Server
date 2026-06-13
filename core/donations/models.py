@@ -71,7 +71,7 @@ class Donation(models.Model):
         ordering = ["-created_at"]
 
     def __str__(self) -> str:
-        return f"{self.donor_name} — ${self.amount / 100:.2f} " f"({self.type}) [{self.status}]"
+        return f"{self.donor_name} — ${self.amount / 100:.2f} ({self.type}) [{self.status}]"
 
 
 class Subscription(models.Model):

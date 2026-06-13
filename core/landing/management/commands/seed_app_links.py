@@ -55,7 +55,6 @@ class Command(BaseCommand):
 
         self.stdout.write(
             self.style.SUCCESS(
-                f"\nDone. {created_count} link(s) created, "
-                f"{len(links) - created_count} skipped."
+                f"\nDone. {created_count} link(s) created, {len(links) - created_count} skipped."
             )
         )

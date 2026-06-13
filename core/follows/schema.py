@@ -1,6 +1,5 @@
 """GraphQL types, queries, and mutations for the follows domain."""
 
-
 import strawberry
 
 from core.profiles.schema import ProfileStatsType

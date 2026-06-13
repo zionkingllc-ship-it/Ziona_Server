@@ -6,6 +6,7 @@ Tests for:
 - Circle creation (create_circle)
 - Error handling for all edge cases
 """
+
 import pytest
 from django.test import TestCase
 
