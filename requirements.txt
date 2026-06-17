@@ -17,7 +17,7 @@ dj-database-url==2.1.0
 PyJWT==2.13.0
 bcrypt==4.1.2
 firebase-admin==6.3.0
-cryptography==46.0.7
+cryptography==48.0.1
 
 # Redis & Celery
 redis==5.0.1
@@ -42,7 +42,7 @@ structlog==24.1.0
 django-structlog==6.0.1
 
 # Input Sanitization
-bleach==6.1.0
+bleach==6.4.0
 
 # Code Quality
 ruff==0.2.0
