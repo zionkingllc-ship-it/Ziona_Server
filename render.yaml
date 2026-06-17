@@ -59,7 +59,7 @@ services:
       - key: GCS_CORS_ALLOWED_ORIGINS
         value: https://ziona-app-staging.netlify.app,https://ziona-admin-dashboard-git-staging-zionking-llc.vercel.app,https://ziona-admin-dashboard.vercel.app
       - key: GCP_STORAGE_BUCKET
-        value: ziona-media-staging
+        value: ziona-media-dev
       - key: GCP_CREDENTIALS_FILE
         value: /etc/secrets/gcp-credentials.json
       - key: FIREBASE_CREDENTIALS_FILE

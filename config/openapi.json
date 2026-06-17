@@ -366,9 +366,19 @@
       "delete": {
         "tags": ["Authentication"],
         "summary": "Delete user account",
-        "description": "Permanently deletes the authenticated user's account and all associated data.",
+        "description": "Permanently deletes the authenticated user's account and all associated data. Provide password or otp/code plus acknowledgePermanentDeletion=true. For compatibility, acknowledgePermanentDeletion may also be sent as a DELETE query parameter.",
         "operationId": "deleteAccount",
         "security": [{"BearerAuth": []}],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeleteAccountRequest"
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "Account deleted successfully",
@@ -386,6 +396,221 @@
                     }
                   }
                 }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation or re-authentication error",
+            "content": {
+              "application/json": {
+                "schema": {"$ref": "#/components/schemas/ErrorResponse"}
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid Bearer token",
+            "content": {
+              "application/json": {
+                "schema": {"$ref": "#/components/schemas/ErrorResponse"}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/change-password": {
+      "post": {
+        "tags": ["Authentication"],
+        "summary": "Change password",
+        "description": "Change the authenticated user password. Supports optionally signing out other devices.",
+        "operationId": "changePassword",
+        "security": [{"BearerAuth": []}],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChangePasswordRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Password changed successfully",
+            "content": {
+              "application/json": {
+                "schema": {"$ref": "#/components/schemas/MessageResponse"}
+              }
+            }
+          },
+          "400": {
+            "description": "Validation or password policy error",
+            "content": {
+              "application/json": {
+                "schema": {"$ref": "#/components/schemas/ErrorResponse"}
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid Bearer token",
+            "content": {
+              "application/json": {
+                "schema": {"$ref": "#/components/schemas/ErrorResponse"}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/otp/send": {
+      "post": {
+        "tags": ["Authentication"],
+        "summary": "Send OTP",
+        "description": "Send a one-time code for registration, verification, password reset, or account actions.",
+        "operationId": "sendOtp",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OtpSendRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OTP sent successfully",
+            "content": {
+              "application/json": {
+                "schema": {"$ref": "#/components/schemas/OtpSendSuccessResponse"}
+              }
+            }
+          },
+          "400": {
+            "description": "Validation or rate-limit error",
+            "content": {
+              "application/json": {
+                "schema": {"$ref": "#/components/schemas/ErrorResponse"}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/otp/verify": {
+      "post": {
+        "tags": ["Authentication"],
+        "summary": "Verify OTP",
+        "description": "Verify a previously sent OTP. Response shape varies by purpose.",
+        "operationId": "verifyOtp",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OtpVerifyRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OTP verified successfully",
+            "content": {
+              "application/json": {
+                "schema": {"$ref": "#/components/schemas/OtpVerifySuccessResponse"}
+              }
+            }
+          },
+          "400": {
+            "description": "Validation or verification error",
+            "content": {
+              "application/json": {
+                "schema": {"$ref": "#/components/schemas/ErrorResponse"}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/deactivate": {
+      "post": {
+        "tags": ["Authentication"],
+        "summary": "Deactivate account",
+        "description": "Deactivate the authenticated account using password or OTP re-authentication.",
+        "operationId": "deactivateAccount",
+        "security": [{"BearerAuth": []}],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeactivateAccountRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Account deactivated successfully",
+            "content": {
+              "application/json": {
+                "schema": {"$ref": "#/components/schemas/MessageResponse"}
+              }
+            }
+          },
+          "400": {
+            "description": "Validation or re-authentication error",
+            "content": {
+              "application/json": {
+                "schema": {"$ref": "#/components/schemas/ErrorResponse"}
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid Bearer token",
+            "content": {
+              "application/json": {
+                "schema": {"$ref": "#/components/schemas/ErrorResponse"}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/delete-account": {
+      "post": {
+        "tags": ["Authentication"],
+        "summary": "Delete account",
+        "description": "Permanently delete the authenticated account using password or OTP re-authentication. Requires acknowledgePermanentDeletion=true.",
+        "operationId": "deleteAccountProtected",
+        "security": [{"BearerAuth": []}],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeleteAccountRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Account deleted successfully",
+            "content": {
+              "application/json": {
+                "schema": {"$ref": "#/components/schemas/MessageResponse"}
+              }
+            }
+          },
+          "400": {
+            "description": "Validation or re-authentication error",
+            "content": {
+              "application/json": {
+                "schema": {"$ref": "#/components/schemas/ErrorResponse"}
               }
             }
           },
@@ -974,6 +1199,134 @@
                 "additionalProperties": true
               }
             }
+          }
+        }
+      },
+      "ChangePasswordRequest": {
+        "type": "object",
+        "required": ["currentPassword", "newPassword"],
+        "properties": {
+          "currentPassword": {"type": "string", "format": "password", "example": "CurrentPassword123!"},
+          "newPassword": {"type": "string", "format": "password", "example": "NewSecurePass456!"},
+          "signOutOtherDevices": {
+            "type": "boolean",
+            "default": false,
+            "description": "When true, revoke all other refresh/access sessions except the current token."
+          }
+        }
+      },
+      "DeleteAccountRequest": {
+        "type": "object",
+        "required": ["acknowledgePermanentDeletion"],
+        "description": "Provide either password or otp/code, plus acknowledgePermanentDeletion=true.",
+        "properties": {
+          "password": {
+            "type": "string",
+            "format": "password",
+            "description": "Current account password. Required when deleting with password re-authentication.",
+            "example": "SecurePass123!"
+          },
+          "otp": {
+            "type": "string",
+            "description": "One-time code from /auth/otp/send with purpose=account_deletion.",
+            "example": "123456"
+          },
+          "code": {
+            "type": "string",
+            "description": "Alias for otp. Supported for compatibility.",
+            "example": "123456"
+          },
+          "acknowledgePermanentDeletion": {
+            "type": "boolean",
+            "description": "Must be true to confirm permanent account deletion.",
+            "example": true
+          }
+        }
+      },
+      "DeactivateAccountRequest": {
+        "type": "object",
+        "description": "Provide either password or otp/code.",
+        "properties": {
+          "password": {"type": "string", "format": "password", "example": "SecurePass123!"},
+          "otp": {"type": "string", "example": "123456"},
+          "code": {
+            "type": "string",
+            "description": "Alias for otp. Supported for compatibility.",
+            "example": "123456"
+          }
+        }
+      },
+      "OtpSendRequest": {
+        "type": "object",
+        "required": ["email", "purpose"],
+        "properties": {
+          "email": {"type": "string", "format": "email", "example": "user@example.com"},
+          "purpose": {
+            "type": "string",
+            "enum": [
+              "registration",
+              "email_verification",
+              "password_reset",
+              "account_deactivation",
+              "account_deletion"
+            ],
+            "example": "account_deletion"
+          }
+        }
+      },
+      "OtpVerifyRequest": {
+        "type": "object",
+        "required": ["email", "code", "purpose"],
+        "properties": {
+          "email": {"type": "string", "format": "email", "example": "user@example.com"},
+          "code": {"type": "string", "example": "123456"},
+          "purpose": {
+            "type": "string",
+            "enum": [
+              "registration",
+              "email_verification",
+              "password_reset",
+              "account_deactivation",
+              "account_deletion"
+            ],
+            "example": "account_deletion"
+          }
+        }
+      },
+      "MessageResponse": {
+        "type": "object",
+        "properties": {
+          "success": {"type": "boolean", "example": true},
+          "data": {
+            "type": "object",
+            "properties": {
+              "message": {"type": "string", "example": "Operation completed successfully."}
+            }
+          }
+        }
+      },
+      "OtpSendSuccessResponse": {
+        "type": "object",
+        "properties": {
+          "success": {"type": "boolean", "example": true},
+          "data": {
+            "type": "object",
+            "properties": {
+              "message": {"type": "string", "example": "OTP sent successfully"},
+              "expiresIn": {"type": "integer", "example": 600},
+              "purpose": {"type": "string", "example": "account_deletion"},
+              "resendAfter": {"type": "integer", "example": 60}
+            }
+          }
+        }
+      },
+      "OtpVerifySuccessResponse": {
+        "type": "object",
+        "properties": {
+          "success": {"type": "boolean", "example": true},
+          "data": {
+            "type": "object",
+            "description": "Shape varies by purpose. Account deletion/deactivation returns { verified, purpose }."
           }
         }
       }
