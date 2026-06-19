@@ -572,7 +572,7 @@ DISABLE_SCRIPTURE_IMPORT = env.bool("DISABLE_SCRIPTURE_IMPORT", default=False)
 def validate_non_debug_runtime_settings(
     *, environment_name: str, config: dict[str, str] | None = None
 ) -> None:
-    """Fail fast when a non-debug environment is missing critical secrets/config."""
+    """Fail fast when a non-debug environment is missing critical runtime config."""
     values = config or {
         "SECRET_KEY": SECRET_KEY,
         "JWT_SECRET_KEY": JWT_SECRET_KEY,

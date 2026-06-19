@@ -116,8 +116,8 @@ def test_non_debug_runtime_validation_rejects_unsafe_defaults():
         validate_non_debug_runtime_settings(
             environment_name="production",
             config={
-                "SECRET_KEY": "insecure-dev-key-change-me",
-                "JWT_SECRET_KEY": "insecure-dev-key-change-me",
+                "SECRET_KEY": "insecure-dev-key-change-me",  # pragma: allowlist secret
+                "JWT_SECRET_KEY": "insecure-dev-key-change-me",  # pragma: allowlist secret
                 "ENCRYPTION_KEY": "",
                 "GCP_STORAGE_BUCKET": "ziona-media-dev",
                 "GCP_CREDENTIALS_FILE": "",
@@ -139,9 +139,9 @@ def test_non_debug_runtime_validation_accepts_valid_config():
     validate_non_debug_runtime_settings(
         environment_name="staging",
         config={
-            "SECRET_KEY": "staging-secret-key-that-is-not-default",
-            "JWT_SECRET_KEY": "staging-jwt-secret-key-that-is-different",
-            "ENCRYPTION_KEY": "test-encryption-key",
+            "SECRET_KEY": "staging-secret-key-that-is-not-default",  # pragma: allowlist secret
+            "JWT_SECRET_KEY": "staging-jwt-secret-key-that-is-different",  # pragma: allowlist secret
+            "ENCRYPTION_KEY": "test-encryption-key",  # pragma: allowlist secret
             "GCP_STORAGE_BUCKET": "ziona-media-dev",
             "GCP_CREDENTIALS_FILE": "/etc/secrets/gcp-credentials.json",
             "FIREBASE_CREDENTIALS_FILE": "/etc/secrets/firebase-credentials.json",

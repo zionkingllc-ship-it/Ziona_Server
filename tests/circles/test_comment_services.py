@@ -16,10 +16,11 @@ from core.users.models import User
 
 @pytest.fixture
 def circle_post_with_members(db):
-    author = User.objects.create_user(email="author-comments@example.com", password="password123")
-    member = User.objects.create_user(email="member-comments@example.com", password="password123")
+    test_password = "password123"  # pragma: allowlist secret
+    author = User.objects.create_user(email="author-comments@example.com", password=test_password)
+    member = User.objects.create_user(email="member-comments@example.com", password=test_password)
     outsider = User.objects.create_user(
-        email="outsider-comments@example.com", password="password123"
+        email="outsider-comments@example.com", password=test_password
     )
 
     circle = Circle.objects.create(
