@@ -583,7 +583,9 @@ def validate_non_debug_runtime_settings(
     }
     errors: list[str] = []
 
-    if not values["SECRET_KEY"] or values["SECRET_KEY"] == "insecure-dev-key-change-me":
+    if (
+        not values["SECRET_KEY"] or values["SECRET_KEY"] == "insecure-dev-key-change-me"
+    ):  # pragma: allowlist secret
         errors.append("DJANGO_SECRET_KEY must be set to a non-default value")
     if not values["JWT_SECRET_KEY"] or values["JWT_SECRET_KEY"] == values["SECRET_KEY"]:
         errors.append("JWT_SECRET_KEY must be set independently from DJANGO_SECRET_KEY")
