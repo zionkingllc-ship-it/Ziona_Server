@@ -18,7 +18,8 @@ env_file = BASE_DIR / ".env"
 if env_file.exists():
     environ.Env.read_env(str(env_file))
 
-SECRET_KEY = env("DJANGO_SECRET_KEY", default="insecure-dev-key-change-me")
+DEVELOPMENT_SECRET_KEY = "insecure-dev-key-change-me"  # pragma: allowlist secret
+SECRET_KEY = env("DJANGO_SECRET_KEY", default=DEVELOPMENT_SECRET_KEY)
 
 DEBUG = env("DEBUG")
 
@@ -583,9 +584,7 @@ def validate_non_debug_runtime_settings(
     }
     errors: list[str] = []
 
-    if (
-        not values["SECRET_KEY"] or values["SECRET_KEY"] == "insecure-dev-key-change-me"
-    ):  # pragma: allowlist secret
+    if not values["SECRET_KEY"] or values["SECRET_KEY"] == DEVELOPMENT_SECRET_KEY:
         errors.append("DJANGO_SECRET_KEY must be set to a non-default value")
     if not values["JWT_SECRET_KEY"] or values["JWT_SECRET_KEY"] == values["SECRET_KEY"]:
         errors.append("JWT_SECRET_KEY must be set independently from DJANGO_SECRET_KEY")
