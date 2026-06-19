@@ -47,6 +47,21 @@ CELERY_REDIS_BACKEND_USE_SSL = {"ssl_cert_reqs": ssl.CERT_REQUIRED}
 
 CORS_ALLOW_ALL_ORIGINS = False
 
+CORS_ALLOWED_ORIGINS = env.list(  # noqa: F405
+    "CORS_ALLOWED_ORIGINS",
+    default=[
+        "https://ziona.app",
+        "https://www.ziona.app",
+        "https://admin.ziona.app",
+        "https://zionking.org",
+        "https://www.zionking.org",
+    ],
+)
+GCS_CORS_ALLOWED_ORIGINS = env.list(  # noqa: F405
+    "GCS_CORS_ALLOWED_ORIGINS",
+    default=CORS_ALLOWED_ORIGINS,
+)
+
 if SENTRY_DSN:  # noqa: F405
     sentry_sdk.init(
         dsn=SENTRY_DSN,  # noqa: F405
