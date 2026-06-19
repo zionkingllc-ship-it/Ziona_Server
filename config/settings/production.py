@@ -63,3 +63,5 @@ if SENTRY_DSN:  # noqa: F405
 RATE_LIMIT_ENABLED = True
 
 GRAPHQL_INTROSPECTION_ENABLED = False
+
+validate_non_debug_runtime_settings(environment_name="production")  # noqa: F405

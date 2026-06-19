@@ -18,6 +18,17 @@ REQUIRED_WORKFLOWS = {"Ziona CI/CD", "Ziona Vulnerability Scanner"}
 SUCCESS_STATES = {"live", "active", "deployed", "succeeded", "success", "completed"}
 
 
+def validate_api_url(url: str) -> None:
+    """Ensure automation only calls the configured GitHub/Render API origins."""
+    parsed = parse.urlparse(url)
+    allowed_hosts = {
+        parse.urlparse(GITHUB_API_URL).hostname,
+        parse.urlparse(RENDER_API_URL).hostname,
+    }
+    if parsed.scheme != "https" or parsed.hostname not in allowed_hosts:
+        raise RuntimeError(f"Refusing to call untrusted API URL: {url}")
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--service-id", required=True)
@@ -60,9 +71,10 @@ def api_request(
         data = json.dumps(payload).encode("utf-8")
         request_headers["Content-Type"] = "application/json"
 
+    validate_api_url(url)
     req = request.Request(url, data=data, method=method, headers=request_headers)  # noqa: S310
     try:
-        with request.urlopen(req, timeout=30) as response:  # noqa: S310
+        with request.urlopen(req, timeout=30) as response:  # noqa: S310  # nosec B310
             return read_json_response(response)
     except error.HTTPError as exc:
         body = exc.read().decode("utf-8", errors="replace")

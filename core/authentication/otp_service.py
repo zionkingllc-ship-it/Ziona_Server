@@ -141,8 +141,8 @@ class OTPService:
 
         except AuthenticationError:
             raise
-        except Exception:
-            logger.debug("Failed to check resend limits", exc_info=True)
+        except Exception as e:
+            _handle_otp_redis_failure("Failed to check resend limits", e)
 
         OTPService._send_otp(email, str(user.id), purpose=purpose)
 
@@ -259,7 +259,14 @@ class OTPService:
             record_successful_auth(user, ip_address)
 
             access_token = TokenService.generate_access_token(str(user.id), user.role)
-            refresh_token, _ = TokenService.generate_refresh_token(str(user.id))
+            try:
+                refresh_token, _ = TokenService.generate_refresh_token(str(user.id))
+            except Exception as e:
+                logger.error("Failed to issue verified-session refresh token: %s", e, exc_info=True)
+                raise AuthenticationError(
+                    "Authentication service is temporarily unavailable. Please try again.",
+                    code="AUTH_SERVICE_UNAVAILABLE",
+                ) from e
 
             log_security_event(
                 f"auth.otp.verified.{purpose}",
@@ -501,7 +508,14 @@ class OTPService:
         cache.delete(f"user_me_data_{user.id}")
 
         access_token = TokenService.generate_access_token(str(user.id), user.role)
-        refresh_token, _ = TokenService.generate_refresh_token(str(user.id))
+        try:
+            refresh_token, _ = TokenService.generate_refresh_token(str(user.id))
+        except Exception as e:
+            logger.error("Failed to issue email-verification refresh token: %s", e, exc_info=True)
+            raise AuthenticationError(
+                "Authentication service is temporarily unavailable. Please try again.",
+                code="AUTH_SERVICE_UNAVAILABLE",
+            ) from e
 
         logger.info("Email verified: user_id=%s", user.id)
         log_security_event(
@@ -614,13 +628,14 @@ class OTPService:
                 )
             return
 
-        from core.shared.tasks.email_tasks import send_email_async
+        from core.shared.tasks.email_tasks import queue_email_delivery
 
-        send_email_async.delay(
+        queue_email_delivery(
             subject=f"Ziona - {purpose.replace('_', ' ').title()} Code",
             message=f"Your code is: {otp}\n\nThis code expires in 10 minutes.",
             from_email=settings.DEFAULT_FROM_EMAIL,
             recipient_list=[email],
+            email_kind=f"otp_{purpose}",
         )
 
     @staticmethod
@@ -648,8 +663,8 @@ class OTPService:
                 )
         except AuthenticationError:
             raise
-        except Exception:
-            logger.debug("Failed to check OTP attempts", exc_info=True)
+        except Exception as e:
+            _handle_otp_redis_failure("Failed to check OTP attempts", e)
 
     @staticmethod
     def _increment_otp_attempts(email: str, purpose: str) -> None:
@@ -663,8 +678,8 @@ class OTPService:
             pipe.incr(key)
             pipe.expire(key, 600)
             pipe.execute()
-        except Exception:
-            logger.debug("Failed to increment OTP attempts", exc_info=True)
+        except Exception as e:
+            _handle_otp_redis_failure("Failed to increment OTP attempts", e)
 
     @staticmethod
     def _check_resend_limit(email: str, purpose: str, max_resends: int = 3) -> None:
@@ -691,8 +706,8 @@ class OTPService:
                 )
         except AuthenticationError:
             raise
-        except Exception:
-            logger.debug("Failed to check resend limit", exc_info=True)
+        except Exception as e:
+            _handle_otp_redis_failure("Failed to check resend limit", e)
 
     @staticmethod
     def _increment_resend_count(email: str, purpose: str) -> None:
@@ -706,5 +721,17 @@ class OTPService:
             pipe.incr(key)
             pipe.expire(key, 600)
             pipe.execute()
-        except Exception:
-            logger.debug("Failed to increment resend count", exc_info=True)
+        except Exception as e:
+            _handle_otp_redis_failure("Failed to increment resend count", e)
+
+
+def _handle_otp_redis_failure(log_message: str, exc: Exception) -> None:
+    """Raise typed OTP infra errors in non-dev environments."""
+    if getattr(settings, "AUTH_STRICT_REDIS", False):
+        logger.error("%s: %s", log_message, exc, exc_info=True)
+        raise AuthenticationError(
+            "Verification service is temporarily unavailable. Please try again.",
+            code="OTP_SERVICE_UNAVAILABLE",
+        ) from exc
+
+    logger.debug("%s", log_message, exc_info=True)

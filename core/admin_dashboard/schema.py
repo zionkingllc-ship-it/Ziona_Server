@@ -6,6 +6,7 @@ import strawberry
 from strawberry.types import Info
 
 from core.admin_dashboard.permissions import admin_required
+from core.shared.request_utils import get_client_ip
 from core.shared.types import ErrorType
 
 # ──────────────────────────────────────────────
@@ -1713,7 +1714,7 @@ class AdminDashboardMutations:
         from core.users.schema import _get_authenticated_user_id
 
         try:
-            ip_address = info.context.request.META.get("REMOTE_ADDR", "")
+            ip_address = get_client_ip(info.context.request, default="")
             user_id = _get_authenticated_user_id(info)
             user = None
             if user_id:
@@ -1776,7 +1777,7 @@ class AdminDashboardMutations:
             result = ContactService.submit_help_message(
                 message=message,
                 category_slug=category_slug or "",
-                ip_address=info.context.request.META.get("REMOTE_ADDR", ""),
+                ip_address=get_client_ip(info.context.request, default=""),
                 user=user,
                 name=name or "",
                 email=email or "",

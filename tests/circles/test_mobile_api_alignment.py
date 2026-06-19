@@ -1,9 +1,11 @@
 import json
 from datetime import timedelta
+from unittest.mock import patch
 
 import pytest
 from django.core.management import call_command
 from django.test import Client, TestCase
+from django.test.utils import override_settings
 from django.utils import timezone
 
 from core.circles.anchor_services import create_anchor, get_anchor_history
@@ -150,8 +152,15 @@ class TestMobileAnchorAlignment(TestCase):
             expires_at=now - timedelta(days=1),
         )
 
-        all_anchors = get_anchor_history(str(self.circle.id))
-        past_anchors = get_anchor_history(str(self.circle.id), include_active=False)
+        all_anchors = get_anchor_history(
+            str(self.circle.id),
+            viewer_id=str(self.admin.id),
+        )
+        past_anchors = get_anchor_history(
+            str(self.circle.id),
+            include_active=False,
+            viewer_id=str(self.admin.id),
+        )
 
         self.assertIn(active, all_anchors)
         self.assertIn(past, all_anchors)
@@ -191,6 +200,7 @@ class TestMobileGraphQLAlignment(TestCase):
             created_by=self.author,
         )
         CircleMembership.objects.create(circle=self.circle, user=self.author, role="admin")
+        CircleMembership.objects.create(circle=self.circle, user=self.viewer, role="member")
         CircleRule.objects.create(
             circle=self.circle,
             rule_number=1,
@@ -307,6 +317,7 @@ class TestMobileGraphQLAlignment(TestCase):
             }
             """,
             {"id": str(self.circle.id)},
+            access_token=self.viewer_access_token,
         )
 
         circle = data["circle"]
@@ -316,9 +327,15 @@ class TestMobileGraphQLAlignment(TestCase):
         self.assertEqual(circle["image"], "https://example.com/cover.jpg")
         self.assertEqual(circle["bannerImage"], "https://example.com/banner.jpg")
         self.assertEqual(circle["profileImage"], "https://example.com/profile.jpg")
-        self.assertEqual(circle["members"], 1)
-        self.assertEqual(circle["avatars"], ["https://example.com/avatar.jpg"])
-        self.assertFalse(circle["isJoined"])
+        self.assertEqual(circle["members"], 2)
+        self.assertEqual(
+            circle["avatars"],
+            [
+                "https://example.com/avatar.jpg",
+                "https://example.com/viewer.jpg",
+            ],
+        )
+        self.assertTrue(circle["isJoined"])
         self.assertEqual(circle["rules"][0]["id"], 1)
         self.assertEqual(circle["activeAnchor"]["anchorType"], "text")
         self.assertEqual(circle["activeAnchor"]["type"], "text")
@@ -406,6 +423,7 @@ class TestMobileGraphQLAlignment(TestCase):
             }
             """,
             {"circleId": str(self.circle.id)},
+            access_token=self.viewer_access_token,
         )
 
         feed_post = next(
@@ -470,6 +488,7 @@ class TestMobileGraphQLAlignment(TestCase):
             }
             """,
             {"circleId": str(self.circle.id), "postId": str(self.post.id)},
+            access_token=self.viewer_access_token,
         )
 
         feed_posts = {post["id"]: post for post in data["circleFeed"]["posts"]}
@@ -597,38 +616,51 @@ class TestMobileGraphQLAlignment(TestCase):
         self.assertEqual(payload["post"]["video"]["duration"], 31)
         self.assertIsNone(payload["post"]["image"])
 
+    @override_settings(MEDIA_URL_ALLOWLIST=["cdn.example.com"])
     def test_create_circle_post_accepts_media_urls_fallback(self):
         fallback_url = "https://cdn.example.com/circle-posts/fallback.jpg"
-        data = _graphql(
-            """
-            mutation CreateCirclePost($circleId: String!, $mediaUrls: [String!], $width: Int, $height: Int) {
-              createCirclePost(
-                circleId: $circleId
-                text: "Fallback URL post"
-                mediaUrls: $mediaUrls
-                width: $width
-                height: $height
-              ) {
-                success
-                error { code message }
-                post {
-                  id
-                  media { id url type width height }
-                  mediaUrl
-                  mediaType
-                  image { items { id url width height } }
-                }
-              }
-            }
-            """,
+        response = type(
+            "Response",
+            (),
             {
-                "circleId": str(self.circle.id),
-                "mediaUrls": [fallback_url],
-                "width": 800,
-                "height": 600,
+                "headers": {"Content-Type": "image/jpeg"},
+                "status_code": 200,
+                "is_redirect": False,
+                "is_permanent_redirect": False,
+                "close": lambda self: None,
             },
-            access_token=self.author_access_token,
-        )
+        )()
+        with patch("core.media.services._head_external_media_url", return_value=response):
+            data = _graphql(
+                """
+                mutation CreateCirclePost($circleId: String!, $mediaUrls: [String!], $width: Int, $height: Int) {
+                  createCirclePost(
+                    circleId: $circleId
+                    text: "Fallback URL post"
+                    mediaUrls: $mediaUrls
+                    width: $width
+                    height: $height
+                  ) {
+                    success
+                    error { code message }
+                    post {
+                      id
+                      media { id url type width height }
+                      mediaUrl
+                      mediaType
+                      image { items { id url width height } }
+                    }
+                  }
+                }
+                """,
+                {
+                    "circleId": str(self.circle.id),
+                    "mediaUrls": [fallback_url],
+                    "width": 800,
+                    "height": 600,
+                },
+                access_token=self.author_access_token,
+            )
 
         payload = data["createCirclePost"]
         self.assertTrue(payload["success"])
@@ -728,6 +760,7 @@ class TestMobileGraphQLAlignment(TestCase):
             }
             """,
             {"circleId": str(self.circle.id)},
+            access_token=self.viewer_access_token,
         )
 
         feed_data = data["circleFeedData"]
@@ -736,8 +769,14 @@ class TestMobileGraphQLAlignment(TestCase):
         self.assertEqual(feed_data["coverImage"], "https://example.com/cover.jpg")
         self.assertEqual(feed_data["suggestionCardImage"], "https://example.com/cover.jpg")
         self.assertEqual(feed_data["memberCount"], 1247)
-        self.assertFalse(feed_data["isJoined"])
-        self.assertEqual(feed_data["memberAvatars"], ["https://example.com/avatar.jpg"])
+        self.assertTrue(feed_data["isJoined"])
+        self.assertEqual(
+            feed_data["memberAvatars"],
+            [
+                "https://example.com/avatar.jpg",
+                "https://example.com/viewer.jpg",
+            ],
+        )
         self.assertEqual(feed_data["activeAnchor"]["type"], "text")
         active_date = self.anchor.published_at.date().isoformat()
         past_date = self.past_anchor.published_at.date().isoformat()
@@ -773,6 +812,7 @@ class TestMobileGraphQLAlignment(TestCase):
             }
             """,
             {"circleId": str(self.circle.id)},
+            access_token=self.viewer_access_token,
         )
 
         feed_data = data["circleFeedData"]
@@ -792,6 +832,7 @@ class TestMobileGraphQLAlignment(TestCase):
             }
             """,
             {"circleId": str(self.circle.id)},
+            access_token=self.viewer_access_token,
         )
 
         self.assertEqual(

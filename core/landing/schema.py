@@ -16,6 +16,7 @@ import strawberry
 from strawberry.types import Info
 
 from core.shared.exceptions import AdminError
+from core.shared.request_utils import get_client_ip
 from core.shared.types import ErrorType
 
 # ──────────────────────────────────────────────────────────────
@@ -108,11 +109,7 @@ class LegalDocumentPayload:
 
 
 def _get_ip(info: Info) -> str:
-    request = info.context.request
-    xff = request.META.get("HTTP_X_FORWARDED_FOR", "")
-    if xff:
-        return xff.split(",")[0].strip()
-    return request.META.get("REMOTE_ADDR", "unknown")
+    return get_client_ip(info.context.request)
 
 
 # ──────────────────────────────────────────────────────────────

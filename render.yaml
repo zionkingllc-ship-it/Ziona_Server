@@ -24,6 +24,12 @@ services:
         value: "3.12.0"
       - key: ALLOWED_HOSTS
         value: ziona-api-staging.onrender.com
+      - key: ENABLE_DJANGO_ADMIN
+        value: "true"
+      - key: ENABLE_PUBLIC_API_DOCS
+        value: "true"
+      - key: ENABLE_GRAPHQL_STATIC_DOCS
+        value: "true"
       - key: DATABASE_URL
         sync: false
       - key: REDIS_URL
@@ -73,7 +79,7 @@ services:
     branch: staging
     autoDeployTrigger: checksPass
     buildCommand: *buildCommand
-    startCommand: python manage.py check_media_runtime && celery -A config worker --loglevel=info --concurrency=1
+    startCommand: python manage.py check_media_runtime && celery -A config worker --loglevel=info --concurrency=1 -Q email,default,media,cron
     envVars: *stagingEnv
 
   - type: web
@@ -93,6 +99,12 @@ services:
         value: "3.12.0"
       - key: ALLOWED_HOSTS
         value: api.ziona.app,ziona-server.onrender.com
+      - key: ENABLE_DJANGO_ADMIN
+        value: "false"
+      - key: ENABLE_PUBLIC_API_DOCS
+        value: "false"
+      - key: ENABLE_GRAPHQL_STATIC_DOCS
+        value: "false"
       - key: CORS_ALLOWED_ORIGINS
         value: https://ziona.app,https://www.ziona.app,https://admin.ziona.app
       - key: GCS_CORS_ALLOWED_ORIGINS
@@ -148,7 +160,7 @@ services:
     branch: main
     autoDeployTrigger: checksPass
     buildCommand: *buildCommand
-    startCommand: python manage.py check_media_runtime && celery -A config worker --loglevel=info --concurrency=1
+    startCommand: python manage.py check_media_runtime && celery -A config worker --loglevel=info --concurrency=1 -Q email,default,media,cron
     envVars: *prodEnv
 
   - type: cron
@@ -158,7 +170,7 @@ services:
     plan: starter
     branch: main
     autoDeployTrigger: checksPass
-    schedule: "* * * * *"
+    schedule: "*/5 * * * *"
     buildCommand: *buildCommand
     startCommand: python manage.py enqueue_scheduled_task check-scheduled-anchors
     envVars: *prodEnv
@@ -170,7 +182,7 @@ services:
     plan: starter
     branch: main
     autoDeployTrigger: checksPass
-    schedule: "*/5 * * * *"
+    schedule: "*/15 * * * *"
     buildCommand: *buildCommand
     startCommand: python manage.py enqueue_scheduled_task refresh-dashboard-cache
     envVars: *prodEnv

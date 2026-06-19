@@ -74,6 +74,56 @@ def test_create_response_success(circle_with_anchor, test_users):
     assert response.parent_response is None
 
 
+def test_create_response_accepts_trusted_external_image_url(
+    circle_with_anchor, test_users, settings, monkeypatch
+):
+    _, anchor = circle_with_anchor
+    _, member, _ = test_users
+    settings.MEDIA_URL_ALLOWLIST = ["cdn.example.com"]
+    image_url = "https://cdn.example.com/responses/image.jpg"
+    response = type(
+        "Response",
+        (),
+        {
+            "headers": {"Content-Type": "image/jpeg"},
+            "status_code": 200,
+            "is_redirect": False,
+            "is_permanent_redirect": False,
+            "close": lambda self: None,
+        },
+    )()
+    monkeypatch.setattr("core.media.services._head_external_media_url", lambda url: response)
+
+    created = create_response(
+        user_id=member.id,
+        anchor_id=anchor.id,
+        response_type="reflection",
+        content="Image response",
+        media_url=image_url,
+        media_type="image",
+    )
+
+    assert created.media_url == image_url
+    assert created.media_type == "image"
+
+
+def test_create_response_rejects_external_video_url(circle_with_anchor, test_users):
+    _, anchor = circle_with_anchor
+    _, member, _ = test_users
+
+    with pytest.raises(ZionaError) as excinfo:
+        create_response(
+            user_id=member.id,
+            anchor_id=anchor.id,
+            response_type="reflection",
+            content="Video response",
+            media_url="https://cdn.example.com/responses/video.mp4",
+            media_type="video",
+        )
+
+    assert excinfo.value.code == "EXTERNAL_VIDEO_NOT_ALLOWED"
+
+
 def test_create_response_not_member_raises(circle_with_anchor, test_users):
     circle, anchor = circle_with_anchor
     u1, u2, u3 = test_users
@@ -145,6 +195,23 @@ def test_toggle_reaction(circle_with_anchor, test_users):
     assert response.reaction_count == 0
 
 
+def test_non_member_cannot_toggle_reaction(circle_with_anchor, test_users):
+    _circle, anchor = circle_with_anchor
+    author, _member, outsider = test_users
+
+    response = create_response(
+        user_id=author.id,
+        anchor_id=anchor.id,
+        response_type="reflection",
+        content="Parent",
+    )
+
+    with pytest.raises(ZionaError) as excinfo:
+        toggle_reaction(outsider.id, response.id, "amen")
+
+    assert excinfo.value.code == "NOT_CIRCLE_MEMBER"
+
+
 def test_trending_sort_algorithm(circle_with_anchor, test_users):
     circle, anchor = circle_with_anchor
     u1, u2, u3 = test_users
@@ -180,6 +247,20 @@ def test_trending_sort_algorithm(circle_with_anchor, test_users):
     assert responses[2].id == r1.id
 
 
+def test_non_member_cannot_view_anchor_responses(circle_with_anchor, test_users):
+    _circle, anchor = circle_with_anchor
+    author, _member, outsider = test_users
+
+    create_response(
+        user_id=author.id,
+        anchor_id=anchor.id,
+        response_type="reflection",
+        content="Members only response",
+    )
+
+    assert get_anchor_responses(anchor.id, viewer_id=outsider.id) == []
+
+
 def test_moderation_auto_hide(circle_with_anchor, test_users):
     circle, anchor = circle_with_anchor
     u1, u2, u3 = test_users
@@ -201,6 +282,7 @@ def test_moderation_auto_hide(circle_with_anchor, test_users):
     # 3 reports -> should auto hide
     # Make sure we add a 4th user for 3 distinct reports
     u4 = User.objects.create_user(email="user4@example.com", password="password123")
+    CircleMembership.objects.create(circle=circle, user=u4, role="member")
     report_circle_content(u4.id, "response", response.id, "Spam", circle.id)
 
     response.refresh_from_db()
@@ -227,6 +309,16 @@ def test_reported_response_hidden_for_reporter_only(circle_with_anchor, test_use
 
     assert response.id not in reporter_visible_ids
     assert response.id in author_visible_ids
+
+
+def test_non_member_cannot_report_circle_content(circle_with_anchor, test_users):
+    circle, anchor = circle_with_anchor
+    _author, _member, outsider = test_users
+
+    with pytest.raises(ZionaError) as excinfo:
+        report_circle_content(outsider.id, "anchor", anchor.id, "Spam", circle.id)
+
+    assert excinfo.value.code == "NOT_CIRCLE_MEMBER"
 
 
 def test_reported_anchor_hidden_for_reporter_only(circle_with_anchor, test_users):

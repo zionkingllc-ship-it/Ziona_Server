@@ -16,6 +16,7 @@ env:
   JWT_SECRET_KEY: ci-only-jwt-secret-key-long-enough-for-tests-123456789 # pragma: allowlist secret
   ENCRYPTION_KEY: KmL2Fsoq9wd1MR_wy_QKdKI-ghgEsnU-VBSyCrEV-Bs=
   SECRET_SCAN_EXCLUDES: '(^|/)(\.git|\.secrets\.baseline|venv|\.venv|__pycache__|\.pytest_cache|\.mypy_cache|\.ruff_cache|node_modules|\.next|out|build|coverage)(/|$)'
+  BANDIT_EXCLUDES: tests,migrations,docs,venv,.venv
 
 jobs:
   lint:
@@ -173,6 +174,51 @@ jobs:
       - name: Audit Python dependencies
         run: pip-audit -r requirements.txt --progress-spinner off
 
+  bandit:
+    name: Bandit Static Security
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install Bandit
+        run: pip install bandit==1.8.6
+
+      - name: Run Bandit high-confidence scan
+        run: |
+          bandit -r core config scripts \
+            -x "$BANDIT_EXCLUDES" \
+            -f json \
+            -o bandit-report.json || true
+          python - <<'PY'
+          import json
+          import sys
+
+          with open("bandit-report.json", encoding="utf-8") as fh:
+              report = json.load(fh)
+
+          findings = [
+              item for item in report.get("results", [])
+              if item.get("issue_confidence") == "HIGH"
+              and item.get("issue_severity") in {"MEDIUM", "HIGH"}
+          ]
+
+          if findings:
+              print("::error::Bandit reported medium/high severity high-confidence findings:")
+              for item in findings[:25]:
+                  print(
+                      f"- {item.get('filename')}:{item.get('line_number')} "
+                      f"{item.get('test_id')} {item.get('issue_text')}"
+                  )
+              if len(findings) > 25:
+                  print(f"...and {len(findings) - 25} more finding(s)")
+              sys.exit(1)
+          PY
+
   production-sanity:
     name: Production Sanity
     runs-on: ubuntu-latest
@@ -183,8 +229,14 @@ jobs:
       CELERY_BROKER_URL: redis://localhost:6379/0
       CELERY_RESULT_BACKEND: redis://localhost:6379/0
       ALLOWED_HOSTS: api.ziona.app,ziona-server.onrender.com
+      ENABLE_DJANGO_ADMIN: "false"
+      ENABLE_PUBLIC_API_DOCS: "false"
+      ENABLE_GRAPHQL_STATIC_DOCS: "false"
       CORS_ALLOWED_ORIGINS: https://ziona.app,https://www.ziona.app,https://admin.ziona.app
       GCS_CORS_ALLOWED_ORIGINS: https://ziona.app,https://www.ziona.app,https://admin.ziona.app
+      GCP_STORAGE_BUCKET: ziona-media-prod
+      GCP_CREDENTIALS_FILE: /etc/secrets/gcp-credentials.json
+      FIREBASE_CREDENTIALS_FILE: /etc/secrets/firebase-credentials.json
     steps:
       - uses: actions/checkout@v4
 

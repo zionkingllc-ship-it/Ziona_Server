@@ -21,6 +21,7 @@ from core.authentication.response_helpers import (
 )
 from core.authentication.validators import AuthenticationError
 from core.authentication.views import BaseAuthView
+from core.shared.request_utils import get_client_ip
 
 logger = logging.getLogger("core.authentication")
 
@@ -34,11 +35,8 @@ def _parse_json_body(request: HttpRequest) -> dict:
 
 
 def _get_client_ip(request: HttpRequest) -> str:
-    """Extract client IP from request."""
-    x_forwarded_for = request.META.get("HTTP_X_FORWARDED_FOR")
-    if x_forwarded_for:
-        return x_forwarded_for.split(",")[0].strip()
-    return request.META.get("REMOTE_ADDR", "")
+    """Extract client IP using the shared trusted-proxy helper."""
+    return get_client_ip(request, default="")
 
 
 def _auth_error_response(e: AuthenticationError) -> JsonResponse:

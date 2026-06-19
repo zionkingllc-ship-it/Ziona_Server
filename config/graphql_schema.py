@@ -1,4 +1,6 @@
 import strawberry
+from django.conf import settings
+from strawberry.extensions import DisableIntrospection, MaxAliasesLimiter, QueryDepthLimiter
 from strawberry.schema import Schema
 
 from core.admin_dashboard.schema import AdminDashboardMutations, AdminDashboardQueries
@@ -15,6 +17,7 @@ from core.notifications.schema import NotificationMutations, NotificationQueries
 from core.posts.schema import PostMutations, PostQueries
 from core.profiles.schema import ProfileMutations, ProfileQueries
 from core.scripture.schema import ScriptureQueries
+from core.shared.graphql_extensions import MaxQueryComplexityLimiter
 from core.users.schema import UserMutations, UserQueries
 
 
@@ -62,7 +65,21 @@ class Mutation(
     pass
 
 
-schema: Schema = strawberry.Schema(
-    query=Query,
-    mutation=Mutation,
-)
+def build_schema() -> Schema:
+    """Construct the GraphQL schema with environment-specific validation guards."""
+    extensions = [
+        lambda: QueryDepthLimiter(max_depth=settings.GRAPHQL_MAX_DEPTH),
+        lambda: MaxAliasesLimiter(max_alias_count=settings.GRAPHQL_MAX_ALIASES),
+        lambda: MaxQueryComplexityLimiter(max_complexity=settings.GRAPHQL_MAX_COMPLEXITY),
+    ]
+    if not settings.GRAPHQL_INTROSPECTION_ENABLED:
+        extensions.append(DisableIntrospection)
+
+    return strawberry.Schema(
+        query=Query,
+        mutation=Mutation,
+        extensions=extensions,
+    )
+
+
+schema: Schema = build_schema()

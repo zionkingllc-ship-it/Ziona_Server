@@ -5,10 +5,13 @@ Handles signed URL generation for direct GCP Cloud Storage uploads,
 file validation, and post-upload processing.
 """
 
+import ipaddress
 import logging
 import uuid
 from typing import Any
+from urllib.parse import urljoin, urlparse
 
+import requests
 from django.conf import settings
 
 from core.media.models import MediaFile, MediaStatus, MediaType
@@ -49,9 +52,11 @@ ALLOWED_TYPES = {
 
 MAGIC_BYTES = {
     "image/jpeg": [b"\xff\xd8\xff"],
+    "image/jpg": [b"\xff\xd8\xff"],
     "image/png": [b"\x89PNG\r\n\x1a\n"],
     "image/webp": [b"RIFF"],
     "video/mp4": [b"ftyp"],
+    "video/quicktime": [b"ftyp"],
 }
 
 
@@ -327,21 +332,22 @@ class MediaService:
                 code="INVALID_STATUS",
             ) from None
 
-        media_file.status = MediaStatus.PROCESSING
-        media_file.save(update_fields=["status", "updated_at"])
-
         try:
-            from core.media.tasks import process_media_upload
+            verified_content_type, verified_size = _verify_uploaded_object(media_file)
+        except MediaError as exc:
+            _mark_media_failed(media_file, reason=exc.code)
+            _delete_uploaded_object(media_file.storage_path)
+            raise
 
-            process_media_upload.delay(str(media_file.id))
-        except Exception as e:
-            media_file.status = MediaStatus.FAILED
-            media_file.save(update_fields=["status", "updated_at"])
-            logger.warning("Failed to queue media processing task: %s", e)
-            raise MediaError(
-                "Upload completed, but media processing could not be queued. Please retry.",
-                code="MEDIA_PROCESSING_QUEUE_FAILED",
-            ) from e
+        media_file.file_type = verified_content_type
+        media_file.file_size = verified_size
+        media_file.media_type = ALLOWED_TYPES[verified_content_type]["media_type"]
+        media_file.status = MediaStatus.PROCESSING
+        media_file.save(
+            update_fields=["file_type", "file_size", "media_type", "status", "updated_at"]
+        )
+
+        _queue_media_processing(media_file)
 
         return media_file
 
@@ -408,13 +414,7 @@ def _generate_gcp_signed_url(
     """
     from datetime import timedelta
 
-    from google.cloud import storage
-
-    credentials_file = settings.GCP_CREDENTIALS_FILE
-    if credentials_file:
-        client = storage.Client.from_service_account_json(credentials_file)
-    else:
-        client = storage.Client()
+    client = _get_gcs_client()
 
     bucket_obj = client.bucket(bucket)
     blob = bucket_obj.blob(blob_path)
@@ -432,10 +432,13 @@ def _queue_media_processing(media_file: MediaFile) -> None:
     try:
         from core.media.tasks import process_media_upload
 
-        process_media_upload.delay(str(media_file.id))
+        process_media_upload.apply_async(
+            args=[str(media_file.id)],
+            queue=settings.CELERY_QUEUE_MEDIA,
+            priority=settings.CELERY_MEDIA_TASK_PRIORITY,
+        )
     except Exception as exc:
-        media_file.status = MediaStatus.FAILED
-        media_file.save(update_fields=["status", "updated_at"])
+        _mark_media_failed(media_file, reason="MEDIA_PROCESSING_QUEUE_FAILED")
         logger.warning("Failed to queue media processing task: %s", exc)
         raise MediaError(
             "Media uploaded, but processing could not be queued. Please retry.",
@@ -504,6 +507,215 @@ def validate_magic_bytes(file_content: bytes, declared_type: str) -> bool:
                 return True
 
     return False
+
+
+def validate_trusted_external_image_url(url: str) -> str:
+    """Return a normalized external image URL if it passes host and redirect validation."""
+    normalized_url = normalize_url(url)
+    current_url = normalized_url
+
+    for _ in range(4):
+        parsed = urlparse(current_url)
+        host = (parsed.hostname or "").lower()
+        if parsed.scheme != "https":
+            raise MediaError(
+                "Only HTTPS media URLs are allowed.",
+                code="INVALID_MEDIA_URL",
+                details={"url": normalized_url},
+            )
+        if not host or host == "localhost" or _is_ip_literal(host):
+            raise MediaError(
+                "Media URLs must use a trusted public host.",
+                code="INVALID_MEDIA_URL",
+                details={"url": normalized_url},
+            )
+        if not _host_is_allowed(host):
+            raise MediaError(
+                "Media host is not allowlisted.",
+                code="INVALID_MEDIA_URL",
+                details={"url": normalized_url, "host": host},
+            )
+
+        response = _head_external_media_url(current_url)
+        if response.is_redirect or response.is_permanent_redirect:
+            location = response.headers.get("Location")
+            response.close()
+            if not location:
+                raise MediaError(
+                    "Media URL redirect is missing a target location.",
+                    code="INVALID_MEDIA_URL",
+                    details={"url": normalized_url},
+                )
+            current_url = normalize_url(urljoin(current_url, location))
+            continue
+
+        content_type = (response.headers.get("Content-Type") or "").split(";", 1)[0].strip().lower()
+        response.close()
+        if not content_type.startswith("image/"):
+            raise MediaError(
+                "Only externally hosted images are accepted.",
+                code="INVALID_MEDIA_URL",
+                details={"url": normalized_url, "contentType": content_type or None},
+            )
+        return current_url
+
+    raise MediaError(
+        "Media URL has too many redirects.",
+        code="INVALID_MEDIA_URL",
+        details={"url": normalized_url},
+    )
+
+
+def _verify_uploaded_object(media_file: MediaFile) -> tuple[str, int]:
+    """Validate a client-uploaded GCS object before the backend trusts it."""
+    expected_type = (media_file.file_type or "").split(";", 1)[0].strip().lower()
+    type_config = ALLOWED_TYPES.get(expected_type)
+    if not type_config:
+        raise MediaError(
+            "Uploaded file type is not allowed.",
+            code="INVALID_MEDIA_TYPE",
+            details=build_media_validation_details(),
+        )
+
+    bucket = _get_gcs_bucket()
+    blob = bucket.blob(media_file.storage_path)
+    try:
+        blob.reload()
+    except Exception as exc:  # noqa: BLE001
+        raise MediaError(
+            "Uploaded media object was not found.",
+            code="MEDIA_OBJECT_NOT_FOUND",
+        ) from exc
+
+    actual_size = int(blob.size or 0)
+    if actual_size <= 0:
+        raise MediaError(
+            "Uploaded file is empty.",
+            code="INVALID_FILE_SIZE",
+            details=build_media_validation_details(
+                max_size=type_config["max_size"],
+                received_size=actual_size,
+            ),
+        )
+    if actual_size > type_config["max_size"]:
+        raise MediaError(
+            "Uploaded file exceeds the allowed size.",
+            code="MEDIA_TOO_LARGE",
+            details=build_media_validation_details(
+                max_size=type_config["max_size"],
+                received_size=actual_size,
+            ),
+        )
+
+    actual_type = (blob.content_type or expected_type).split(";", 1)[0].strip().lower()
+    actual_config = ALLOWED_TYPES.get(actual_type)
+    if not actual_config:
+        raise MediaError(
+            "Uploaded file type is not allowed.",
+            code="INVALID_MEDIA_TYPE",
+            details=build_media_validation_details(),
+        )
+    if actual_config["media_type"] != type_config["media_type"]:
+        raise MediaError(
+            "Uploaded file type does not match the declared media type.",
+            code="INVALID_MEDIA_TYPE",
+            details=build_media_validation_details(),
+        )
+
+    file_head = blob.download_as_bytes(start=0, end=31)
+    if not validate_magic_bytes(file_head, actual_type):
+        raise MediaError(
+            "Uploaded file contents do not match its declared type.",
+            code="INVALID_MEDIA_SIGNATURE",
+            details=build_media_validation_details(),
+        )
+
+    return actual_type, actual_size
+
+
+def _delete_uploaded_object(storage_path: str) -> None:
+    if not storage_path:
+        return
+    try:
+        _get_gcs_bucket().blob(storage_path).delete()
+    except Exception:  # noqa: BLE001
+        logger.warning(
+            "failed_to_delete_invalid_media_object", extra={"storage_path": storage_path}
+        )
+
+
+def _mark_media_failed(media_file: MediaFile, reason: str | None = None) -> None:
+    media_file.status = MediaStatus.FAILED
+    media_file.processing_error_code = reason or "MEDIA_PROCESSING_FAILED"
+    media_file.processing_error_message = _media_failure_message(reason)
+    media_file.processing_failed_stage = "upload_confirm"
+    media_file.save(
+        update_fields=[
+            "status",
+            "processing_error_code",
+            "processing_error_message",
+            "processing_failed_stage",
+            "updated_at",
+        ]
+    )
+    logger.warning(
+        "media_marked_failed",
+        extra={"media_id": str(media_file.id), "reason": reason},
+    )
+
+
+def _media_failure_message(reason: str | None) -> str:
+    messages = {
+        "MEDIA_PROCESSING_QUEUE_FAILED": "Media uploaded, but processing could not be queued. Please retry.",
+        "MEDIA_OBJECT_NOT_FOUND": "Uploaded media object was not found. Please upload the file again.",
+        "MEDIA_TOO_LARGE": "Uploaded file exceeds the allowed size.",
+        "INVALID_FILE_SIZE": "Uploaded file is empty or invalid.",
+        "INVALID_MEDIA_TYPE": "Uploaded file type is not allowed.",
+        "INVALID_MEDIA_SIGNATURE": "Uploaded file contents do not match its declared type.",
+    }
+    return messages.get(reason or "", "Media validation failed before processing.")
+
+
+def _head_external_media_url(url: str) -> requests.Response:
+    try:
+        response = requests.head(url, allow_redirects=False, timeout=5)
+        if response.status_code == 405:
+            response.close()
+            response = requests.get(url, allow_redirects=False, timeout=5, stream=True)
+        return response
+    except requests.RequestException as exc:
+        raise MediaError(
+            "Could not validate the external media URL.",
+            code="INVALID_MEDIA_URL",
+            details={"url": url},
+        ) from exc
+
+
+def _host_is_allowed(host: str) -> bool:
+    allowlist = getattr(settings, "MEDIA_URL_ALLOWLIST", [])
+    normalized_allowlist = [entry.strip().lower() for entry in allowlist if entry and entry.strip()]
+    return any(host == allowed or host.endswith(f".{allowed}") for allowed in normalized_allowlist)
+
+
+def _is_ip_literal(host: str) -> bool:
+    try:
+        ipaddress.ip_address(host)
+        return True
+    except ValueError:
+        return False
+
+
+def _get_gcs_client():
+    from google.cloud import storage
+
+    credentials_file = settings.GCP_CREDENTIALS_FILE
+    if credentials_file:
+        return storage.Client.from_service_account_json(credentials_file)
+    return storage.Client()
+
+
+def _get_gcs_bucket():
+    return _get_gcs_client().bucket(settings.GCP_STORAGE_BUCKET)
 
 
 def build_media_validation_details(

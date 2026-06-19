@@ -73,12 +73,25 @@ class MediaQueries:
                 error=ErrorType(code="MEDIA_NOT_FOUND", message="Media file not found"),
             )
 
+        error = None
+        if media_file.status == "failed":
+            error = ErrorType(
+                code=media_file.processing_error_code or "MEDIA_PROCESSING_FAILED",
+                message=media_file.processing_error_message
+                or "Media processing failed. Please try another file.",
+                details={
+                    "stage": media_file.processing_failed_stage or None,
+                    "mediaId": str(media_file.id),
+                },
+            )
+
         return MediaStatusPayload(
             success=True,
             media_id=str(media_file.id),
             media_url=media_file.url,
             thumbnail_url=media_file.thumbnail_url,
             status=media_file.status,
+            error=error,
         )
 
 

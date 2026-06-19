@@ -17,47 +17,71 @@ from core.posts.views import (
     share_preview,
 )
 
-urlpatterns = [
-    path("admin/", admin.site.urls),
-    path("health/", include("health_check.urls")),
-    path(
-        "graphql/",
-        csrf_exempt(GraphQLView.as_view(schema=schema)),
-        name="graphql",
-    ),
-    path(
-        "graphql",
-        csrf_exempt(GraphQLView.as_view(schema=schema)),
-        name="graphql_no_slash",
-    ),
-    path("api/auth/", include("core.authentication.urls")),
-    path("docs/", swagger_ui, name="swagger-ui"),
-    path("api/schema/", openapi_schema, name="openapi-schema"),
-    path(
-        "graphql-docs/",
-        lambda r: serve(
-            r, "index.html", document_root=os.path.join(settings.BASE_DIR, "docs", "graphql-docs")
+
+def build_urlpatterns():
+    """Build routes from environment flags so prod can disable public surfaces cleanly."""
+    patterns = [
+        path("health/", include("health_check.urls")),
+        path(
+            "graphql/",
+            csrf_exempt(GraphQLView.as_view(schema=schema)),
+            name="graphql",
         ),
-        name="graphql-docs-index",
-    ),
-    path(
-        "graphql-docs/<path:path>",
-        serve,
-        {"document_root": os.path.join(settings.BASE_DIR, "docs", "graphql-docs")},
-    ),
-    path(
-        ".well-known/apple-app-site-association",
-        apple_app_site_association,
-        name="apple-app-site-association",
-    ),
-    path(
-        ".well-known/assetlinks.json",
-        android_asset_links,
-        name="android-asset-links",
-    ),
-    path("post/<str:post_id>/", share_preview, name="share-preview"),
-    path("api/webhooks/stripe/", stripe_webhook, name="stripe-webhook"),
-]
+        path(
+            "graphql",
+            csrf_exempt(GraphQLView.as_view(schema=schema)),
+            name="graphql_no_slash",
+        ),
+        path("api/auth/", include("core.authentication.urls")),
+        path(
+            ".well-known/apple-app-site-association",
+            apple_app_site_association,
+            name="apple-app-site-association",
+        ),
+        path(
+            ".well-known/assetlinks.json",
+            android_asset_links,
+            name="android-asset-links",
+        ),
+        path("post/<str:post_id>/", share_preview, name="share-preview"),
+        path("api/webhooks/stripe/", stripe_webhook, name="stripe-webhook"),
+    ]
+
+    if settings.ENABLE_DJANGO_ADMIN:
+        patterns.insert(0, path("admin/", admin.site.urls))
+
+    if settings.ENABLE_PUBLIC_API_DOCS:
+        patterns.extend(
+            [
+                path("docs/", swagger_ui, name="swagger-ui"),
+                path("api/schema/", openapi_schema, name="openapi-schema"),
+            ]
+        )
+
+    if settings.ENABLE_GRAPHQL_STATIC_DOCS:
+        patterns.extend(
+            [
+                path(
+                    "graphql-docs/",
+                    lambda r: serve(
+                        r,
+                        "index.html",
+                        document_root=os.path.join(settings.BASE_DIR, "docs", "graphql-docs"),
+                    ),
+                    name="graphql-docs-index",
+                ),
+                path(
+                    "graphql-docs/<path:path>",
+                    serve,
+                    {"document_root": os.path.join(settings.BASE_DIR, "docs", "graphql-docs")},
+                ),
+            ]
+        )
+
+    return patterns
+
+
+urlpatterns = build_urlpatterns()
 
 
 def custom_404_handler(request, exception=None):

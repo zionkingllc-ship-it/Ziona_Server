@@ -4,6 +4,8 @@ from pathlib import Path
 
 import environ
 from celery.schedules import crontab
+from django.core.exceptions import ImproperlyConfigured
+from kombu import Queue
 
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
@@ -21,6 +23,16 @@ SECRET_KEY = env("DJANGO_SECRET_KEY", default="insecure-dev-key-change-me")
 DEBUG = env("DEBUG")
 
 ALLOWED_HOSTS = env("ALLOWED_HOSTS")
+TRUSTED_PROXY_CIDRS = env.list(
+    "TRUSTED_PROXY_CIDRS",
+    default=[
+        "127.0.0.1/32",
+        "::1/128",
+        "10.0.0.0/8",
+        "172.16.0.0/12",
+        "192.168.0.0/16",
+    ],
+)
 
 
 DJANGO_APPS = [
@@ -203,6 +215,7 @@ JWT_REFRESH_TOKEN_LIFETIME = timedelta(days=30)
 JWT_REFRESH_ROTATION_GRACE_SECONDS = env.int("JWT_REFRESH_ROTATION_GRACE_SECONDS", default=30)
 JWT_ALGORITHM = "HS256"
 JWT_LEEWAY_SECONDS = env.int("JWT_LEEWAY_SECONDS", default=30)
+AUTH_STRICT_REDIS = env.bool("AUTH_STRICT_REDIS", default=not DEBUG)
 
 
 # Celery broker and result backend are intentionally separated from REDIS_URL.
@@ -220,6 +233,89 @@ CELERY_TIMEZONE = "UTC"
 CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True
 CELERY_BROKER_POOL_LIMIT = env.int("CELERY_BROKER_POOL_LIMIT", default=2)
 CELERY_WORKER_PREFETCH_MULTIPLIER = env.int("CELERY_WORKER_PREFETCH_MULTIPLIER", default=1)
+CELERY_QUEUE_EMAIL = env("CELERY_QUEUE_EMAIL", default="email")
+CELERY_QUEUE_DEFAULT = env("CELERY_QUEUE_DEFAULT", default="default")
+CELERY_QUEUE_MEDIA = env("CELERY_QUEUE_MEDIA", default="media")
+CELERY_QUEUE_CRON = env("CELERY_QUEUE_CRON", default="cron")
+CELERY_EMAIL_TASK_PRIORITY = env.int("CELERY_EMAIL_TASK_PRIORITY", default=9)
+CELERY_DEFAULT_TASK_PRIORITY = env.int("CELERY_DEFAULT_TASK_PRIORITY", default=5)
+CELERY_MEDIA_TASK_PRIORITY = env.int("CELERY_MEDIA_TASK_PRIORITY", default=3)
+CELERY_CRON_TASK_PRIORITY = env.int("CELERY_CRON_TASK_PRIORITY", default=1)
+CELERY_TASK_DEFAULT_QUEUE = CELERY_QUEUE_DEFAULT
+CELERY_TASK_DEFAULT_PRIORITY = CELERY_DEFAULT_TASK_PRIORITY
+CELERY_TASK_QUEUE_MAX_PRIORITY = 9
+CELERY_TASK_QUEUES = (
+    Queue(CELERY_QUEUE_EMAIL),
+    Queue(CELERY_QUEUE_DEFAULT),
+    Queue(CELERY_QUEUE_MEDIA),
+    Queue(CELERY_QUEUE_CRON),
+)
+CELERY_TASK_ROUTES = {
+    "core.shared.tasks.email_tasks.send_email_async": {
+        "queue": CELERY_QUEUE_EMAIL,
+        "priority": CELERY_EMAIL_TASK_PRIORITY,
+    },
+    "core.admin_dashboard.tasks.send_contact_reply_email": {
+        "queue": CELERY_QUEUE_EMAIL,
+        "priority": CELERY_EMAIL_TASK_PRIORITY,
+    },
+    "core.media.tasks.process_media_upload": {
+        "queue": CELERY_QUEUE_MEDIA,
+        "priority": CELERY_MEDIA_TASK_PRIORITY,
+    },
+    "core.media.tasks.optimize_image_media_stage": {
+        "queue": CELERY_QUEUE_MEDIA,
+        "priority": CELERY_MEDIA_TASK_PRIORITY,
+    },
+    "core.media.tasks.optimize_video_media_stage": {
+        "queue": CELERY_QUEUE_MEDIA,
+        "priority": CELERY_MEDIA_TASK_PRIORITY,
+    },
+    "core.media.tasks.generate_video_thumbnail_stage": {
+        "queue": CELERY_QUEUE_MEDIA,
+        "priority": CELERY_MEDIA_TASK_PRIORITY,
+    },
+    "core.media.tasks.finalize_media_ready": {
+        "queue": CELERY_QUEUE_MEDIA,
+        "priority": CELERY_MEDIA_TASK_PRIORITY,
+    },
+    "core.notifications.tasks.send_daily_anchor_notifications": {
+        "queue": CELERY_QUEUE_CRON,
+        "priority": CELERY_CRON_TASK_PRIORITY,
+    },
+    "core.notifications.tasks.cleanup_old_notifications": {
+        "queue": CELERY_QUEUE_CRON,
+        "priority": CELERY_CRON_TASK_PRIORITY,
+    },
+    "core.notifications.tasks.send_daily_notification_digest": {
+        "queue": CELERY_QUEUE_CRON,
+        "priority": CELERY_CRON_TASK_PRIORITY,
+    },
+    "core.admin_dashboard.tasks.calculate_daily_analytics": {
+        "queue": CELERY_QUEUE_CRON,
+        "priority": CELERY_CRON_TASK_PRIORITY,
+    },
+    "core.admin_dashboard.tasks.refresh_dashboard_cache": {
+        "queue": CELERY_QUEUE_CRON,
+        "priority": CELERY_CRON_TASK_PRIORITY,
+    },
+    "core.admin_dashboard.tasks.check_scheduled_anchors": {
+        "queue": CELERY_QUEUE_CRON,
+        "priority": CELERY_CRON_TASK_PRIORITY,
+    },
+    "core.landing.tasks.refresh_company_stats": {
+        "queue": CELERY_QUEUE_CRON,
+        "priority": CELERY_CRON_TASK_PRIORITY,
+    },
+    "core.media.tasks.cleanup_stale_media_uploads": {
+        "queue": CELERY_QUEUE_CRON,
+        "priority": CELERY_CRON_TASK_PRIORITY,
+    },
+    "circles.purge_expired_anchors": {
+        "queue": CELERY_QUEUE_CRON,
+        "priority": CELERY_CRON_TASK_PRIORITY,
+    },
+}
 CELERY_WORKER_CANCEL_LONG_RUNNING_TASKS_ON_CONNECTION_LOSS = env.bool(
     "CELERY_WORKER_CANCEL_LONG_RUNNING_TASKS_ON_CONNECTION_LOSS",
     default=True,
@@ -231,6 +327,9 @@ CELERY_BROKER_TRANSPORT_OPTIONS = {
     "socket_keepalive": True,
     "retry_on_timeout": True,
     "health_check_interval": env.int("CELERY_REDIS_HEALTH_CHECK_INTERVAL", default=30),
+    "queue_order_strategy": "priority",
+    "priority_steps": list(range(10)),
+    "sep": ":",
 }
 CELERY_RESULT_BACKEND_TRANSPORT_OPTIONS = {
     "socket_connect_timeout": env.int("CELERY_REDIS_SOCKET_CONNECT_TIMEOUT", default=10),
@@ -262,11 +361,11 @@ CELERY_BEAT_SCHEDULE = {
     },
     "refresh-dashboard-cache": {
         "task": "core.admin_dashboard.tasks.refresh_dashboard_cache",
-        "schedule": 300,  # every 5 minutes
+        "schedule": 900,  # every 15 minutes
     },
     "check-scheduled-anchors": {
         "task": "core.admin_dashboard.tasks.check_scheduled_anchors",
-        "schedule": 60,  # every minute
+        "schedule": 300,  # every 5 minutes
     },
     "refresh-company-stats": {
         "task": "core.landing.tasks.refresh_company_stats",
@@ -285,12 +384,15 @@ CELERY_BEAT_SCHEDULE = {
 GCP_STORAGE_BUCKET = env("GCP_STORAGE_BUCKET", default="ziona-media-dev")
 GCP_CREDENTIALS_FILE = env("GCP_CREDENTIALS_FILE", default="")
 GCP_SIGNED_URL_EXPIRY = 900
+MEDIA_URL_ALLOWLIST = env.list("MEDIA_URL_ALLOWLIST", default=["storage.googleapis.com"])
 MEDIA_IMAGE_MAX_DIMENSION = env.int("MEDIA_IMAGE_MAX_DIMENSION", default=1600)
 MEDIA_IMAGE_JPEG_QUALITY = env.int("MEDIA_IMAGE_JPEG_QUALITY", default=82)
 MEDIA_VIDEO_MAX_DIMENSION = env.int("MEDIA_VIDEO_MAX_DIMENSION", default=1280)
 MEDIA_VIDEO_CRF = env.int("MEDIA_VIDEO_CRF", default=28)
 MEDIA_VIDEO_PRESET = env("MEDIA_VIDEO_PRESET", default="veryfast")
 MEDIA_STALE_UPLOAD_HOURS = env.int("MEDIA_STALE_UPLOAD_HOURS", default=24)
+MEDIA_VIDEO_OPTIMIZE_TIMEOUT_SECONDS = env.int("MEDIA_VIDEO_OPTIMIZE_TIMEOUT_SECONDS", default=240)
+MEDIA_THUMBNAIL_TIMEOUT_SECONDS = env.int("MEDIA_THUMBNAIL_TIMEOUT_SECONDS", default=90)
 
 
 EMAIL_BACKEND = "core.shared.email_backends.ensend.EnsendEmailBackend"
@@ -415,6 +517,11 @@ RATE_LIMIT_QUERIES = env("RATE_LIMIT_QUERIES", default="100/60s")
 
 GRAPHQL_MAX_DEPTH = 5
 GRAPHQL_MAX_COMPLEXITY = 1000
+GRAPHQL_MAX_ALIASES = env.int("GRAPHQL_MAX_ALIASES", default=15)
+GRAPHQL_INTROSPECTION_ENABLED = DEBUG
+ENABLE_DJANGO_ADMIN = env.bool("ENABLE_DJANGO_ADMIN", default=DEBUG)
+ENABLE_PUBLIC_API_DOCS = env.bool("ENABLE_PUBLIC_API_DOCS", default=DEBUG)
+ENABLE_GRAPHQL_STATIC_DOCS = env.bool("ENABLE_GRAPHQL_STATIC_DOCS", default=DEBUG)
 
 
 SENTRY_DSN = env("SENTRY_DSN", default="")
@@ -460,3 +567,36 @@ LOGGING = {
 API_BIBLE_KEY = env("API_BIBLE_KEY", default=None)
 ENABLE_PREMIUM_BIBLE_VERSIONS = env.bool("ENABLE_PREMIUM_BIBLE_VERSIONS", default=False)
 DISABLE_SCRIPTURE_IMPORT = env.bool("DISABLE_SCRIPTURE_IMPORT", default=False)
+
+
+def validate_non_debug_runtime_settings(
+    *, environment_name: str, config: dict[str, str] | None = None
+) -> None:
+    """Fail fast when a non-debug environment is missing critical secrets/config."""
+    values = config or {
+        "SECRET_KEY": SECRET_KEY,
+        "JWT_SECRET_KEY": JWT_SECRET_KEY,
+        "ENCRYPTION_KEY": ENCRYPTION_KEY,
+        "GCP_STORAGE_BUCKET": GCP_STORAGE_BUCKET,
+        "GCP_CREDENTIALS_FILE": GCP_CREDENTIALS_FILE,
+        "FIREBASE_CREDENTIALS_FILE": FIREBASE_CREDENTIALS_FILE,
+    }
+    errors: list[str] = []
+
+    if not values["SECRET_KEY"] or values["SECRET_KEY"] == "insecure-dev-key-change-me":
+        errors.append("DJANGO_SECRET_KEY must be set to a non-default value")
+    if not values["JWT_SECRET_KEY"] or values["JWT_SECRET_KEY"] == values["SECRET_KEY"]:
+        errors.append("JWT_SECRET_KEY must be set independently from DJANGO_SECRET_KEY")
+    if not values["ENCRYPTION_KEY"]:
+        errors.append("ENCRYPTION_KEY must be configured")
+    if not values["GCP_STORAGE_BUCKET"]:
+        errors.append("GCP_STORAGE_BUCKET must be configured")
+    if not values["GCP_CREDENTIALS_FILE"]:
+        errors.append("GCP_CREDENTIALS_FILE must be configured")
+    if not values["FIREBASE_CREDENTIALS_FILE"]:
+        errors.append("FIREBASE_CREDENTIALS_FILE must be configured")
+    if environment_name == "production" and values["GCP_STORAGE_BUCKET"] == "ziona-media-dev":
+        errors.append("Production must not use the ziona-media-dev bucket")
+
+    if errors:
+        raise ImproperlyConfigured(f"Unsafe {environment_name} configuration: " + "; ".join(errors))

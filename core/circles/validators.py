@@ -1,65 +1,36 @@
-# ruff: noqa: S603, S607
 """
 Validators for Circle Responses.
-- Media validations (image sizes, video durations using ffprobe).
+- Media trust and type validation.
 - Content validations.
 """
 
-import subprocess
-
-from django.conf import settings
-
+from core.media.services import MediaError, validate_trusted_external_image_url
 from core.shared.exceptions import ZionaError
 
 
-def validate_response_media(media_type: str, media_url: str):
+def validate_response_media(media_type: str, media_url: str) -> str:
     """
     Validates media attached to a response.
-    For videos, enforces 15-30 second duration limit.
+    External video URLs are intentionally rejected to avoid SSRF and remote probing.
+    External images must be trusted HTTPS hosts from MEDIA_URL_ALLOWLIST.
     """
     if not media_type or not media_url:
-        return
+        return media_url
 
     if media_type not in ["image", "video"]:
         raise ZionaError(message="Media type must be image or video", code="INVALID_MEDIA_TYPE")
 
     if media_type == "video":
-        # Skip ffprobe check during local tests if settings flag is set
-        if getattr(settings, "SKIP_FFPROBE_TESTS", False):
-            return
+        raise ZionaError(
+            message="Externally hosted videos are not accepted. Use signed media upload.",
+            code="EXTERNAL_VIDEO_NOT_ALLOWED",
+        )
 
-        try:
-            # We assume the media_url is accessible. In production this would be a signed URL
-            # Or we validate *before* upload. For this milestone, we run ffprobe on the URL.
-            command = [
-                "ffprobe",
-                "-v",
-                "error",
-                "-show_entries",
-                "format=duration",
-                "-of",
-                "default=noprint_wrappers=1:nokey=1",
-                media_url,
-            ]
-            result = subprocess.run(  # noqa: S603, S607
-                command, capture_output=True, text=True, timeout=10
-            )
-
-            if result.returncode != 0:
-                raise ZionaError(message="Could not validate video file", code="INVALID_VIDEO_FILE")
-
-            duration = float(result.stdout.strip())
-
-            if duration < 15.0 or duration > 30.0:
-                raise ZionaError(
-                    message=f"Video must be between 15 and 30 seconds. Current: {duration:.1f}s",
-                    code="INVALID_VIDEO_DURATION",
-                )
-
-        except (subprocess.TimeoutExpired, ValueError):
-            raise ZionaError(
-                message="Timeout or error validating video duration", code="VIDEO_VALIDATION_FAILED"
-            ) from None
-        except FileNotFoundError:
-            # ffprobe not installed, pass for now (or fail loud in prod)
-            pass
+    try:
+        return validate_trusted_external_image_url(media_url)
+    except MediaError as exc:
+        raise ZionaError(
+            message=exc.message,
+            code=exc.code,
+            extensions=exc.details,
+        ) from exc

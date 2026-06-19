@@ -116,12 +116,11 @@ class PostService:
                 code="MEDIA_REQUIRED",
             )
 
-        import re
-
         from django.db.models import Q
 
         from core.categories.models import Category
         from core.media.models import MediaFile, MediaStatus
+        from core.media.services import validate_trusted_external_image_url
         from core.users.models import User
 
         category_obj = None
@@ -158,33 +157,19 @@ class PostService:
                         code=ErrorCode.VALIDATION_ERROR,
                     )
         elif media_urls:
-            url_pattern = re.compile(
-                r"^(?:http|ftp)s?://"
-                r"(?:(?:[A-Z0-9](?:[A-Z0-9-]{0,61}[A-Z0-9])?\.)+(?:[A-Z]{2,6}\.?|[A-Z0-9-]{2,}\.?)|"
-                r"localhost|"
-                r"\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})"
-                r"(?::\d+)?"
-                r"(?:/?|[/?]\S+)$",
-                re.IGNORECASE,
-            )
-
             for url in media_urls:
-                if not re.match(url_pattern, url):
-                    raise PostError(message=f"Invalid media URL: {url}", code="INVALID_MEDIA_URL")
-
-                ext = url.split("?")[0].split(".")[-1].lower() if "." in url.split("?")[0] else ""
-                inferred_type = "video" if ext in ["mp4", "mov", "webm"] else "image"
+                normalized_url = validate_trusted_external_image_url(url)
                 media_file = MediaFile.objects.create(
                     user_id=user_id,
-                    storage_path=url,
-                    file_name=url.split("/")[-1] or "media_url",
-                    file_type="video/mp4" if inferred_type == "video" else "image/jpeg",
+                    storage_path=normalized_url,
+                    file_name=normalized_url.split("/")[-1] or "media_url",
+                    file_type="image/jpeg",
                     file_size=0,
-                    media_type=inferred_type,
-                    thumbnail_path=thumbnail_url if thumbnail_url else "",
+                    media_type="image",
+                    thumbnail_path="",
                     width=width,
                     height=height,
-                    duration=duration if inferred_type == "video" else None,
+                    duration=None,
                     status="ready",
                 )
                 resolved_media_files.append(media_file)

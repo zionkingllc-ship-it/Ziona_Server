@@ -290,8 +290,23 @@ class TestSchemaAlignment:
             assert isinstance(data, str)
             assert len(data) > 0
 
-    def test_create_post_media_urls_only(self, auth_client, user):
+    def test_create_post_media_urls_only(self, auth_client, user, settings, monkeypatch):
         """Verify createPost accepts mediaUrls seamlessly"""
+        settings.MEDIA_URL_ALLOWLIST = ["storage.googleapis.com"]
+        monkeypatch.setattr(
+            "core.media.services._head_external_media_url",
+            lambda url: type(
+                "Response",
+                (),
+                {
+                    "headers": {"Content-Type": "image/jpeg"},
+                    "status_code": 200,
+                    "is_redirect": False,
+                    "is_permanent_redirect": False,
+                    "close": lambda self: None,
+                },
+            )(),
+        )
         mutation = """
         mutation CreateMediaUrl($postType: PostType!, $caption: String, $mediaUrls: [String!]) {
           createPost(postType: $postType, caption: $caption, mediaUrls: $mediaUrls) {

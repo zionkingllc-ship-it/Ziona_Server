@@ -9,6 +9,7 @@ from django.core.cache import cache
 from django.db import transaction
 from django.utils import timezone
 
+from core.circles.access import has_circle_membership
 from core.circles.models import Anchor, AnchorPage, Circle, CircleMembership
 from core.engagement.cache import EngagementCache
 from core.engagement.hidden_content import exclude_hidden_circle_content
@@ -47,6 +48,9 @@ def get_active_anchor(circle_id: str, viewer_id: str | None = None) -> Anchor | 
     Get the currently active anchor for a circle.
     Cached for 5 minutes. Invalidated on create/delete/expire.
     """
+    if not has_circle_membership(viewer_id, str(circle_id)):
+        return None
+
     if viewer_id and EngagementCache.is_circle_content_hidden(viewer_id, "circle", circle_id):
         return None
 
@@ -86,6 +90,9 @@ def invalidate_active_anchor_cache(circle_id: str) -> None:
 
 def get_anchor_by_date(circle_id: str, date, viewer_id: str | None = None) -> Anchor | None:
     """Get anchor that was active on a specific date."""
+    if not has_circle_membership(viewer_id, str(circle_id)):
+        return None
+
     if viewer_id and EngagementCache.is_circle_content_hidden(viewer_id, "circle", circle_id):
         return None
 
@@ -121,7 +128,7 @@ def get_anchor_by_id(anchor_id: str, viewer_id: str | None = None) -> Anchor:
     )
 
     anchor = queryset.first()
-    if not anchor:
+    if not anchor or not has_circle_membership(viewer_id, str(anchor.circle_id)):
         raise ZionaError(message="Anchor not found", code="ANCHOR_NOT_FOUND") from None
     return anchor
 
@@ -141,6 +148,9 @@ def get_anchor_history(
                       many days in the past are returned. This enforces the
                       5-day display window without waiting for the purge task.
     """
+    if not has_circle_membership(viewer_id, str(circle_id)):
+        return []
+
     if viewer_id and EngagementCache.is_circle_content_hidden(viewer_id, "circle", circle_id):
         return []
 

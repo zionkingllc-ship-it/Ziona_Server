@@ -10,7 +10,7 @@ from core.users.models import User
 
 
 @pytest.mark.django_db
-@patch("core.shared.tasks.email_tasks.send_email_async.delay")
+@patch("core.shared.tasks.email_tasks.queue_email_delivery")
 def test_graphql_register_matches_auth_service_contract(mock_email):
     client = Client()
 
@@ -130,7 +130,7 @@ def test_graphql_register_returns_service_validation_error_for_taken_username():
 
 
 @pytest.mark.django_db
-@patch("core.shared.tasks.email_tasks.send_email_async.delay")
+@patch("core.shared.tasks.email_tasks.queue_email_delivery")
 def test_graphql_login_returns_requires_verification_for_unverified_user(mock_email):
     user = User.objects.create_user(
         email="unverified@example.com",
@@ -182,7 +182,7 @@ def test_graphql_login_returns_requires_verification_for_unverified_user(mock_em
 
 
 @pytest.mark.django_db
-@patch("core.shared.tasks.email_tasks.send_email_async.delay")
+@patch("core.shared.tasks.email_tasks.queue_email_delivery")
 def test_graphql_verify_email_matches_auth_service_otp_flow(mock_email):
     client = Client()
     AuthService.register(
@@ -272,7 +272,7 @@ def test_graphql_verify_email_matches_auth_service_otp_flow(mock_email):
 
 
 @pytest.mark.django_db
-@patch("core.shared.tasks.email_tasks.send_email_async.delay")
+@patch("core.shared.tasks.email_tasks.queue_email_delivery")
 def test_graphql_resend_verification_otp_matches_auth_service_flow(mock_email):
     client = Client()
     AuthService.register(
@@ -348,7 +348,7 @@ def test_graphql_suggest_usernames_accepts_date_of_birth_argument():
 
 
 @pytest.mark.django_db
-@patch("core.shared.tasks.email_tasks.send_email_async.delay")
+@patch("core.shared.tasks.email_tasks.queue_email_delivery")
 def test_graphql_reset_password_matches_public_request_flow(mock_email):
     User.objects.create_user(
         email="reset-request@example.com",
@@ -389,7 +389,7 @@ def test_graphql_reset_password_matches_public_request_flow(mock_email):
 
 
 @pytest.mark.django_db
-@patch("core.shared.tasks.email_tasks.send_email_async.delay")
+@patch("core.shared.tasks.email_tasks.queue_email_delivery")
 def test_graphql_confirm_password_reset_matches_auth_service_flow(mock_email):
     user = User.objects.create_user(
         email="reset-confirm@example.com",

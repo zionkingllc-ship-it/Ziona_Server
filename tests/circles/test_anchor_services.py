@@ -94,7 +94,7 @@ class TestGetActiveAnchor(TestCase):
     def test_returns_active_anchor(self):
         """Should return the currently active anchor"""
         invalidate_active_anchor_cache(str(self.circle.id))
-        anchor = get_active_anchor(str(self.circle.id))
+        anchor = get_active_anchor(str(self.circle.id), viewer_id=str(self.admin.id))
         self.assertIsNotNone(anchor)
         self.assertEqual(anchor.title, "John 3:16")
 
@@ -103,7 +103,7 @@ class TestGetActiveAnchor(TestCase):
         self.anchor.expires_at = timezone.now() - timedelta(hours=1)
         self.anchor.save()
         invalidate_active_anchor_cache(str(self.circle.id))
-        anchor = get_active_anchor(str(self.circle.id))
+        anchor = get_active_anchor(str(self.circle.id), viewer_id=str(self.admin.id))
         self.assertIsNone(anchor)
 
     def test_returns_none_for_future_anchor(self):
@@ -112,7 +112,7 @@ class TestGetActiveAnchor(TestCase):
         self.anchor.expires_at = timezone.now() + timedelta(hours=29)
         self.anchor.save()
         invalidate_active_anchor_cache(str(self.circle.id))
-        anchor = get_active_anchor(str(self.circle.id))
+        anchor = get_active_anchor(str(self.circle.id), viewer_id=str(self.admin.id))
         self.assertIsNone(anchor)
 
 
@@ -137,12 +137,12 @@ class TestAnchorHistory(TestCase):
 
     def test_returns_all_anchors(self):
         """Should return all past anchors ordered by published_at DESC"""
-        anchors = get_anchor_history(str(self.circle.id))
+        anchors = get_anchor_history(str(self.circle.id), viewer_id=str(self.admin.id))
         self.assertEqual(len(anchors), 5)
 
     def test_respects_limit(self):
         """Should respect the limit parameter"""
-        anchors = get_anchor_history(str(self.circle.id), limit=2)
+        anchors = get_anchor_history(str(self.circle.id), limit=2, viewer_id=str(self.admin.id))
         self.assertEqual(len(anchors), 2)
 
 

@@ -8,10 +8,14 @@ Tests for:
 """
 
 import importlib
+from datetime import timedelta
+from unittest.mock import patch
 
 import pytest
 from django.apps import apps as django_apps
 from django.test import TestCase
+from django.test.utils import override_settings
+from django.utils import timezone
 
 from core.circles.models import Circle, CircleMembership, CirclePost
 from core.circles.services import (
@@ -19,10 +23,14 @@ from core.circles.services import (
     create_circle_post,
     ensure_circle_post_liked,
     get_all_circles,
+    get_circle_by_id,
+    get_circle_post,
     get_my_circles,
     get_suggested_circles,
     join_circle,
     leave_circle,
+    pray_for_anchor,
+    pray_for_circle_post,
 )
 from core.media.models import MediaFile, MediaStatus
 from core.media.models import MediaType as StoredMediaType
@@ -195,12 +203,15 @@ class TestCirclePostEngagement(TestCase):
     def setUp(self):
         self.user = _make_user("post-liker@test.com", "postliker")
         self.author = _make_user("post-author@test.com", "postauthor")
+        self.outsider = _make_user("post-outsider@test.com", "postoutsider")
         self.circle = Circle.objects.create(
             name="Circle Post Engagement",
             description="A circle for post engagement",
             cover_image="https://example.com/cover.jpg",
             created_by=self.author,
         )
+        CircleMembership.objects.create(circle=self.circle, user=self.author, role="admin")
+        CircleMembership.objects.create(circle=self.circle, user=self.user, role="member")
         self.post = CirclePost.objects.create(
             circle=self.circle,
             user=self.author,
@@ -226,6 +237,64 @@ class TestCirclePostEngagement(TestCase):
             1,
         )
 
+    def test_get_circle_post_requires_membership(self):
+        with self.assertRaises(ZionaError) as ctx:
+            get_circle_post(str(self.post.id), viewer_id=str(self.outsider.id))
+
+        self.assertEqual(ctx.exception.code, "CIRCLE_POST_NOT_FOUND")
+
+    def test_ensure_circle_post_liked_requires_membership(self):
+        with self.assertRaises(ZionaError) as ctx:
+            ensure_circle_post_liked(str(self.outsider.id), str(self.post.id))
+
+        self.assertEqual(ctx.exception.code, "NOT_MEMBER")
+
+    def test_pray_for_circle_post_requires_membership(self):
+        with self.assertRaises(ZionaError) as ctx:
+            pray_for_circle_post(str(self.outsider.id), str(self.post.id))
+
+        self.assertEqual(ctx.exception.code, "NOT_MEMBER")
+
+
+@pytest.mark.django_db
+class TestCircleContentVisibility(TestCase):
+    def setUp(self):
+        self.author = _make_user("circle-author-visibility@test.com", "circleauthorvisibility")
+        self.member = _make_user("circle-member-visibility@test.com", "circlemembervisibility")
+        self.outsider = _make_user(
+            "circle-outsider-visibility@test.com", "circleoutsidervisibility"
+        )
+        self.circle = Circle.objects.create(
+            name="Member Circle",
+            description="Members only",
+            cover_image="https://example.com/cover.jpg",
+            created_by=self.author,
+        )
+        CircleMembership.objects.create(circle=self.circle, user=self.author, role="admin")
+        CircleMembership.objects.create(circle=self.circle, user=self.member, role="member")
+        self.anchor = django_apps.get_model("circles", "Anchor").objects.create(
+            circle=self.circle,
+            created_by=self.author,
+            anchor_type="text",
+            title="Today's Anchor",
+            content="Hello",
+            published_at=timezone.now(),
+            expires_at=timezone.now() + timedelta(days=1),
+        )
+
+    def test_get_circle_by_id_requires_membership(self):
+        assert get_circle_by_id(str(self.circle.id), viewer_id=str(self.outsider.id)) is None
+        assert (
+            get_circle_by_id(str(self.circle.id), viewer_id=str(self.member.id)).id
+            == self.circle.id
+        )
+
+    def test_pray_for_anchor_requires_membership(self):
+        with self.assertRaises(ZionaError) as ctx:
+            pray_for_anchor(str(self.outsider.id), str(self.anchor.id))
+
+        self.assertEqual(ctx.exception.code, "NOT_CIRCLE_MEMBER")
+
 
 @pytest.mark.django_db
 class TestCirclePostMediaCreation(TestCase):
@@ -239,15 +308,28 @@ class TestCirclePostMediaCreation(TestCase):
         )
         CircleMembership.objects.create(circle=self.circle, user=self.author, role="admin")
 
+    @override_settings(MEDIA_URL_ALLOWLIST=["cdn.example.com"])
     def test_create_circle_post_accepts_media_urls_fallback(self):
-        post = create_circle_post(
-            user_id=str(self.author.id),
-            circle_id=str(self.circle.id),
-            text="Fallback media",
-            media_urls=["https://cdn.example.com/circle-posts/fallback.jpg"],
-            width=1024,
-            height=768,
-        )
+        response = type(
+            "Response",
+            (),
+            {
+                "headers": {"Content-Type": "image/jpeg"},
+                "status_code": 200,
+                "is_redirect": False,
+                "is_permanent_redirect": False,
+                "close": lambda self: None,
+            },
+        )()
+        with patch("core.media.services._head_external_media_url", return_value=response):
+            post = create_circle_post(
+                user_id=str(self.author.id),
+                circle_id=str(self.circle.id),
+                text="Fallback media",
+                media_urls=["https://cdn.example.com/circle-posts/fallback.jpg"],
+                width=1024,
+                height=768,
+            )
 
         attached_media = list(post.media_files.all())
         self.assertEqual(len(attached_media), 1)

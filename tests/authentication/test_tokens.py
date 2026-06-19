@@ -5,7 +5,7 @@ import pytest
 from django.conf import settings
 from django.utils import timezone
 
-from core.authentication.tokens import TokenError, TokenService
+from core.authentication.tokens import TokenError, TokenInfrastructureError, TokenService
 
 
 class TestAccessToken:
@@ -105,6 +105,48 @@ class TestRefreshToken:
         second = TokenService.rotate_refresh_token(old_token, user.role)
 
         assert second == first
+
+    def test_generate_refresh_token_fails_closed_when_redis_is_required(
+        self, create_user, settings, monkeypatch
+    ):
+        user = create_user()
+        settings.AUTH_STRICT_REDIS = True
+
+        def _boom(_alias):
+            raise RuntimeError("redis down")
+
+        monkeypatch.setattr("django_redis.get_redis_connection", _boom)
+
+        with pytest.raises(TokenInfrastructureError, match="Unable to create a session"):
+            TokenService.generate_refresh_token(str(user.id))
+
+    def test_validate_refresh_token_fails_closed_when_redis_is_required(
+        self, create_user, settings, monkeypatch
+    ):
+        user = create_user()
+        settings.AUTH_STRICT_REDIS = False
+        refresh_token, _ = TokenService.generate_refresh_token(str(user.id))
+        settings.AUTH_STRICT_REDIS = True
+
+        def _boom(_alias):
+            raise RuntimeError("redis down")
+
+        monkeypatch.setattr("django_redis.get_redis_connection", _boom)
+
+        with pytest.raises(TokenInfrastructureError, match="Unable to validate your session"):
+            TokenService.validate_refresh_token(refresh_token)
+
+
+class TestSensitiveAccessTokenValidation:
+    def test_sensitive_validation_rejects_invalidated_token(self, create_user):
+        user = create_user()
+        token = TokenService.generate_access_token(str(user.id), user.role)
+
+        user.token_invalid_before = timezone.now()
+        user.save(update_fields=["token_invalid_before", "updated_at"])
+
+        with pytest.raises(TokenError, match="invalidated"):
+            TokenService.validate_access_token(token, enforce_revocation=True)
 
 
 class TestTokenBlacklist:

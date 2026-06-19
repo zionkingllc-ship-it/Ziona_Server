@@ -32,7 +32,7 @@ def client():
 class TestFullAuthFlowE2E:
     """End-to-end test of the complete auth flow with camelCase responses."""
 
-    @patch("core.shared.tasks.email_tasks.send_email_async.delay")
+    @patch("core.shared.tasks.email_tasks.queue_email_delivery")
     def test_complete_auth_flow(self, mock_email, client, db):
         """Full flow: suggest → register → login-unverified → verify → login → refresh → logout."""
 
@@ -147,7 +147,7 @@ class TestFullAuthFlowE2E:
         assert resp.status_code == 200
         assert resp.json()["success"] is True
 
-    @patch("core.shared.tasks.email_tasks.send_email_async.delay")
+    @patch("core.shared.tasks.email_tasks.queue_email_delivery")
     def test_resend_otp_flow(self, mock_email, client, db):
         """Test OTP resend returns expiresIn and generates a new code."""
 
@@ -189,7 +189,7 @@ class TestFullAuthFlowE2E:
         assert resp.status_code == 200
         assert "accessToken" in resp.json()["data"]["tokens"]
 
-    @patch("core.shared.tasks.email_tasks.send_email_async.delay")
+    @patch("core.shared.tasks.email_tasks.queue_email_delivery")
     def test_register_unverified_update_flow(self, mock_email, client, db):
         """Re-registering with unverified email updates data and returns 200."""
 

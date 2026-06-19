@@ -134,12 +134,60 @@ class DonationMutations:
     def cancel_subscription(
         self,
         info: Info,
-        subscription_id: str,  # auto → subscriptionId
+        subscription_id: str | None = None,  # auto → subscriptionId
     ) -> CancelPayload:
         from core.donations.services import DonationService
+        from core.shared.types import ErrorType
 
         try:
-            DonationService.cancel_subscription(subscription_id)
+            from core.authentication.account_status import ensure_account_can_authenticate
+            from core.authentication.tokens import (
+                TokenError,
+                TokenInfrastructureError,
+                TokenService,
+            )
+            from core.users.models import User
+
+            request = info.context.request
+            auth_header = request.META.get("HTTP_AUTHORIZATION", "")
+            if not auth_header.startswith("Bearer "):
+                return CancelPayload(
+                    success=False,
+                    error=ErrorType(
+                        code="UNAUTHENTICATED",
+                        message="Authentication required.",
+                    ),
+                )
+
+            try:
+                payload = TokenService.validate_access_token(
+                    auth_header[7:],
+                    enforce_revocation=True,
+                )
+            except TokenInfrastructureError:
+                return CancelPayload(
+                    success=False,
+                    error=ErrorType(
+                        code="AUTH_SERVICE_UNAVAILABLE",
+                        message="Authentication service is temporarily unavailable. Please try again.",
+                    ),
+                )
+            except TokenError:
+                return CancelPayload(
+                    success=False,
+                    error=ErrorType(
+                        code="INVALID_TOKEN",
+                        message="Invalid or expired token.",
+                    ),
+                )
+
+            user = User.all_objects.get(id=payload["user_id"])
+            ensure_account_can_authenticate(user)
+
+            DonationService.cancel_subscription_for_user(
+                user_email=user.email,
+                subscription_id=subscription_id,
+            )
             return CancelPayload(success=True)
         except AdminError as e:
             return CancelPayload(

@@ -21,6 +21,9 @@ def test_render_blueprint_uses_cron_jobs_not_prod_beat(settings):
     assert "name: ziona-beat-prod" not in blueprint
     assert "type: cron" in blueprint
     assert "python manage.py enqueue_scheduled_task" in blueprint
+    assert "-Q email,default,media,cron" in blueprint
+    assert 'schedule: "*/5 * * * *"' in blueprint
+    assert 'schedule: "*/15 * * * *"' in blueprint
 
 
 def test_render_cron_task_allowlist_covers_expected_schedules():

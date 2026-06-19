@@ -11,7 +11,42 @@ logger = logging.getLogger("core.users")
 
 @strawberry.type
 class UserType:
-    """GraphQL representation of a User."""
+    """Safe public GraphQL representation of a user."""
+
+    id: str
+    username: str | None
+    full_name: str
+    bio: str
+    bio_link: str | None = None
+    avatar_url: str
+    needs_username_selection: bool
+    location: str
+    created_at: str
+
+    @classmethod
+    def from_model(cls, user: User) -> "UserType":
+        """Create a UserType from a User model instance."""
+        return cls(
+            id=str(user.id),
+            username=user.username,
+            full_name=user.full_name,
+            bio=user.bio,
+            bio_link=user.bio_link or None,
+            avatar_url=user.avatar_url,
+            needs_username_selection=getattr(user, "needs_username_selection", False),
+            location=user.location,
+            created_at=user.created_at.isoformat(),
+        )
+
+    @classmethod
+    def from_db_model(cls, user: User) -> "UserType":
+        """Backward-compatible alias used by embedded GraphQL types."""
+        return cls.from_model(user)
+
+
+@strawberry.type
+class AuthenticatedUserType:
+    """Authenticated/private GraphQL representation of a user."""
 
     id: str
     email: str
@@ -27,8 +62,8 @@ class UserType:
     created_at: str
 
     @classmethod
-    def from_model(cls, user: User) -> "UserType":
-        """Create a UserType from a User model instance."""
+    def from_model(cls, user: User) -> "AuthenticatedUserType":
+        """Create the authenticated view of a user from a model instance."""
         return cls(
             id=str(user.id),
             email=user.email,
@@ -45,8 +80,8 @@ class UserType:
         )
 
     @classmethod
-    def from_db_model(cls, user: User) -> "UserType":
-        """Backward-compatible alias used by embedded GraphQL types."""
+    def from_db_model(cls, user: User) -> "AuthenticatedUserType":
+        """Backward-compatible alias used by authenticated GraphQL payloads."""
         return cls.from_model(user)
 
 

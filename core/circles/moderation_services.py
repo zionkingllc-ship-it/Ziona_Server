@@ -6,6 +6,7 @@ implements the auto-hide threshold logic (3 distinct reports).
 
 from django.db import transaction
 
+from core.circles.access import require_circle_membership
 from core.circles.models import Anchor, AnchorResponse, Circle, CircleReport
 from core.engagement.hidden_content import hide_circle_content_for_user
 from core.shared.exceptions import ZionaError
@@ -28,6 +29,11 @@ def report_circle_content(
         circle = Circle.objects.get(id=circle_id, deleted_at__isnull=True)
     except Circle.DoesNotExist:
         raise ZionaError(message="Circle not found", code="CIRCLE_NOT_FOUND") from None
+    require_circle_membership(
+        reporter_id,
+        str(circle.id),
+        message="You must join the Circle to report its content",
+    )
 
     # Ensure target actually exists and belongs to the circle
     if (

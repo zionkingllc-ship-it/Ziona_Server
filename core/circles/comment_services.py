@@ -14,6 +14,7 @@ from django.db import IntegrityError, transaction
 from django.db.models import Exists, F, OuterRef
 from django.utils import timezone
 
+from core.circles.access import has_circle_membership, require_circle_membership
 from core.circles.models import (
     CirclePost,
     CirclePostComment,
@@ -52,6 +53,8 @@ def get_circle_post_comments(
         post = CirclePost.objects.get(id=post_id, deleted_at__isnull=True)
     except CirclePost.DoesNotExist:
         raise ZionaError(message="Post not found", code=POST_NOT_FOUND) from None
+    if not has_circle_membership(viewer_id, str(post.circle_id)):
+        return [], False, 0
 
     queryset = (
         CirclePostComment.objects.filter(post=post, deleted_at__isnull=True)
@@ -104,6 +107,11 @@ def create_circle_post_comment(
         post = CirclePost.objects.select_for_update().get(id=post_id, deleted_at__isnull=True)
     except CirclePost.DoesNotExist:
         raise ZionaError(message="Post not found", code=POST_NOT_FOUND) from None
+    require_circle_membership(
+        user_id,
+        str(post.circle_id),
+        message="You must be a member of this Circle to comment",
+    )
 
     comment = CirclePostComment.objects.create(
         post=post,
@@ -131,11 +139,18 @@ def delete_circle_post_comment(
     Atomically decrements CirclePost.comments_count.
     """
     try:
-        comment = CirclePostComment.objects.select_for_update().get(
-            id=comment_id, deleted_at__isnull=True
+        comment = (
+            CirclePostComment.objects.select_related("post")
+            .select_for_update()
+            .get(id=comment_id, deleted_at__isnull=True)
         )
     except CirclePostComment.DoesNotExist:
         raise ZionaError(message="Comment not found", code=COMMENT_NOT_FOUND) from None
+    require_circle_membership(
+        user_id,
+        str(comment.post.circle_id),
+        message="You must be a member of this Circle to manage comments",
+    )
 
     if str(comment.user_id) != str(user_id):
         raise ZionaError(message="You can only delete your own comments", code=NOT_COMMENT_AUTHOR)
@@ -168,11 +183,18 @@ def toggle_circle_post_comment_like(
         liked=False → like was removed.
     """
     try:
-        comment = CirclePostComment.objects.select_for_update().get(
-            id=comment_id, deleted_at__isnull=True
+        comment = (
+            CirclePostComment.objects.select_related("post")
+            .select_for_update()
+            .get(id=comment_id, deleted_at__isnull=True)
         )
     except CirclePostComment.DoesNotExist:
         raise ZionaError(message="Comment not found", code=COMMENT_NOT_FOUND) from None
+    require_circle_membership(
+        user_id,
+        str(comment.post.circle_id),
+        message="You must be a member of this Circle to like comments",
+    )
 
     try:
         # Attempt to create the like row.

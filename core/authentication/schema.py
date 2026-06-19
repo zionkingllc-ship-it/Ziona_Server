@@ -2,8 +2,9 @@
 
 import strawberry
 
+from core.shared.request_utils import get_client_ip
 from core.shared.types import ErrorType
-from core.users.schema import UserType
+from core.users.schema import AuthenticatedUserType
 
 
 @strawberry.type
@@ -21,7 +22,7 @@ class AuthPayload:
     success: bool = strawberry.field(
         description="Whether the authentication operation was successful"
     )
-    user: UserType | None = strawberry.field(
+    user: AuthenticatedUserType | None = strawberry.field(
         default=None, description="The authenticated user data"
     )
     access_token: str | None = strawberry.field(
@@ -55,7 +56,7 @@ class RegisterPayload:
     """
 
     success: bool = strawberry.field(description="Whether the registration operation succeeded")
-    user: UserType | None = strawberry.field(
+    user: AuthenticatedUserType | None = strawberry.field(
         default=None,
         description="The registered user data in its current unverified state",
     )
@@ -84,7 +85,9 @@ class AddPasswordPayload:
 
     success: bool = strawberry.field(description="Whether the password was added successfully")
     message: str | None = strawberry.field(default=None, description="Success or error message")
-    user: UserType | None = strawberry.field(default=None, description="The updated user data")
+    user: AuthenticatedUserType | None = strawberry.field(
+        default=None, description="The updated user data"
+    )
     error_code: str | None = strawberry.field(
         default=None, description="Specific error code if operation failed (e.g. UNAUTHENTICATED)"
     )
@@ -176,7 +179,9 @@ class VerifyOTPPayload:
 
     success: bool = strawberry.field(description="Whether the verification was successful")
     message: str | None = strawberry.field(default=None, description="Success or error message")
-    user: UserType | None = strawberry.field(default=None, description="User data (if applicable)")
+    user: AuthenticatedUserType | None = strawberry.field(
+        default=None, description="User data (if applicable)"
+    )
     access_token: str | None = strawberry.field(
         default=None, description="JWT access token (if applicable)"
     )
@@ -204,7 +209,7 @@ class GoogleOAuthPayload:
     """
 
     success: bool = strawberry.field(description="Whether the authentication was successful")
-    user: UserType | None = strawberry.field(
+    user: AuthenticatedUserType | None = strawberry.field(
         default=None, description="The authenticated user data"
     )
     access_token: str | None = strawberry.field(default=None, description="JWT access token")
@@ -317,7 +322,7 @@ class AuthMutations:
         from core.authentication.services import AuthenticationError, AuthService
 
         request = info.context.request
-        ip = request.META.get("REMOTE_ADDR", "unknown")
+        ip = get_client_ip(request)
 
         try:
             result = AuthService.register(
@@ -329,7 +334,7 @@ class AuthMutations:
             )
             return RegisterPayload(
                 success=True,
-                user=UserType.from_model(result["user"]),
+                user=AuthenticatedUserType.from_model(result["user"]),
                 message=result["message"],
                 requires_verification=result.get("requires_verification", False),
             )
@@ -373,7 +378,7 @@ class AuthMutations:
             result = AuthService.verify_email_otp(email=email, code=code)
             return AuthPayload(
                 success=True,
-                user=UserType.from_model(result["user"]),
+                user=AuthenticatedUserType.from_model(result["user"]),
                 access_token=result["access_token"],
                 refresh_token=result["refresh_token"],
                 message="Email verified successfully",
@@ -471,12 +476,12 @@ class AuthMutations:
             result = AuthService.login(
                 email=email,
                 password=password,
-                ip_address=request.META.get("REMOTE_ADDR", "unknown"),
+                ip_address=get_client_ip(request),
                 user_agent=request.META.get("HTTP_USER_AGENT", ""),
             )
             return AuthPayload(
                 success=True,
-                user=UserType.from_model(result["user"]),
+                user=AuthenticatedUserType.from_model(result["user"]),
                 access_token=result.get("access_token"),
                 refresh_token=result.get("refresh_token"),
                 message=result.get("message"),
@@ -513,7 +518,7 @@ class AuthMutations:
             request = info.context.request
             result = AuthService.refresh_tokens(
                 refresh_token,
-                ip_address=request.META.get("REMOTE_ADDR", "unknown"),
+                ip_address=get_client_ip(request),
             )
             return AuthPayload(
                 success=True,
@@ -564,7 +569,7 @@ class AuthMutations:
             return AddPasswordPayload(
                 success=True,
                 message="Password added successfully. You can now login with email and password.",
-                user=UserType.from_model(result["user"]),
+                user=AuthenticatedUserType.from_model(result["user"]),
             )
         except AuthenticationError as e:
             return AddPasswordPayload(
@@ -612,7 +617,7 @@ class AuthMutations:
         **Errors:** UNAUTHENTICATED, INVALID_CREDENTIALS, WEAK_PASSWORD
         """
         from core.authentication.services import AuthService
-        from core.authentication.tokens import TokenService
+        from core.authentication.tokens import TokenInfrastructureError, TokenService
         from core.authentication.validators import AuthenticationError
         from core.users.schema import _get_authenticated_user_id
 
@@ -630,8 +635,14 @@ class AuthMutations:
                 request = info.context.request
                 auth_header = request.META.get("HTTP_AUTHORIZATION", "")
                 token = auth_header[7:]
-                payload = TokenService.validate_access_token(token)
+                payload = TokenService.validate_access_token(token, enforce_revocation=True)
                 current_jti = payload.get("jti")
+            except TokenInfrastructureError:
+                return ChangePasswordPayload(
+                    success=False,
+                    message="Authentication service is temporarily unavailable. Please try again.",
+                    error_code="AUTH_SERVICE_UNAVAILABLE",
+                )
             except Exception:
                 return ChangePasswordPayload(
                     success=False,
@@ -647,7 +658,7 @@ class AuthMutations:
                 new_password=new_password,
                 sign_out_other_devices=sign_out_other_devices,
                 current_jti=current_jti,
-                ip_address=request.META.get("REMOTE_ADDR", "unknown"),
+                ip_address=get_client_ip(request),
             )
             return ChangePasswordPayload(
                 success=True,
@@ -701,11 +712,11 @@ class AuthMutations:
         try:
             result = AuthService.google_oauth_login(
                 id_token=id_token,
-                ip_address=request.META.get("REMOTE_ADDR", "unknown"),
+                ip_address=get_client_ip(request),
             )
             return GoogleOAuthPayload(
                 success=True,
-                user=UserType.from_model(result["user"]),
+                user=AuthenticatedUserType.from_model(result["user"]),
                 access_token=result["access_token"],
                 refresh_token=result["refresh_token"],
                 is_new_user=result["is_new_user"],
@@ -739,11 +750,11 @@ class AuthMutations:
                 raw_nonce=raw_nonce,
                 nonce=nonce,
                 apple_user=user or {},
-                ip_address=request.META.get("REMOTE_ADDR", "unknown"),
+                ip_address=get_client_ip(request),
             )
             return GoogleOAuthPayload(
                 success=True,
-                user=UserType.from_model(result["user"]),
+                user=AuthenticatedUserType.from_model(result["user"]),
                 access_token=result["access_token"],
                 refresh_token=result["refresh_token"],
                 is_new_user=result["is_new_user"],
@@ -790,7 +801,7 @@ class AuthMutations:
             result = AuthService.unified_send_otp(
                 email=email,
                 purpose=purpose,
-                ip_address=request.META.get("REMOTE_ADDR", "unknown"),
+                ip_address=get_client_ip(request),
             )
             return OTPPayload(
                 success=True,
@@ -845,7 +856,7 @@ class AuthMutations:
                 email=email,
                 code=code,
                 purpose=purpose,
-                ip_address=request.META.get("REMOTE_ADDR", "unknown"),
+                ip_address=get_client_ip(request),
             )
 
             payload = VerifyOTPPayload(
@@ -855,7 +866,7 @@ class AuthMutations:
             )
 
             if "user" in result:
-                payload.user = UserType.from_model(result["user"])
+                payload.user = AuthenticatedUserType.from_model(result["user"])
             if "access_token" in result:
                 payload.access_token = result["access_token"]
             if "refresh_token" in result:
@@ -900,7 +911,7 @@ class AuthMutations:
         try:
             AuthService.request_password_reset(
                 email=email,
-                ip_address=request.META.get("REMOTE_ADDR", "unknown"),
+                ip_address=get_client_ip(request),
             )
             return PasswordResetRequestPayload(
                 success=True,
@@ -951,11 +962,11 @@ class AuthMutations:
                 reset_token=reset_token,
                 new_password=new_password,
                 sign_out_all_devices=sign_out_all_devices,
-                ip_address=request.META.get("REMOTE_ADDR", "unknown"),
+                ip_address=get_client_ip(request),
             )
             return AuthPayload(
                 success=True,
-                user=UserType.from_model(result["user"]),
+                user=AuthenticatedUserType.from_model(result["user"]),
                 access_token=result["access_token"],
                 refresh_token=result["refresh_token"],
                 message="Password reset successfully",
@@ -1007,7 +1018,7 @@ class AuthMutations:
             )
             return AuthPayload(
                 success=True,
-                user=UserType.from_model(user),
+                user=AuthenticatedUserType.from_model(user),
             )
         except AuthenticationError as e:
             return AuthPayload(

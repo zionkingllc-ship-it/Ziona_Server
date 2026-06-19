@@ -1,11 +1,11 @@
 import mimetypes
 import os
-import re
 from urllib.parse import urlparse
 
 from django.db import transaction
 from django.db.models import Count, Exists, F, OuterRef, Prefetch
 
+from core.circles.access import has_circle_membership, require_circle_membership
 from core.circles.models import (
     Anchor,
     AnchorEngagement,
@@ -17,6 +17,7 @@ from core.circles.models import (
 from core.engagement.hidden_content import exclude_hidden_circle_content
 from core.media.models import MediaFile, MediaStatus
 from core.media.models import MediaType as StoredMediaType
+from core.media.services import validate_trusted_external_image_url
 from core.shared.exceptions import ZionaError
 
 # Shorthand error codes
@@ -34,7 +35,12 @@ def get_circle_by_id(circle_id: str, viewer_id: str | None = None) -> Circle | N
     """Fetch a single visible circle for the viewer."""
     queryset = Circle.objects.filter(id=circle_id, is_active=True, deleted_at__isnull=True)
     queryset = _exclude_hidden_circles(queryset, viewer_id)
-    return queryset.first()
+    circle = queryset.first()
+    if not circle:
+        return None
+    if not has_circle_membership(viewer_id, str(circle.id)):
+        return None
+    return circle
 
 
 def get_all_circles(
@@ -187,16 +193,6 @@ def create_circle(creator_id: str, name: str, description: str, cover_image: str
 CIRCLE_POST_NOT_FOUND = "CIRCLE_POST_NOT_FOUND"
 ANCHOR_NOT_FOUND = "ANCHOR_NOT_FOUND"
 VALIDATION_ERROR = "VALIDATION_ERROR"
-VIDEO_EXTENSIONS = {".mp4", ".mov", ".webm", ".m4v"}
-URL_PATTERN = re.compile(
-    r"^(?:http|ftp)s?://"
-    r"(?:(?:[A-Z0-9](?:[A-Z0-9-]{0,61}[A-Z0-9])?\.)+(?:[A-Z]{2,6}\.?|[A-Z0-9-]{2,}\.?)|"
-    r"localhost|"
-    r"\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})"
-    r"(?::\d+)?"
-    r"(?:/?|[/?]\S+)$",
-    re.IGNORECASE,
-)
 
 
 def _normalize_media_type_hint(media_type: str | None) -> str | None:
@@ -204,13 +200,6 @@ def _normalize_media_type_hint(media_type: str | None) -> str | None:
         return None
     value = getattr(media_type, "value", media_type)
     return str(value).strip().lower() or None
-
-
-def _infer_media_type_from_url(url: str) -> str:
-    extension = os.path.splitext(urlparse(url).path)[1].lower()
-    if extension in VIDEO_EXTENSIONS:
-        return StoredMediaType.VIDEO
-    return StoredMediaType.IMAGE
 
 
 def _infer_file_type(url: str, media_type: str) -> str:
@@ -267,13 +256,8 @@ def _resolve_circle_post_media(
             normalized_url = (url or "").strip()
             if not normalized_url:
                 continue
-            if not re.match(URL_PATTERN, normalized_url):
-                raise ZionaError(
-                    message=f"Invalid media URL: {normalized_url}",
-                    code=VALIDATION_ERROR,
-                )
-
-            inferred_type = _infer_media_type_from_url(normalized_url)
+            normalized_url = validate_trusted_external_image_url(normalized_url)
+            inferred_type = StoredMediaType.IMAGE
             resolved_media_files.append(
                 MediaFile.objects.create(
                     user_id=user_id,
@@ -427,7 +411,7 @@ def get_circle_post(post_id: str, viewer_id: str | None = None) -> CirclePost:
         )
 
     post = queryset.first()
-    if not post:
+    if not post or not has_circle_membership(viewer_id, str(post.circle_id)):
         raise ZionaError(message="Post not found", code=CIRCLE_POST_NOT_FOUND)
     return post
 
@@ -446,6 +430,12 @@ def like_circle_post(user_id: str, post_id: str) -> dict:
         post = CirclePost.objects.select_for_update().get(id=post_id, deleted_at__isnull=True)
     except CirclePost.DoesNotExist:
         raise ZionaError(message="Post not found", code=CIRCLE_POST_NOT_FOUND) from None
+    require_circle_membership(
+        user_id,
+        str(post.circle_id),
+        code=NOT_MEMBER,
+        message="You must be a member of this Circle to like posts",
+    )
 
     engagement, created = CirclePostEngagement.objects.get_or_create(
         post=post,
@@ -471,6 +461,12 @@ def ensure_circle_post_liked(user_id: str, post_id: str) -> dict:
         post = CirclePost.objects.select_for_update().get(id=post_id, deleted_at__isnull=True)
     except CirclePost.DoesNotExist:
         raise ZionaError(message="Post not found", code=CIRCLE_POST_NOT_FOUND) from None
+    require_circle_membership(
+        user_id,
+        str(post.circle_id),
+        code=NOT_MEMBER,
+        message="You must be a member of this Circle to like posts",
+    )
 
     _engagement, created = CirclePostEngagement.objects.get_or_create(
         post=post,
@@ -569,6 +565,11 @@ def pray_for_anchor(user_id: str, anchor_id: str) -> dict:
         anchor = Anchor.objects.select_for_update().get(id=anchor_id, deleted_at__isnull=True)
     except Anchor.DoesNotExist:
         raise ZionaError(message="Anchor not found", code=ANCHOR_NOT_FOUND) from None
+    require_circle_membership(
+        user_id,
+        str(anchor.circle_id),
+        message="You must join the Circle to pray for anchors",
+    )
 
     engagement, created = AnchorEngagement.objects.get_or_create(
         anchor=anchor, user_id=user_id, engagement_type="pray"
@@ -597,6 +598,11 @@ def like_anchor(user_id: str, anchor_id: str) -> dict:
         anchor = Anchor.objects.select_for_update().get(id=anchor_id, deleted_at__isnull=True)
     except Anchor.DoesNotExist:
         raise ZionaError(message="Anchor not found", code=ANCHOR_NOT_FOUND) from None
+    require_circle_membership(
+        user_id,
+        str(anchor.circle_id),
+        message="You must join the Circle to like anchors",
+    )
 
     engagement, created = AnchorEngagement.objects.get_or_create(
         anchor=anchor, user_id=user_id, engagement_type="like"
@@ -625,6 +631,12 @@ def pray_for_circle_post(user_id: str, post_id: str) -> dict:
         post = CirclePost.objects.select_for_update().get(id=post_id, deleted_at__isnull=True)
     except CirclePost.DoesNotExist:
         raise ZionaError(message="Post not found", code=CIRCLE_POST_NOT_FOUND) from None
+    require_circle_membership(
+        user_id,
+        str(post.circle_id),
+        code=NOT_MEMBER,
+        message="You must be a member of this Circle to pray for posts",
+    )
 
     engagement, created = CirclePostEngagement.objects.get_or_create(
         post=post,

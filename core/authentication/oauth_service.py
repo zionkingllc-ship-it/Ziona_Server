@@ -156,7 +156,14 @@ class OAuthService:
         record_successful_auth(user, ip_address)
 
         access_token = TokenService.generate_access_token(str(user.id), user.role)
-        refresh_token, _ = TokenService.generate_refresh_token(str(user.id))
+        try:
+            refresh_token, _ = TokenService.generate_refresh_token(str(user.id))
+        except Exception as e:
+            logger.error("Failed to issue Google OAuth refresh token: %s", e, exc_info=True)
+            raise AuthenticationError(
+                "Authentication service is temporarily unavailable. Please try again.",
+                code="AUTH_SERVICE_UNAVAILABLE",
+            ) from e
 
         log_security_event(
             "auth.oauth.success",
@@ -285,7 +292,14 @@ class OAuthService:
         record_successful_auth(user, ip_address)
 
         access_token = TokenService.generate_access_token(str(user.id), user.role)
-        refresh_token, _ = TokenService.generate_refresh_token(str(user.id))
+        try:
+            refresh_token, _ = TokenService.generate_refresh_token(str(user.id))
+        except Exception as e:
+            logger.error("Failed to issue Apple OAuth refresh token: %s", e, exc_info=True)
+            raise AuthenticationError(
+                "Authentication service is temporarily unavailable. Please try again.",
+                code="AUTH_SERVICE_UNAVAILABLE",
+            ) from e
 
         log_security_event(
             "auth.oauth.success",

@@ -3,7 +3,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from celery.exceptions import MaxRetriesExceededError
 
-from core.shared.tasks.email_tasks import send_email_async
+from core.shared.tasks.email_tasks import queue_email_delivery, send_email_async
 
 
 @pytest.mark.django_db
@@ -96,11 +96,13 @@ class TestEmailTasks:
         import time
 
         start = time.time()
-        task = send_email_async.delay(
-            subject="Test",
-            message="Body",
-            from_email="noreply@ziona.app",
-            recipient_list=["test@example.com"],
+        task = send_email_async.apply_async(
+            kwargs={
+                "subject": "Test",
+                "message": "Body",
+                "from_email": "noreply@ziona.app",
+                "recipient_list": ["test@example.com"],
+            }
         )
         elapsed = time.time() - start
 
@@ -156,3 +158,27 @@ class TestEmailTasks:
         assert result["success"] is True
         mock_send_mail.assert_called_once()
         assert mock_send_mail.call_args.kwargs["subject"] == "Ziona Update"
+
+    def test_queue_email_delivery_uses_priority_email_queue(self, settings):
+        """Email publish helper should always target the high-priority email queue."""
+        settings.CELERY_QUEUE_EMAIL = "email"
+        settings.CELERY_EMAIL_TASK_PRIORITY = 9
+
+        with patch.object(send_email_async, "apply_async") as mock_apply_async:
+            mock_apply_async.return_value = MagicMock(id="task-123")
+
+            queue_email_delivery(
+                subject="Queued Subject",
+                message="Queued message",
+                from_email="noreply@ziona.app",
+                recipient_list=["queued@example.com"],
+                email_kind="verify_email",
+            )
+
+        mock_apply_async.assert_called_once()
+        kwargs = mock_apply_async.call_args.kwargs
+        assert kwargs["queue"] == "email"
+        assert kwargs["priority"] == 9
+        assert kwargs["kwargs"]["email_kind"] == "verify_email"
+        assert kwargs["kwargs"]["recipient_list"] == ["queued@example.com"]
+        assert kwargs["kwargs"]["enqueued_at"]

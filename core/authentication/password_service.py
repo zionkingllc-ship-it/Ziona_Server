@@ -222,7 +222,14 @@ class PasswordService:
         record_successful_auth(user, ip_address)
 
         access_token = TokenService.generate_access_token(str(user.id), user.role)
-        refresh_token, _ = TokenService.generate_refresh_token(str(user.id))
+        try:
+            refresh_token, _ = TokenService.generate_refresh_token(str(user.id))
+        except Exception as e:
+            logger.error("Failed to issue password-reset session tokens: %s", e, exc_info=True)
+            raise AuthenticationError(
+                "Authentication service is temporarily unavailable. Please try again.",
+                code="AUTH_SERVICE_UNAVAILABLE",
+            ) from e
 
         log_security_event(
             "auth.password_reset.success",

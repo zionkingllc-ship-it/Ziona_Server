@@ -8,6 +8,7 @@ from django.db import transaction
 from django.db.models import F, OuterRef, Subquery
 from django.utils import timezone
 
+from core.circles.access import has_circle_membership, require_circle_membership
 from core.circles.models import Anchor, AnchorResponse, AnchorResponseReaction, CircleMembership
 from core.circles.validators import validate_response_media
 from core.engagement.cache import EngagementCache
@@ -35,6 +36,11 @@ def toggle_reaction(user_id: str, response_id: str, reaction_type: str) -> Ancho
         )
     except AnchorResponse.DoesNotExist:
         raise ZionaError(message="Response not found", code="RESPONSE_NOT_FOUND") from None
+    require_circle_membership(
+        user_id,
+        str(response.anchor.circle_id),
+        message="You must join the Circle to react to responses",
+    )
 
     reaction = AnchorResponseReaction.objects.filter(response=response, user_id=user_id).first()
 
@@ -94,8 +100,7 @@ def create_response(
     if response_type not in valid_types:
         raise ZionaError(message="Invalid response type", code="INVALID_RESPONSE_TYPE")
 
-    # Media validation (15-30s video check)
-    validate_response_media(media_type, media_url)
+    media_url = validate_response_media(media_type, media_url)
 
     return AnchorResponse.objects.create(
         user_id=user_id,
@@ -127,8 +132,7 @@ def create_reply(
             message="Maximum threading depth exceeded", code="THREADING_DEPTH_EXCEEDED"
         )
 
-    # Media validation
-    validate_response_media(media_type, media_url)
+    media_url = validate_response_media(media_type, media_url)
 
     return AnchorResponse.objects.create(
         user_id=user_id,
@@ -165,6 +169,8 @@ def get_anchor_responses(
         Anchor.objects.filter(id=anchor_id, deleted_at__isnull=True).values("circle_id").first()
     )
     if not anchor:
+        return []
+    if not has_circle_membership(viewer_id, str(anchor["circle_id"])):
         return []
 
     if viewer_id and (
@@ -223,6 +229,8 @@ def get_response_replies(response_id: str, viewer_id: str, limit: int = 50) -> l
         .first()
     )
     if not parent:
+        return []
+    if not has_circle_membership(viewer_id, str(parent.anchor.circle_id)):
         return []
 
     if viewer_id and (

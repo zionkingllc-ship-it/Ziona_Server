@@ -7,6 +7,7 @@ Replies send email via Django's send_mail (Ensend backend).
 import logging
 from datetime import datetime, timezone
 
+from django.conf import settings
 from django.db import transaction
 from django.db.models import Q
 
@@ -123,7 +124,13 @@ class ContactService:
         #   3. Celery can retry on transient SMTP failures without data loss.
         from core.admin_dashboard.tasks import send_contact_reply_email
 
-        transaction.on_commit(lambda: send_contact_reply_email.delay(str(contact.id), message))
+        transaction.on_commit(
+            lambda: send_contact_reply_email.apply_async(
+                args=[str(contact.id), message],
+                queue=settings.CELERY_QUEUE_EMAIL,
+                priority=settings.CELERY_EMAIL_TASK_PRIORITY,
+            )
+        )
 
         log_admin_action(
             admin_user=admin_user,

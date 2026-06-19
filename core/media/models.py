@@ -70,6 +70,9 @@ class MediaFile(TimestampedModel):
     width = models.PositiveIntegerField(null=True, blank=True)
     height = models.PositiveIntegerField(null=True, blank=True)
     duration = models.FloatField(null=True, blank=True, help_text="Video duration in seconds")
+    processing_error_code = models.CharField(max_length=80, blank=True)
+    processing_error_message = models.TextField(blank=True)
+    processing_failed_stage = models.CharField(max_length=80, blank=True)
 
     class Meta:
         db_table = "media_files"

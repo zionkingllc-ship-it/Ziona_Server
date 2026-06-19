@@ -39,6 +39,12 @@ class TokenError(Exception):
     pass
 
 
+class TokenInfrastructureError(TokenError):
+    """Raised when token state cannot be checked or persisted safely."""
+
+    pass
+
+
 class TokenService:
     """Service for JWT token operations.
 
@@ -109,12 +115,16 @@ class TokenService:
                 extra={"user_id": str(user_id), "jti": jti},
             )
         except Exception as e:
-            logger.warning(f"Failed to store refresh token in Redis: {e}")
+            _handle_auth_redis_failure(
+                "Failed to store refresh token in Redis",
+                e,
+                raise_message="Unable to create a session right now. Please try again.",
+            )
 
         return token, jti
 
     @staticmethod
-    def validate_access_token(token: str) -> dict:
+    def validate_access_token(token: str, *, enforce_revocation: bool = False) -> dict:
         """Validate and decode a JWT access token.
 
         Validation is performed entirely in CPU (JWT signature + expiry check).
@@ -143,6 +153,9 @@ class TokenService:
 
         if payload.get("type") != "access":
             raise TokenError("Token is not an access token")
+
+        if enforce_revocation:
+            TokenService._enforce_sensitive_access_token_state(payload)
 
         return payload
 
@@ -187,7 +200,11 @@ class TokenService:
         except TokenError:
             raise
         except Exception as e:
-            logger.warning(f"Redis check failed for refresh token: {e}")
+            _handle_auth_redis_failure(
+                "Redis check failed for refresh token",
+                e,
+                raise_message="Unable to validate your session right now. Please try again.",
+            )
 
         return payload
 
@@ -223,7 +240,11 @@ class TokenService:
                 )
                 return cached_rotation
         except Exception as e:
-            logger.warning(f"Failed to inspect old refresh token: {e}")
+            _handle_auth_redis_failure(
+                "Failed to inspect old refresh token",
+                e,
+                raise_message="Unable to rotate your session right now. Please try again.",
+            )
 
         access_token = TokenService.generate_access_token(user_id, role)
         refresh_token, new_jti = TokenService.generate_refresh_token(user_id)
@@ -248,7 +269,11 @@ class TokenService:
             else:
                 redis_conn.delete(old_key)
         except Exception as e:
-            logger.warning(f"Failed to store refresh rotation grace: {e}")
+            _handle_auth_redis_failure(
+                "Failed to store refresh rotation grace",
+                e,
+                raise_message="Unable to rotate your session right now. Please try again.",
+            )
 
         logger.info(
             "Token rotated",
@@ -267,6 +292,9 @@ class TokenService:
         Args:
             user_id: UUID of the user whose tokens to revoke.
         """
+        invalid_before = datetime.now(timezone.utc)
+        TokenService.invalidate_user_access_tokens(user_id, invalid_before=invalid_before)
+
         try:
             from django_redis import get_redis_connection
 
@@ -281,6 +309,21 @@ class TokenService:
             )
         except Exception as e:
             logger.warning(f"Failed to revoke all tokens for user {user_id}: {e}")
+
+    @staticmethod
+    def invalidate_user_access_tokens(
+        user_id: str,
+        *,
+        invalid_before: datetime | None = None,
+    ) -> None:
+        """Invalidate access tokens issued before the given timestamp."""
+        from core.users.models import User
+
+        invalid_before = invalid_before or datetime.now(timezone.utc)
+        User.all_objects.filter(id=user_id).update(
+            token_invalid_before=invalid_before,
+            updated_at=invalid_before,
+        )
 
     @staticmethod
     def revoke_all_user_tokens_except(user_id: str, keep_jti: str) -> int:
@@ -356,6 +399,53 @@ class TokenService:
         except Exception as e:
             logger.warning(f"Failed to blacklist access token: {e}")
 
+    @staticmethod
+    def _enforce_sensitive_access_token_state(payload: dict) -> None:
+        """Check blacklist state and per-user invalidation for sensitive flows."""
+        user_id = payload.get("user_id")
+        jti = payload.get("jti")
+
+        if not user_id or not jti:
+            raise TokenError("Invalid token payload")
+
+        try:
+            from django_redis import get_redis_connection
+
+            redis_conn = get_redis_connection("default")
+            if redis_conn.exists(f"blacklist:{jti}"):
+                raise TokenError("Access token has been revoked")
+        except TokenError:
+            raise
+        except Exception as e:
+            _handle_auth_redis_failure(
+                "Failed to inspect access token blacklist state",
+                e,
+                raise_message="Unable to validate your session right now. Please try again.",
+            )
+
+        from core.users.models import User
+
+        try:
+            user = User.all_objects.only("id", "token_invalid_before").get(id=user_id)
+        except User.DoesNotExist:
+            raise TokenError("User not found") from None
+
+        invalid_before = getattr(user, "token_invalid_before", None)
+        if invalid_before is None:
+            return
+
+        token_iat = payload.get("iat")
+        if token_iat is None:
+            raise TokenError("Invalid token payload")
+
+        if isinstance(token_iat, datetime):
+            token_issued_at = token_iat
+        else:
+            token_issued_at = datetime.fromtimestamp(token_iat, tz=timezone.utc)
+
+        if token_issued_at <= invalid_before:
+            raise TokenError("Access token has been invalidated")
+
 
 def _decode_rotation_value(value) -> dict | None:
     """Return cached rotated token pair when a refresh token is replayed briefly."""
@@ -387,3 +477,12 @@ def _decode_redis_key(key) -> str:
     if isinstance(key, bytes):
         return key.decode("utf-8")
     return str(key)
+
+
+def _handle_auth_redis_failure(log_message: str, exc: Exception, *, raise_message: str) -> None:
+    """Log a Redis-backed auth failure and raise in strict environments."""
+    if getattr(settings, "AUTH_STRICT_REDIS", False):
+        logger.error("%s: %s", log_message, exc, exc_info=True)
+        raise TokenInfrastructureError(raise_message) from exc
+
+    logger.warning("%s: %s", log_message, exc)

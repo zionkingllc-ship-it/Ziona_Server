@@ -104,6 +104,11 @@ class User(AbstractBaseUser, PermissionsMixin):
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
     updated_at = models.DateTimeField(auto_now=True)
     deleted_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    token_invalid_before = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Access tokens issued before this timestamp are rejected on sensitive flows.",
+    )
     last_name_change = models.DateTimeField(null=True, blank=True)
     last_username_change = models.DateTimeField(null=True, blank=True)
 

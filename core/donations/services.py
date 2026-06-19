@@ -182,22 +182,47 @@ class DonationService:
             ) from exc
 
     @staticmethod
-    def cancel_subscription(subscription_id: str) -> dict:
-        """Cancel a Stripe subscription by its ID.
+    def cancel_subscription_for_user(
+        user_email: str,
+        subscription_id: str | None = None,
+    ) -> dict:
+        """Cancel the current user's active Stripe subscription.
 
         Returns:
             {"cancelled": True}
         """
         from core.donations.models import Subscription, SubscriptionStatus
 
+        subscriptions = Subscription.objects.select_related("donation").filter(
+            donation__donor_email__iexact=user_email,
+        )
+        if subscription_id:
+            subscriptions = subscriptions.filter(stripe_subscription_id=subscription_id)
+        else:
+            subscriptions = subscriptions.exclude(status=SubscriptionStatus.CANCELLED)
+
+        matches = list(subscriptions[:2])
+        if not matches:
+            raise AdminError(
+                "Active subscription not found for this account.",
+                ErrorCode.NOT_FOUND,
+            )
+        if len(matches) > 1 and not subscription_id:
+            raise AdminError(
+                "Multiple subscriptions found. Provide a subscription ID to choose one.",
+                ErrorCode.VALIDATION_ERROR,
+            )
+
+        subscription = matches[0]
+        stripe_subscription_id = subscription.stripe_subscription_id
         stripe = _get_stripe()
 
         try:
-            stripe.Subscription.cancel(subscription_id)
+            stripe.Subscription.cancel(stripe_subscription_id)
         except Exception as exc:
             logger.error(
                 "cancel_subscription_failed",
-                extra={"subscription_id": subscription_id, "error": str(exc)},
+                extra={"subscription_id": stripe_subscription_id, "error": str(exc)},
                 exc_info=True,
             )
             raise AdminError(
@@ -205,13 +230,13 @@ class DonationService:
                 ErrorCode.VALIDATION_ERROR,
             ) from exc
 
-        Subscription.objects.filter(stripe_subscription_id=subscription_id).update(
+        Subscription.objects.filter(id=subscription.id).update(
             status=SubscriptionStatus.CANCELLED,
             cancelled_at=timezone.now(),
         )
         logger.info(
             "subscription_cancelled",
-            extra={"subscription_id": subscription_id},
+            extra={"subscription_id": stripe_subscription_id, "donor_email": user_email},
         )
         return {"cancelled": True}
 

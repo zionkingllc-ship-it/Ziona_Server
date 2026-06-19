@@ -22,7 +22,7 @@ from django.utils import timezone
 from core.authentication.account_status import ensure_account_can_authenticate
 from core.authentication.activity import record_successful_auth
 from core.authentication.otp_service import OTPService
-from core.authentication.tokens import TokenError, TokenService
+from core.authentication.tokens import TokenError, TokenInfrastructureError, TokenService
 from core.authentication.validators import (
     AuthenticationError,
     validate_and_encrypt_dob,
@@ -256,7 +256,14 @@ class AuthService:
         record_successful_auth(user, ip_address)
 
         access_token = TokenService.generate_access_token(str(user.id), user.role)
-        refresh_token, _ = TokenService.generate_refresh_token(str(user.id))
+        try:
+            refresh_token, _ = TokenService.generate_refresh_token(str(user.id))
+        except TokenError as e:
+            logger.error("Failed to issue login refresh token: %s", e, exc_info=True)
+            raise AuthenticationError(
+                "Authentication service is temporarily unavailable. Please try again.",
+                code="AUTH_SERVICE_UNAVAILABLE",
+            ) from e
 
         logger.info("Login success: user_id=%s ip=%s", user.id, ip_address)
         log_security_event(
@@ -501,10 +508,14 @@ class AuthService:
                 result = TokenService.rotate_refresh_token(refresh_token, role)
                 record_successful_auth(user, ip_address)
                 return result
+            except TokenInfrastructureError as e:
+                raise AuthenticationError(str(e), code="AUTH_SERVICE_UNAVAILABLE") from e
             except TokenError as e:
                 raise AuthenticationError(str(e), code="INVALID_REFRESH_TOKEN") from e
         except AuthenticationError:
             raise
+        except TokenInfrastructureError as e:
+            raise AuthenticationError(str(e), code="AUTH_SERVICE_UNAVAILABLE") from e
         except TokenError as e:
             raise AuthenticationError(str(e), code="INVALID_REFRESH_TOKEN") from e
 

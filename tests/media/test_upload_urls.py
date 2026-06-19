@@ -6,7 +6,60 @@ from django.core.management import call_command
 from django.test import Client
 
 from core.media.models import MediaFile
-from core.media.services import MediaError, MediaService
+from core.media.services import MediaError, MediaService, validate_trusted_external_image_url
+
+
+class _FakeBlob:
+    def __init__(
+        self,
+        *,
+        size: int = 2048,
+        content_type: str = "image/jpeg",
+        head: bytes = b"\xff\xd8\xff\xe0",
+        missing: bool = False,
+    ):
+        self.size = size
+        self.content_type = content_type
+        self._head = head
+        self._missing = missing
+        self.deleted = False
+
+    def reload(self):
+        if self._missing:
+            raise RuntimeError("not found")
+
+    def download_as_bytes(self, start=None, end=None):  # noqa: ARG002
+        return self._head
+
+    def delete(self):
+        self.deleted = True
+
+
+class _FakeBucket:
+    def __init__(self, blob: _FakeBlob):
+        self._blob = blob
+
+    def blob(self, storage_path):  # noqa: ARG002
+        return self._blob
+
+
+class _FakeHeadResponse:
+    def __init__(self, *, status_code: int = 200, content_type: str = "image/jpeg", location=None):
+        self.status_code = status_code
+        self.headers = {"Content-Type": content_type}
+        if location:
+            self.headers["Location"] = location
+
+    @property
+    def is_redirect(self) -> bool:
+        return self.status_code in {301, 302, 303, 307, 308}
+
+    @property
+    def is_permanent_redirect(self) -> bool:
+        return self.status_code in {301, 308}
+
+    def close(self):
+        return None
 
 
 @pytest.mark.django_db
@@ -213,11 +266,15 @@ def test_confirm_upload_graphql_queues_processing(settings, authenticated_user, 
         "core.media.services._generate_gcp_signed_url",
         lambda **kwargs: "https://storage.googleapis.com/signed-upload-url",
     )
+    monkeypatch.setattr(
+        "core.media.services._get_gcs_bucket",
+        lambda: _FakeBucket(_FakeBlob()),
+    )
     queued = []
 
-    from core.media.tasks import process_media_upload
-
-    monkeypatch.setattr(process_media_upload, "delay", lambda media_id: queued.append(media_id))
+    monkeypatch.setattr(
+        "core.media.services._queue_media_processing", lambda media: queued.append(str(media.id))
+    )
 
     generated = MediaService.generate_upload_url(
         user_id=str(authenticated_user["user"].id),
@@ -256,6 +313,95 @@ def test_confirm_upload_graphql_queues_processing(settings, authenticated_user, 
     assert payload["mediaId"] == generated["media_id"]
     assert payload["status"] == "processing"
     assert queued == [generated["media_id"]]
+
+
+@pytest.mark.django_db
+def test_confirm_upload_marks_media_failed_when_uploaded_object_is_missing(
+    settings, authenticated_user, monkeypatch
+):
+    settings.GCP_STORAGE_BUCKET = "ziona-media-test"
+    monkeypatch.setattr(
+        "core.media.services._generate_gcp_signed_url",
+        lambda **kwargs: "https://storage.googleapis.com/signed-upload-url",
+    )
+    missing_blob = _FakeBlob(missing=True)
+    monkeypatch.setattr("core.media.services._get_gcs_bucket", lambda: _FakeBucket(missing_blob))
+
+    generated = MediaService.generate_upload_url(
+        user_id=str(authenticated_user["user"].id),
+        file_name="missing.jpg",
+        file_type="image/jpeg",
+        file_size=2048,
+    )
+
+    with pytest.raises(MediaError) as exc:
+        MediaService.confirm_upload(generated["media_id"], str(authenticated_user["user"].id))
+
+    media = MediaFile.objects.get(id=generated["media_id"])
+    assert exc.value.code == "MEDIA_OBJECT_NOT_FOUND"
+    assert media.status == "failed"
+    assert missing_blob.deleted is True
+
+
+@pytest.mark.django_db
+def test_confirm_upload_rejects_magic_byte_mismatch(settings, authenticated_user, monkeypatch):
+    settings.GCP_STORAGE_BUCKET = "ziona-media-test"
+    monkeypatch.setattr(
+        "core.media.services._generate_gcp_signed_url",
+        lambda **kwargs: "https://storage.googleapis.com/signed-upload-url",
+    )
+    monkeypatch.setattr(
+        "core.media.services._get_gcs_bucket",
+        lambda: _FakeBucket(_FakeBlob(head=b"not-an-image")),
+    )
+
+    generated = MediaService.generate_upload_url(
+        user_id=str(authenticated_user["user"].id),
+        file_name="bad.jpg",
+        file_type="image/jpeg",
+        file_size=2048,
+    )
+
+    with pytest.raises(MediaError) as exc:
+        MediaService.confirm_upload(generated["media_id"], str(authenticated_user["user"].id))
+
+    media = MediaFile.objects.get(id=generated["media_id"])
+    assert exc.value.code == "INVALID_MEDIA_SIGNATURE"
+    assert media.status == "failed"
+
+
+def test_validate_trusted_external_image_url_accepts_allowlisted_https_image(settings, monkeypatch):
+    settings.MEDIA_URL_ALLOWLIST = ["cdn.example.com"]
+    monkeypatch.setattr(
+        "core.media.services._head_external_media_url",
+        lambda url: _FakeHeadResponse(content_type="image/png"),
+    )
+
+    result = validate_trusted_external_image_url("https://cdn.example.com/path/file.png")
+
+    assert result == "https://cdn.example.com/path/file.png"
+
+
+def test_validate_trusted_external_image_url_rejects_non_allowlisted_host(settings):
+    settings.MEDIA_URL_ALLOWLIST = ["cdn.example.com"]
+
+    with pytest.raises(MediaError) as exc:
+        validate_trusted_external_image_url("https://evil.example.com/file.jpg")
+
+    assert exc.value.code == "INVALID_MEDIA_URL"
+
+
+def test_validate_trusted_external_image_url_rejects_external_video(settings, monkeypatch):
+    settings.MEDIA_URL_ALLOWLIST = ["cdn.example.com"]
+    monkeypatch.setattr(
+        "core.media.services._head_external_media_url",
+        lambda url: _FakeHeadResponse(content_type="video/mp4"),
+    )
+
+    with pytest.raises(MediaError) as exc:
+        validate_trusted_external_image_url("https://cdn.example.com/file.mp4")
+
+    assert exc.value.code == "INVALID_MEDIA_URL"
 
 
 @pytest.mark.django_db
@@ -301,6 +447,54 @@ def test_media_status_query_returns_processing_state(settings, authenticated_use
     assert payload["mediaId"] == str(media.id)
     assert payload["status"] == "processing"
     assert payload["mediaUrl"].endswith("/uploads/test/images/circle-cover.jpg")
+
+
+@pytest.mark.django_db
+def test_media_status_query_returns_failure_reason(settings, authenticated_user):
+    settings.GCP_STORAGE_BUCKET = "ziona-media-test"
+    media = MediaFile.objects.create(
+        user=authenticated_user["user"],
+        file_name="clip.mp4",
+        file_type="video/mp4",
+        file_size=2048,
+        media_type="video",
+        storage_path="uploads/test/videos/clip.mp4",
+        status="failed",
+        processing_error_code="VIDEO_PROCESSING_RESOURCE_LIMIT",
+        processing_error_message="Video processing exceeded available server resources.",
+        processing_failed_stage="video_optimize",
+    )
+
+    client = Client()
+    client.defaults["HTTP_AUTHORIZATION"] = f"Bearer {authenticated_user['access_token']}"
+    response = client.post(
+        "/graphql/",
+        data=json.dumps(
+            {
+                "query": """
+                query MediaStatus($mediaId: String!) {
+                  mediaStatus(mediaId: $mediaId) {
+                    success
+                    mediaId
+                    status
+                    error { code message details }
+                  }
+                }
+                """,
+                "variables": {"mediaId": str(media.id)},
+            }
+        ),
+        content_type="application/json",
+    )
+
+    content = json.loads(response.content)
+    assert "errors" not in content
+    payload = content["data"]["mediaStatus"]
+    assert payload["success"] is True
+    assert payload["status"] == "failed"
+    assert payload["error"]["code"] == "VIDEO_PROCESSING_RESOURCE_LIMIT"
+    assert payload["error"]["message"] == "Video processing exceeded available server resources."
+    assert payload["error"]["details"]["stage"] == "video_optimize"
 
 
 @pytest.mark.django_db

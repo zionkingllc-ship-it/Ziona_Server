@@ -4,9 +4,13 @@ import pytest
 
 from core.media.models import MediaFile
 from core.media.tasks import (
+    _classify_processing_failure,
     _optimize_image_file,
     _optimize_video_file,
     _optimize_video_media,
+    finalize_media_ready,
+    generate_video_thumbnail_stage,
+    optimize_image_media_stage,
     process_media_upload,
 )
 
@@ -71,7 +75,62 @@ def test_optimize_video_file_raises_when_ffmpeg_fails(tmp_path, monkeypatch):
 
 
 @pytest.mark.django_db
-def test_process_media_upload_sets_ready_after_image_optimization(create_user, monkeypatch):
+def test_classify_video_resource_limit_failure(create_user):
+    media = MediaFile.objects.create(
+        user=create_user(),
+        file_name="clip.mp4",
+        file_type="video/mp4",
+        file_size=2048,
+        media_type="video",
+        storage_path="uploads/test/videos/clip.mp4",
+        status="processing",
+    )
+
+    code, message = _classify_processing_failure(
+        media,
+        RuntimeError("FFmpeg exited with code -11:"),
+    )
+
+    assert code == "VIDEO_PROCESSING_RESOURCE_LIMIT"
+    assert "server resources" in message
+
+
+@pytest.mark.django_db
+def test_process_media_upload_queues_image_pipeline(create_user, monkeypatch):
+    user = create_user()
+    media = MediaFile.objects.create(
+        user=user,
+        file_name="image.jpg",
+        file_type="image/jpeg",
+        file_size=2048,
+        media_type="image",
+        storage_path="uploads/test/images/image.jpg",
+        status="processing",
+    )
+    queued = {}
+
+    class FakeAsyncResult:
+        id = "pipeline-1"
+
+    class FakePipeline:
+        def __init__(self, steps):
+            queued["steps"] = steps
+
+        def apply_async(self):
+            queued["applied"] = True
+            return FakeAsyncResult()
+
+    monkeypatch.setattr("core.media.tasks.chain", lambda *steps: FakePipeline(steps))
+
+    result = process_media_upload(str(media.id))
+
+    assert result == str(media.id)
+    assert queued["applied"] is True
+    assert len(queued["steps"]) == 2
+
+
+@pytest.mark.django_db
+def test_optimize_image_media_stage_sets_metadata(create_user, monkeypatch):
     user = create_user()
     media = MediaFile.objects.create(
         user=user,
@@ -91,16 +150,41 @@ def test_process_media_upload_sets_ready_after_image_optimization(create_user, m
 
     monkeypatch.setattr("core.media.tasks._optimize_image_media", fake_optimize)
 
-    process_media_upload(str(media.id))
+    result = optimize_image_media_stage(str(media.id))
 
     media.refresh_from_db()
-    assert media.status == "ready"
+    assert result == str(media.id)
     assert media.file_size == 1024
     assert media.width == 640
 
 
 @pytest.mark.django_db
-def test_process_media_upload_marks_failed_when_optimization_fails(create_user, monkeypatch):
+def test_generate_video_thumbnail_stage_marks_failed_without_retry_storm(create_user, monkeypatch):
+    user = create_user()
+    media = MediaFile.objects.create(
+        user=user,
+        file_name="video.mp4",
+        file_type="video/mp4",
+        file_size=2048,
+        media_type="video",
+        storage_path="uploads/test/videos/video.mp4",
+        status="processing",
+    )
+
+    monkeypatch.setattr(
+        "core.media.tasks._generate_video_thumbnail",
+        lambda media_file: (_ for _ in ()).throw(RuntimeError("thumbnail failed")),
+    )
+
+    with pytest.raises(RuntimeError, match="thumbnail failed"):
+        generate_video_thumbnail_stage(str(media.id))
+
+    media.refresh_from_db()
+    assert media.status == "failed"
+
+
+@pytest.mark.django_db
+def test_finalize_media_ready_marks_processing_media_ready(create_user):
     user = create_user()
     media = MediaFile.objects.create(
         user=user,
@@ -112,16 +196,11 @@ def test_process_media_upload_marks_failed_when_optimization_fails(create_user, 
         status="processing",
     )
 
-    monkeypatch.setattr(
-        "core.media.tasks._optimize_image_media",
-        lambda media_file: (_ for _ in ()).throw(RuntimeError("cannot optimize")),
-    )
-
-    with pytest.raises(Exception, match="cannot optimize"):
-        process_media_upload(str(media.id))
+    result = finalize_media_ready(str(media.id))
 
     media.refresh_from_db()
-    assert media.status == "failed"
+    assert result == str(media.id)
+    assert media.status == "ready"
 
 
 @pytest.mark.django_db

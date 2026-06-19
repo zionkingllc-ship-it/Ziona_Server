@@ -10,15 +10,14 @@ import logging
 
 from strawberry.types import Info
 
+from core.shared.request_utils import get_client_ip
+
 logger = logging.getLogger("core.admin_dashboard")
 
 
 def _get_client_ip(request) -> str:
-    """Extract client IP from request, handling proxies."""
-    forwarded = request.META.get("HTTP_X_FORWARDED_FOR")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
-    return request.META.get("REMOTE_ADDR", "unknown")
+    """Extract client IP using the shared trusted-proxy helper."""
+    return get_client_ip(request)
 
 
 def get_admin_user(info: Info):
@@ -39,7 +38,7 @@ def get_admin_user(info: Info):
     token = auth_header[7:]
 
     try:
-        payload = TokenService.validate_access_token(token)
+        payload = TokenService.validate_access_token(token, enforce_revocation=True)
     except Exception:
         return None
 

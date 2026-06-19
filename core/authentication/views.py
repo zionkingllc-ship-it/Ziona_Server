@@ -28,6 +28,7 @@ from core.authentication.response_helpers import (
     success_response,
 )
 from core.authentication.services import AuthenticationError, AuthService
+from core.shared.request_utils import get_client_ip
 from core.users.models import User
 
 logger = logging.getLogger("core.authentication")
@@ -41,11 +42,8 @@ DELETION_ACKNOWLEDGEMENT_KEYS = (
 
 
 def _get_client_ip(request: HttpRequest) -> str:
-    """Extract client IP from request."""
-    x_forwarded_for = request.META.get("HTTP_X_FORWARDED_FOR")
-    if x_forwarded_for:
-        return x_forwarded_for.split(",")[0].strip()
-    return request.META.get("REMOTE_ADDR", "unknown")
+    """Extract client IP using the shared trusted-proxy helper."""
+    return get_client_ip(request)
 
 
 def _parse_json_body(request: HttpRequest) -> dict:
@@ -83,6 +81,8 @@ def _auth_error_response(
         "APPLE_KEYS_UNAVAILABLE": 503,
         "APPLE_KEYS_INVALID": 503,
         "OAUTH_NOT_CONFIGURED": 503,
+        "AUTH_SERVICE_UNAVAILABLE": 503,
+        "OTP_SERVICE_UNAVAILABLE": 503,
         "APPLE_TOKEN_EXPIRED": 401,
         "INVALID_OAUTH_TOKEN": 400,
         "APPLE_NONCE_REQUIRED": 400,
@@ -114,10 +114,15 @@ def _authenticated_user_id_from_request(request: HttpRequest) -> str:
     if not access_token:
         raise AuthenticationError("Authentication required", "UNAUTHENTICATED")
 
-    from core.authentication.tokens import TokenError, TokenService
+    from core.authentication.tokens import TokenError, TokenInfrastructureError, TokenService
 
     try:
-        payload = TokenService.validate_access_token(access_token)
+        payload = TokenService.validate_access_token(access_token, enforce_revocation=True)
+    except TokenInfrastructureError:
+        raise AuthenticationError(
+            "Authentication service is temporarily unavailable. Please try again.",
+            "AUTH_SERVICE_UNAVAILABLE",
+        ) from None
     except TokenError:
         raise AuthenticationError("Invalid or expired token", "INVALID_TOKEN") from None
 
@@ -447,12 +452,25 @@ class ChangePasswordView(BaseAuthView):
 
         current_jti = None
         if sign_out_other_devices:
-            from core.authentication.tokens import TokenError, TokenService
+            from core.authentication.tokens import (
+                TokenError,
+                TokenInfrastructureError,
+                TokenService,
+            )
 
             auth_header = request.META.get("HTTP_AUTHORIZATION", "")
             access_token = auth_header[7:] if auth_header.startswith("Bearer ") else ""
             try:
-                payload = TokenService.validate_access_token(access_token)
+                payload = TokenService.validate_access_token(
+                    access_token,
+                    enforce_revocation=True,
+                )
+            except TokenInfrastructureError:
+                return error_response(
+                    message="Authentication service is temporarily unavailable. Please try again.",
+                    code="AUTH_SERVICE_UNAVAILABLE",
+                    status=503,
+                )
             except TokenError:
                 return error_response(
                     message="Invalid or expired token. Please re-login.",

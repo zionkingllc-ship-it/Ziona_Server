@@ -2,6 +2,7 @@ import json
 from unittest.mock import patch
 
 from django.test import Client
+from django.utils import timezone
 
 
 class TestRegisterEndpoint:
@@ -329,7 +330,7 @@ class TestResendOTPEndpoint:
 class TestPasswordResetEndpoint:
     """Test POST /api/auth/password-reset."""
 
-    @patch("core.shared.tasks.email_tasks.send_email_async.delay")
+    @patch("core.shared.tasks.email_tasks.queue_email_delivery")
     def test_password_reset_request_queues_html_email(
         self, mock_email, api_client: Client, create_user
     ):
@@ -542,6 +543,28 @@ class TestDeleteAccountEndpoint:
         assert response.status_code == 200
         assert response.json()["success"] is True
         assert not User.objects.filter(id=user.id).exists()
+
+    def test_delete_account_rejects_invalidated_sensitive_token(
+        self, api_client: Client, authenticated_user
+    ):
+        user = authenticated_user["user"]
+        user.token_invalid_before = timezone.now()
+        user.save(update_fields=["token_invalid_before", "updated_at"])
+
+        response = api_client.post(
+            "/api/auth/delete-account",
+            data=json.dumps(
+                {
+                    "password": "TestPass123!",
+                    "acknowledgePermanentDeletion": True,
+                }
+            ),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {authenticated_user['access_token']}",
+        )
+
+        assert response.status_code == 401
+        assert response.json()["error"]["code"] == "INVALID_TOKEN"
 
 
 class TestDeactivateAccountEndpoint:

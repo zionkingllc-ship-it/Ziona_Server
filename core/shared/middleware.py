@@ -8,6 +8,8 @@ from collections import OrderedDict
 from django.conf import settings
 from django.http import HttpRequest, HttpResponse, JsonResponse
 
+from core.shared.request_utils import get_client_ip
+
 logger = logging.getLogger("core.middleware")
 
 
@@ -194,20 +196,8 @@ class RateLimitMiddleware:
 
 
 def _get_client_ip(request: HttpRequest) -> str:
-    """Extract the client IP address from request headers.
-
-    Handles X-Forwarded-For from proxies/load balancers.
-
-    Args:
-        request: The incoming HTTP request.
-
-    Returns:
-        Client IP address as a string.
-    """
-    x_forwarded_for = request.META.get("HTTP_X_FORWARDED_FOR")
-    if x_forwarded_for:
-        return x_forwarded_for.split(",")[0].strip()
-    return request.META.get("REMOTE_ADDR", "unknown")
+    """Delegate client IP extraction to the shared trusted-proxy helper."""
+    return get_client_ip(request)
 
 
 def _parse_rate_limit(limit_str: str) -> tuple[int, int]:

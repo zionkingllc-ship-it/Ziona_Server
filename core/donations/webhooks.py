@@ -140,9 +140,9 @@ def _handle_payment_failed(invoice: dict) -> None:
     # Queue failure email
     if customer_email:
         try:
-            from core.shared.tasks.email_tasks import send_email_async
+            from core.shared.tasks.email_tasks import queue_email_delivery
 
-            send_email_async.delay(
+            queue_email_delivery(
                 subject="Action required: Payment failed",
                 message=(
                     "Hi,\n\nWe were unable to process your recent donation payment. "
@@ -151,6 +151,7 @@ def _handle_payment_failed(invoice: dict) -> None:
                 ),
                 from_email=settings.DEFAULT_FROM_EMAIL,
                 recipient_list=[customer_email],
+                email_kind="donation_payment_failed",
             )
         except Exception:  # noqa: BLE001
             logger.error("payment_failed_email_error", exc_info=True)

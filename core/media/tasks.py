@@ -1,8 +1,4 @@
-"""
-Celery tasks for media processing.
-
-Handles post-upload file validation and processing.
-"""
+"""Celery tasks for staged media processing."""
 
 import logging
 import os
@@ -11,80 +7,170 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-from celery import shared_task
+from celery import chain, shared_task
 from django.conf import settings
+from django.db import DatabaseError
 from django.utils import timezone
+from google.api_core import exceptions as gcs_exceptions
+from PIL import UnidentifiedImageError
 
 from core.media.models import MediaFile, MediaStatus, MediaType
 
 logger = logging.getLogger("core.media")
 
 
-@shared_task(
-    bind=True,
-    max_retries=3,
-    default_retry_delay=30,
-    time_limit=300,
+DETERMINISTIC_MEDIA_EXCEPTIONS = (
+    RuntimeError,
+    subprocess.TimeoutExpired,
+    UnidentifiedImageError,
+    ValueError,
 )
-def process_media_upload(self, media_id: str) -> None:
-    """Process an uploaded media file.
+TRANSIENT_MEDIA_EXCEPTIONS = (
+    DatabaseError,
+    gcs_exceptions.GoogleAPICallError,
+    gcs_exceptions.RetryError,
+)
 
-    Steps:
-    1. Validate the MediaFile record exists.
-    2. Optimize and replace the canonical GCS object.
-    3. For videos: generate a thumbnail.
-    4. Update status to READY only after processing succeeds.
 
-    Args:
-        media_id: UUID of the MediaFile to process.
-    """
-    try:
-        media_file = MediaFile.objects.get(id=media_id)
-    except MediaFile.DoesNotExist:
-        logger.error("Media file not found: %s", media_id)
-        return
+@shared_task(bind=True, max_retries=2, default_retry_delay=15, time_limit=60)
+def process_media_upload(self, media_id: str) -> str | None:
+    """Queue a staged processing pipeline for the uploaded media."""
+    media_file = _get_media_file(media_id)
+    if media_file is None:
+        logger.error("media_file_not_found", extra={"media_id": media_id})
+        return None
+    if media_file.status == MediaStatus.FAILED:
+        logger.info("media_processing_skipped_failed", extra={"media_id": media_id})
+        return str(media_file.id)
+    if media_file.status == MediaStatus.READY:
+        logger.info("media_processing_skipped_ready", extra={"media_id": media_id})
+        return str(media_file.id)
+    if media_file.status == MediaStatus.PENDING:
+        media_file.status = MediaStatus.PROCESSING
+        media_file.save(update_fields=["status", "updated_at"])
 
     logger.info(
-        "Processing media upload",
+        "media_processing_pipeline_start",
         extra={
-            "media_id": media_id,
+            "media_id": str(media_file.id),
             "media_type": media_file.media_type,
             "user_id": str(media_file.user_id),
         },
     )
 
+    if media_file.media_type == MediaType.IMAGE:
+        pipeline = chain(
+            optimize_image_media_stage.s(str(media_file.id)),
+            finalize_media_ready.s(),
+        )
+    elif media_file.media_type == MediaType.VIDEO:
+        pipeline = chain(
+            optimize_video_media_stage.s(str(media_file.id)),
+            generate_video_thumbnail_stage.s(),
+            finalize_media_ready.s(),
+        )
+    else:
+        _mark_media_failed(media_file, stage="pipeline", exc=ValueError("Unsupported media type"))
+        raise ValueError(f"Unsupported media type: {media_file.media_type}")
+
     try:
-        if media_file.status == MediaStatus.PENDING:
-            media_file.status = MediaStatus.PROCESSING
-            media_file.save(update_fields=["status", "updated_at"])
+        async_result = pipeline.apply_async()
+    except Exception as exc:  # noqa: BLE001
+        _handle_stage_failure(self, media_file, exc, stage="pipeline_enqueue")
+        return None
 
-        if media_file.media_type == MediaType.IMAGE:
-            _optimize_image_media(media_file)
+    logger.info(
+        "media_processing_pipeline_queued",
+        extra={"media_id": str(media_file.id), "pipeline_task_id": async_result.id},
+    )
+    return str(media_file.id)
 
-        if media_file.media_type == MediaType.VIDEO:
-            _optimize_video_media(media_file)
-            _generate_video_thumbnail(media_file)
 
+@shared_task(
+    bind=True,
+    max_retries=2,
+    default_retry_delay=30,
+    retry_backoff=True,
+    retry_jitter=True,
+    time_limit=180,
+)
+def optimize_image_media_stage(self, media_id: str) -> str:
+    """Optimize an uploaded image and persist its canonical metadata."""
+    media_file = _get_media_file_or_raise(media_id)
+    if media_file.status == MediaStatus.FAILED:
+        return str(media_file.id)
+
+    try:
+        _optimize_image_media(media_file)
+    except Exception as exc:  # noqa: BLE001
+        _handle_stage_failure(self, media_file, exc, stage="image_optimize")
+
+    return str(media_file.id)
+
+
+@shared_task(
+    bind=True,
+    max_retries=2,
+    default_retry_delay=45,
+    retry_backoff=True,
+    retry_jitter=True,
+    time_limit=300,
+)
+def optimize_video_media_stage(self, media_id: str) -> str:
+    """Normalize an uploaded video and persist canonical metadata."""
+    media_file = _get_media_file_or_raise(media_id)
+    if media_file.status == MediaStatus.FAILED:
+        return str(media_file.id)
+
+    try:
+        _optimize_video_media(media_file)
+    except Exception as exc:  # noqa: BLE001
+        _handle_stage_failure(self, media_file, exc, stage="video_optimize")
+
+    return str(media_file.id)
+
+
+@shared_task(
+    bind=True,
+    max_retries=2,
+    default_retry_delay=30,
+    retry_backoff=True,
+    retry_jitter=True,
+    time_limit=120,
+)
+def generate_video_thumbnail_stage(self, media_id: str) -> str:
+    """Generate a thumbnail from the already-optimized canonical video."""
+    media_file = _get_media_file_or_raise(media_id)
+    if media_file.status == MediaStatus.FAILED:
+        return str(media_file.id)
+
+    try:
+        _generate_video_thumbnail(media_file)
+    except Exception as exc:  # noqa: BLE001
+        _handle_stage_failure(self, media_file, exc, stage="video_thumbnail")
+
+    return str(media_file.id)
+
+
+@shared_task(bind=True, max_retries=1, default_retry_delay=30, time_limit=60)
+def finalize_media_ready(self, media_id: str) -> str | None:
+    """Mark processed media READY once every prior pipeline stage has succeeded."""
+    media_file = _get_media_file(media_id)
+    if media_file is None:
+        logger.error("media_finalize_missing", extra={"media_id": media_id})
+        return None
+    if media_file.status == MediaStatus.FAILED:
+        logger.info("media_finalize_skipped_failed", extra={"media_id": media_id})
+        return str(media_file.id)
+
+    try:
         media_file.status = MediaStatus.READY
         media_file.save(update_fields=["status", "updated_at"])
+    except Exception as exc:  # noqa: BLE001
+        _handle_stage_failure(self, media_file, exc, stage="finalize")
 
-        logger.info(
-            "Media processing complete",
-            extra={"media_id": media_id, "status": "ready"},
-        )
-
-    except Exception as exc:
-        logger.error(
-            "Media processing failed for %s: %s",
-            media_id,
-            exc,
-            exc_info=True,
-        )
-        media_file.status = MediaStatus.FAILED
-        media_file.save(update_fields=["status", "updated_at"])
-
-        # Retry on catastrophic failure (DB unavailable, OOM, etc.)
-        raise self.retry(exc=exc) from exc
+    logger.info("media_processing_complete", extra={"media_id": media_id, "status": "ready"})
+    return str(media_file.id)
 
 
 @shared_task(bind=True, max_retries=1, default_retry_delay=60, time_limit=180)
@@ -112,7 +198,7 @@ def cleanup_stale_media_uploads(self) -> int:
                     )
             media_file.status = MediaStatus.FAILED
             media_file.save(update_fields=["status", "updated_at"])
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         logger.error("stale_media_cleanup_failed", exc_info=True)
         raise self.retry(exc=exc) from exc
 
@@ -237,6 +323,8 @@ def _optimize_video_file(input_path: Path, output_path: Path) -> None:
         "yuv420p",
         "-movflags",
         "+faststart",
+        "-threads",
+        "1",
         "-c:a",
         "aac",
         "-b:a",
@@ -246,7 +334,7 @@ def _optimize_video_file(input_path: Path, output_path: Path) -> None:
     result = subprocess.run(
         cmd,  # noqa: S603
         capture_output=True,
-        timeout=240,
+        timeout=settings.MEDIA_VIDEO_OPTIMIZE_TIMEOUT_SECONDS,
         check=False,
     )
     if result.returncode != 0:
@@ -317,132 +405,185 @@ def _upload_blob(storage_path: str, source: Path, content_type: str) -> None:
 
 
 def _generate_video_thumbnail(media_file: MediaFile) -> None:
-    """Extract a square JPEG thumbnail from a video and upload it to GCS.
+    """Extract a square JPEG thumbnail from a locally downloaded optimized video."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        optimized_video_path = Path(tmpdir) / "optimized.mp4"
+        thumbnail_file_path = Path(tmpdir) / "thumbnail.jpg"
 
-    Design principles:
-    - Streams from GCS via a signed URL — never downloads the full video.
-    - Captures JPEG bytes from FFmpeg stdout via a pipe — no temp files on disk.
-    - Uploads directly server-to-GCS using the storage client — no signed URL needed.
+        _download_blob(media_file.storage_path, optimized_video_path)
+        _generate_video_thumbnail_file(optimized_video_path, thumbnail_file_path)
 
-    FFmpeg command breakdown:
-        -ss 1           Seek to the 1-second mark (avoids black frames on many videos)
-        -i <url>        Read from the GCS signed URL (FFmpeg handles HTTP streaming)
-        -vframes 1      Extract exactly one frame
-        -vf "crop=..."  Center-crop to a square, then scale to 640×640
-        -vcodec mjpeg   Encode as JPEG
-        -f image2       Force image output format
-        pipe:1          Write raw JPEG bytes to stdout (no disk writes)
+        thumbnail_path = f"thumbnails/{media_file.user_id}/{media_file.id}.jpg"
+        _upload_blob(thumbnail_path, thumbnail_file_path, "image/jpeg")
 
-    Args:
-        media_file: The MediaFile instance to generate a thumbnail for.
+        media_file.thumbnail_path = thumbnail_path
+        media_file.save(update_fields=["thumbnail_path", "updated_at"])
 
-    Raises:
-        RuntimeError: If FFmpeg fails or produces no output.
-        Exception: On GCS upload failure.
-    """
-    from core.media.services import _generate_gcp_signed_url
+        logger.info(
+            "thumbnail_generated",
+            extra={
+                "media_id": str(media_file.id),
+                "thumbnail_path": thumbnail_path,
+                "size_bytes": thumbnail_file_path.stat().st_size,
+            },
+        )
 
-    # -----------------------------------------------------------------------
-    # Step 1: Generate a short-lived signed READ URL for the video.
-    # This allows FFmpeg to stream the first few seconds directly from GCS
-    # without downloading the entire file.
-    # -----------------------------------------------------------------------
-    # If storage_path is already a full URL (e.g. manual entry or external import),
-    # use it directly. Otherwise, generate a signed URL.
-    if media_file.storage_path.startswith(("http://", "https://")):
-        video_url = media_file.storage_path
-    else:
-        try:
-            video_url = _generate_gcp_signed_url(
-                bucket=settings.GCP_STORAGE_BUCKET,
-                blob_path=media_file.storage_path,
-                content_type=media_file.file_type,
-                expiry_seconds=900,  # 15 min — sufficient for FFmpeg to connect
-                method="GET",
-            )
-        except Exception as e:
-            # Fall back to the public URL if signed URL generation fails.
-            # This works as long as the bucket has public read access.
-            logger.warning("Signed URL generation failed, falling back to public URL: %s", e)
-            video_url = (
-                f"https://storage.googleapis.com/"
-                f"{settings.GCP_STORAGE_BUCKET}/{media_file.storage_path}"
-            )
 
-    # -----------------------------------------------------------------------
-    # Step 2: Run FFmpeg to extract a single square JPEG frame.
-    # stdout=PIPE captures the JPEG bytes directly in memory.
-    # stderr=PIPE silences FFmpeg's verbose output from polluting logs.
-    # timeout=60 ensures a hung FFmpeg process never blocks a worker forever.
-    #
-    # imageio_ffmpeg.get_ffmpeg_exe() returns the absolute path to the
-    # pip-bundled static FFmpeg binary — no system install required.
-    # -----------------------------------------------------------------------
+def _generate_video_thumbnail_file(input_path: Path, output_path: Path) -> None:
+    """Generate a thumbnail image from a local optimized video file."""
     import imageio_ffmpeg
 
     ffmpeg_bin = imageio_ffmpeg.get_ffmpeg_exe()
     cmd = [
         ffmpeg_bin,
+        "-y",
         "-ss",
-        "1",  # Seek to 1s
+        "1",
         "-i",
-        video_url,  # Read from GCS
+        str(input_path),
         "-vframes",
-        "1",  # One frame only
+        "1",
         "-vf",
-        "crop=min(iw\\,ih):min(iw\\,ih),scale=640:640",  # Square + resize
+        "crop=min(iw\\,ih):min(iw\\,ih),scale=640:640",
         "-f",
-        "image2",  # Image format
+        "image2",
         "-vcodec",
-        "mjpeg",  # JPEG codec
+        "mjpeg",
         "-loglevel",
-        "error",  # Suppress noise
-        "pipe:1",  # Output to stdout
+        "error",
+        "-threads",
+        "1",
+        str(output_path),
     ]
     result = subprocess.run(
         cmd,  # noqa: S603
         capture_output=True,
-        timeout=60,
+        timeout=settings.MEDIA_THUMBNAIL_TIMEOUT_SECONDS,
         check=False,
     )
 
     if result.returncode != 0:
         stderr = result.stderr.decode("utf-8", errors="replace")
         raise RuntimeError(f"FFmpeg exited with code {result.returncode}: {stderr[:500]}")
+    if not output_path.exists() or output_path.stat().st_size == 0:
+        raise RuntimeError("FFmpeg produced an empty thumbnail image")
 
-    jpeg_bytes = result.stdout
-    if not jpeg_bytes:
-        raise RuntimeError("FFmpeg produced empty output — video may be corrupt or too short")
 
-    logger.debug(
-        "FFmpeg frame extracted",
-        extra={"media_id": str(media_file.id), "jpeg_size_bytes": len(jpeg_bytes)},
+def _get_media_file(media_id: str) -> MediaFile | None:
+    try:
+        return MediaFile.objects.get(id=media_id)
+    except MediaFile.DoesNotExist:
+        return None
+
+
+def _get_media_file_or_raise(media_id: str) -> MediaFile:
+    media_file = _get_media_file(media_id)
+    if media_file is None:
+        raise ValueError(f"Media file {media_id} does not exist")
+    return media_file
+
+
+def get_ffmpeg_runtime_info() -> dict[str, str | None]:
+    """Return the resolved FFmpeg binary path and version banner."""
+    import imageio_ffmpeg
+
+    ffmpeg_bin = imageio_ffmpeg.get_ffmpeg_exe()
+    cmd = [ffmpeg_bin, "-version"]
+    version_result = subprocess.run(
+        cmd,  # noqa: S603
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
     )
+    version_line = None
+    if version_result.stdout:
+        version_line = version_result.stdout.splitlines()[0].strip()
+    return {"path": ffmpeg_bin, "version": version_line}
 
-    # -----------------------------------------------------------------------
-    # Step 3: Upload the JPEG bytes directly to GCS.
-    # Server-to-GCS uploads use the storage client directly — no signed URL
-    # needed. This is faster and does not count against Upstash.
-    # -----------------------------------------------------------------------
-    thumbnail_path = f"thumbnails/{media_file.user_id}/{media_file.id}.jpg"
 
-    bucket = _get_gcs_bucket()
-    blob = bucket.blob(thumbnail_path)
-    blob.upload_from_string(jpeg_bytes, content_type="image/jpeg")
+def _handle_stage_failure(task, media_file: MediaFile, exc: Exception, *, stage: str) -> None:
+    if isinstance(exc, DETERMINISTIC_MEDIA_EXCEPTIONS):
+        _mark_media_failed(media_file, stage=stage, exc=exc)
+        raise exc
 
-    # -----------------------------------------------------------------------
-    # Step 4: Persist the thumbnail path on the MediaFile record.
-    # The thumbnail_url property on the model already knows how to build
-    # the correct GCS URL from this relative path.
-    # -----------------------------------------------------------------------
-    media_file.thumbnail_path = thumbnail_path
-    media_file.save(update_fields=["thumbnail_path", "updated_at"])
+    if isinstance(exc, TRANSIENT_MEDIA_EXCEPTIONS):
+        try:
+            raise task.retry(exc=exc)
+        except task.MaxRetriesExceededError:
+            _mark_media_failed(media_file, stage=stage, exc=exc)
+            raise exc from exc
 
-    logger.info(
-        "Thumbnail generated and uploaded",
+    _mark_media_failed(media_file, stage=stage, exc=exc)
+    raise exc from exc
+
+
+def _mark_media_failed(media_file: MediaFile, *, stage: str, exc: Exception) -> None:
+    code, message = _classify_processing_failure(media_file, exc)
+    media_file.status = MediaStatus.FAILED
+    media_file.processing_error_code = code
+    media_file.processing_error_message = message
+    media_file.processing_failed_stage = stage
+    media_file.save(
+        update_fields=[
+            "status",
+            "processing_error_code",
+            "processing_error_message",
+            "processing_failed_stage",
+            "updated_at",
+        ]
+    )
+    logger.error(
+        "media_processing_failed",
         extra={
             "media_id": str(media_file.id),
-            "thumbnail_path": thumbnail_path,
-            "size_bytes": len(jpeg_bytes),
+            "stage": stage,
+            "code": code,
+            "error": str(exc),
         },
+        exc_info=True,
+    )
+
+
+def _classify_processing_failure(media_file: MediaFile, exc: Exception) -> tuple[str, str]:
+    """Return a stable client-safe code/message for a media processing failure."""
+    media_kind = "Video" if media_file.media_type == MediaType.VIDEO else "Media"
+    error_text = str(exc)
+    lowered_error = error_text.lower()
+
+    if isinstance(exc, subprocess.TimeoutExpired):
+        return (
+            "VIDEO_PROCESSING_TIMEOUT"
+            if media_file.media_type == MediaType.VIDEO
+            else "MEDIA_PROCESSING_TIMEOUT",
+            f"{media_kind} processing timed out. Please try a shorter or lower-resolution file.",
+        )
+
+    if media_file.media_type == MediaType.VIDEO and (
+        "code -11" in lowered_error
+        or "sigsegv" in lowered_error
+        or "signal 11" in lowered_error
+        or "out of memory" in lowered_error
+        or "oom" in lowered_error
+    ):
+        return (
+            "VIDEO_PROCESSING_RESOURCE_LIMIT",
+            "Video processing exceeded available server resources. Please try a shorter or lower-resolution video.",
+        )
+
+    if isinstance(exc, UnidentifiedImageError):
+        return (
+            "IMAGE_PROCESSING_FAILED",
+            "Image processing failed. Please upload a valid image file.",
+        )
+
+    if media_file.media_type == MediaType.VIDEO and "ffmpeg" in lowered_error:
+        return (
+            "VIDEO_PROCESSING_FAILED",
+            "Video processing failed. Please try a different video format.",
+        )
+
+    return (
+        "MEDIA_PROCESSING_FAILED",
+        f"{media_kind} processing failed. Please try another file.",
     )

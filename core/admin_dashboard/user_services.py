@@ -290,19 +290,12 @@ class UserManagementService:
 
         _ensure_action_available(user, "delete")
 
-        # Snapshot before delete
-        user_snapshot = {
-            "username": user.username,
-            "email": user.email,
-            "full_name": user.full_name,
-            "status": user.status,
-            "created_at": user.created_at.isoformat() if user.created_at else None,
-        }
-
         # Soft delete
-        user.deleted_at = datetime.now(timezone.utc)
+        deletion_time = datetime.now(timezone.utc)
+        user.deleted_at = deletion_time
         user.is_active = False
         user.save(update_fields=["deleted_at", "is_active", "updated_at"])
+        audit_details = _build_minimal_user_audit_details(user, deleted_at=deletion_time)
 
         # Revoke all tokens and device tokens.
         _revoke_user_sessions(user.id, delete_device_tokens=True)
@@ -312,7 +305,7 @@ class UserManagementService:
             action_type=ModerationActionType.DELETED,
             reason="Admin deleted account",
             admin_user=admin_user,
-            metadata={"user_snapshot": user_snapshot},
+            metadata=audit_details.copy(),
         )
 
         log_admin_action(
@@ -320,7 +313,7 @@ class UserManagementService:
             action="USER_DELETED",
             target_type="User",
             target_id=str(user.id),
-            details={"user_snapshot": user_snapshot},
+            details=audit_details.copy(),
             ip_address=ip_address,
         )
 
@@ -543,6 +536,61 @@ class UserManagementService:
 # ─────────────────────────────────────────
 
 
+def _build_minimal_user_audit_details(user, *, deleted_at) -> dict:
+    """Return the minimum deletion audit payload needed for traceability."""
+    return {
+        "subject_user_id": str(user.id),
+        "status_before": user.status,
+        "deleted_at": deleted_at.isoformat(),
+    }
+
+
+def redact_legacy_user_snapshot_payloads(*, dry_run: bool = True) -> dict[str, int]:
+    """Remove legacy user_snapshot payloads from moderation and audit records."""
+    from core.admin_dashboard.models import AdminAuditLog, ModerationAction
+
+    redacted_audit_logs = _redact_json_snapshot_rows(
+        AdminAuditLog.objects.order_by("id"),
+        field_name="details",
+        subject_id_getter=lambda row: row.target_id,
+        dry_run=dry_run,
+    )
+    redacted_moderation_actions = _redact_json_snapshot_rows(
+        ModerationAction.objects.select_related("user").order_by("id"),
+        field_name="metadata",
+        subject_id_getter=lambda row: str(row.user_id),
+        dry_run=dry_run,
+    )
+
+    return {
+        "redacted_audit_logs": redacted_audit_logs,
+        "redacted_moderation_actions": redacted_moderation_actions,
+    }
+
+
+def _redact_json_snapshot_rows(
+    queryset, *, field_name: str, subject_id_getter, dry_run: bool
+) -> int:
+    """Strip user_snapshot payloads from JSONField-backed rows."""
+    redacted_count = 0
+
+    for row in queryset.iterator():
+        payload = getattr(row, field_name, None)
+        if not isinstance(payload, dict) or "user_snapshot" not in payload:
+            continue
+
+        sanitized_payload = dict(payload)
+        sanitized_payload.pop("user_snapshot", None)
+        sanitized_payload.setdefault("subject_user_id", subject_id_getter(row))
+        sanitized_payload.setdefault("legacy_snapshot_redacted", True)
+
+        redacted_count += 1
+        if not dry_run:
+            type(row).objects.filter(pk=row.pk).update(**{field_name: sanitized_payload})
+
+    return redacted_count
+
+
 def _user_to_dict(user) -> dict:
     """Convert User model to admin-facing dict."""
     posts_count = getattr(user, "posts_count", 0)
@@ -731,13 +779,14 @@ def _queue_moderation_email(user, action_type: str, reason: str) -> None:
         try:
             from django.conf import settings
 
-            from core.shared.tasks.email_tasks import send_email_async
+            from core.shared.tasks.email_tasks import queue_email_delivery
 
-            send_email_async.delay(
+            queue_email_delivery(
                 subject=subject,
                 message=message,
                 from_email=settings.DEFAULT_FROM_EMAIL,
                 recipient_list=[email],
+                email_kind=f"moderation_{action_type}",
             )
         except Exception:
             logger.warning(

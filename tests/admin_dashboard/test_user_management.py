@@ -1,7 +1,11 @@
 import pytest
 from django.utils import timezone
 
-from core.admin_dashboard.user_services import UserManagementService
+from core.admin_dashboard.models import AdminAuditLog, ModerationAction
+from core.admin_dashboard.user_services import (
+    UserManagementService,
+    redact_legacy_user_snapshot_payloads,
+)
 from core.users.models import User, UserStatus
 
 
@@ -81,3 +85,82 @@ def test_suspend_user(authenticated_admin, create_user):
     user.refresh_from_db()
     assert isinstance(result, dict)
     assert user.status == "suspended"
+
+
+@pytest.mark.django_db
+def test_delete_user_audit_payload_is_sanitized(authenticated_admin, create_user):
+    user = create_user("deleteme@example.com", "deleteme", "Pass123!", role="user")
+
+    result = UserManagementService.delete_user(
+        str(user.id),
+        authenticated_admin["user"],
+        ip_address="10.0.0.10",
+    )
+
+    user.refresh_from_db()
+    moderation_action = ModerationAction.objects.get(user=user)
+    audit_log = AdminAuditLog.objects.get(
+        action="USER_DELETED",
+        target_id=str(user.id),
+    )
+
+    assert result["success"] is True
+    assert user.deleted_at is not None
+    assert "user_snapshot" not in moderation_action.metadata
+    assert "user_snapshot" not in audit_log.details
+    assert moderation_action.metadata["subject_user_id"] == str(user.id)
+    assert audit_log.details["subject_user_id"] == str(user.id)
+    assert "email" not in moderation_action.metadata
+    assert "username" not in moderation_action.metadata
+    assert "full_name" not in moderation_action.metadata
+
+
+@pytest.mark.django_db
+def test_redact_legacy_user_snapshot_payloads_strips_existing_snapshots(
+    authenticated_admin,
+    create_user,
+):
+    user = create_user("legacy-snapshot@example.com", "legacy", "Pass123!", role="user")
+    legacy_snapshot = {
+        "username": user.username,
+        "email": user.email,
+        "full_name": user.full_name,
+    }
+
+    audit_log = AdminAuditLog.objects.create(
+        admin_user=authenticated_admin["user"],
+        action="USER_DELETED",
+        target_type="User",
+        target_id=str(user.id),
+        details={"user_snapshot": legacy_snapshot},
+        ip_address="10.0.0.10",
+    )
+    moderation_action = ModerationAction.objects.create(
+        user=user,
+        action_type="deleted",
+        reason="Legacy snapshot",
+        admin_user=authenticated_admin["user"],
+        metadata={"user_snapshot": legacy_snapshot},
+    )
+
+    dry_run_result = redact_legacy_user_snapshot_payloads(dry_run=True)
+    assert dry_run_result["redacted_audit_logs"] >= 1
+    assert dry_run_result["redacted_moderation_actions"] >= 1
+
+    audit_log.refresh_from_db()
+    moderation_action.refresh_from_db()
+    assert "user_snapshot" in audit_log.details
+    assert "user_snapshot" in moderation_action.metadata
+
+    apply_result = redact_legacy_user_snapshot_payloads(dry_run=False)
+    assert apply_result["redacted_audit_logs"] >= 1
+    assert apply_result["redacted_moderation_actions"] >= 1
+
+    audit_log.refresh_from_db()
+    moderation_action.refresh_from_db()
+    assert "user_snapshot" not in audit_log.details
+    assert "user_snapshot" not in moderation_action.metadata
+    assert audit_log.details["subject_user_id"] == str(user.id)
+    assert moderation_action.metadata["subject_user_id"] == str(user.id)
+    assert audit_log.details["legacy_snapshot_redacted"] is True
+    assert moderation_action.metadata["legacy_snapshot_redacted"] is True
