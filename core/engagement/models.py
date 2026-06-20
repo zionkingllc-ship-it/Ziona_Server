@@ -7,7 +7,12 @@ for all post interaction mechanics.
 
 from django.db import models
 
-from core.shared.models import SoftDeleteModel, TimestampedModel
+from core.shared.models import (
+    ActiveUserContentManager,
+    AllObjectsManager,
+    SoftDeleteModel,
+    TimestampedModel,
+)
 
 
 class Like(TimestampedModel):
@@ -80,6 +85,9 @@ class Comment(SoftDeleteModel):
     )
     text = models.TextField(max_length=500)
     mentioned_users = models.JSONField(default=list, blank=True)
+
+    objects = ActiveUserContentManager()
+    all_objects = AllObjectsManager()
 
     class Meta:
         db_table = "comments"

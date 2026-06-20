@@ -37,6 +37,7 @@ def test_render_cron_task_allowlist_covers_expected_schedules():
         "refresh-company-stats",
         "purge-expired-anchors",
         "cleanup-stale-media",
+        "purge-due-account-deletions",
     }
 
     assert expected.issubset(SCHEDULED_TASKS)

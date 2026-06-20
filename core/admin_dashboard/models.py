@@ -165,6 +165,14 @@ class ContactStatus(models.TextChoices):
     RESOLVED = "resolved", "Resolved"
 
 
+class ContactSenderType(models.TextChoices):
+    """Participant types for normalized support conversation messages."""
+
+    USER = "USER", "User"
+    ADMIN = "ADMIN", "Admin"
+    SYSTEM = "SYSTEM", "System"
+
+
 class ContactMessage(models.Model):
     """A support message submitted by a user or visitor.
 
@@ -200,6 +208,8 @@ class ContactMessage(models.Model):
         db_index=True,
     )
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    last_message_at = models.DateTimeField(null=True, blank=True, db_index=True)
     replied_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
@@ -212,40 +222,53 @@ class ContactMessage(models.Model):
                 fields=["requester_user", "-created_at"],
                 name="idx_contact_requester_created",
             ),
+            models.Index(
+                fields=["requester_user", "-last_message_at"],
+                name="idx_contact_requester_last",
+            ),
         ]
 
     def __str__(self) -> str:
         return f"Contact from {self.name} ({self.email})"
 
 
-class ContactReply(models.Model):
-    """An admin reply to a contact message.
-
-    Attributes:
-        contact: The parent contact message.
-        message: The reply body.
-        sent_by: The admin who sent the reply.
-        sent_at: Timestamp of the reply.
-    """
+class ContactConversationMessage(models.Model):
+    """A normalized user, admin, or system message in a support thread."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     contact = models.ForeignKey(
         ContactMessage,
         on_delete=models.CASCADE,
-        related_name="replies",
+        related_name="conversation_messages",
     )
-    message = models.TextField()
-    sent_by = models.ForeignKey(
+    sender_type = models.CharField(max_length=10, choices=ContactSenderType.choices)
+    sender_user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,
         null=True,
-        related_name="contact_replies_sent",
+        blank=True,
+        related_name="support_conversation_messages",
     )
-    sent_at = models.DateTimeField(auto_now_add=True)
+    message = models.TextField()
+    client_message_id = models.CharField(max_length=100, null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
 
     class Meta:
-        db_table = "contact_replies"
-        ordering = ["sent_at"]
+        db_table = "contact_conversation_messages"
+        ordering = ["created_at", "id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["contact", "client_message_id"],
+                condition=models.Q(client_message_id__isnull=False),
+                name="uq_contact_client_message",
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=["contact", "created_at", "id"],
+                name="idx_contact_message_cursor",
+            ),
+        ]
 
     def __str__(self) -> str:
-        return f"Reply to {self.contact_id} by {self.sent_by_id}"
+        return f"{self.sender_type} message in {self.contact_id}"

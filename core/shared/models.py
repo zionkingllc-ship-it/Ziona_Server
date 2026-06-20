@@ -1,6 +1,7 @@
 import uuid
 
 from django.db import models
+from django.db.models import Q
 from django.utils import timezone
 
 
@@ -41,6 +42,37 @@ class AllObjectsManager(models.Manager):
     """Manager that includes soft-deleted records."""
 
     pass
+
+
+class ActiveUserContentManager(SoftDeleteManager):
+    """Hide content whose user-owned account is outside the active lifecycle."""
+
+    def get_queryset(self):
+        return (
+            super()
+            .get_queryset()
+            .filter(
+                user__deleted_at__isnull=True,
+                user__lifecycle_state="active",
+            )
+        )
+
+
+class ActiveCreatorContentManager(SoftDeleteManager):
+    """Hide creator-owned content while preserving intentionally system-owned rows."""
+
+    def get_queryset(self):
+        return (
+            super()
+            .get_queryset()
+            .filter(
+                Q(created_by__isnull=True)
+                | Q(
+                    created_by__deleted_at__isnull=True,
+                    created_by__lifecycle_state="active",
+                )
+            )
+        )
 
 
 class SoftDeleteModel(TimestampedModel):

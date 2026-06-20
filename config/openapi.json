@@ -365,8 +365,8 @@
       },
       "delete": {
         "tags": ["Authentication"],
-        "summary": "Delete user account",
-        "description": "Permanently deletes the authenticated user's account and all associated data. Provide password or otp/code plus acknowledgePermanentDeletion=true. For compatibility, acknowledgePermanentDeletion may also be sent as a DELETE query parameter.",
+        "summary": "Schedule account deletion",
+        "description": "Schedules reversible account deletion after a 30-day grace period. Existing sessions are revoked immediately and the account is hidden. Provide password or otp/code plus acknowledgePermanentDeletion=true. For compatibility, acknowledgePermanentDeletion may also be sent as a DELETE query parameter.",
         "operationId": "deleteAccount",
         "security": [{"BearerAuth": []}],
         "requestBody": {
@@ -380,22 +380,11 @@
           }
         },
         "responses": {
-          "200": {
-            "description": "Account deleted successfully",
+          "202": {
+            "description": "Account deletion scheduled",
             "content": {
               "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "success": {"type": "boolean", "example": true},
-                    "data": {
-                      "type": "object",
-                      "properties": {
-                        "message": {"type": "string", "example": "Account permanently deleted."}
-                      }
-                    }
-                  }
-                }
+                "schema": {"$ref": "#/components/schemas/AccountDeletionScheduledResponse"}
               }
             }
           },
@@ -583,8 +572,8 @@
     "/auth/delete-account": {
       "post": {
         "tags": ["Authentication"],
-        "summary": "Delete account",
-        "description": "Permanently delete the authenticated account using password or OTP re-authentication. Requires acknowledgePermanentDeletion=true.",
+        "summary": "Schedule account deletion",
+        "description": "Schedule reversible account deletion after a 30-day grace period using password or OTP re-authentication. Requires acknowledgePermanentDeletion=true.",
         "operationId": "deleteAccountProtected",
         "security": [{"BearerAuth": []}],
         "requestBody": {
@@ -598,11 +587,11 @@
           }
         },
         "responses": {
-          "200": {
-            "description": "Account deleted successfully",
+          "202": {
+            "description": "Account deletion scheduled",
             "content": {
               "application/json": {
-                "schema": {"$ref": "#/components/schemas/MessageResponse"}
+                "schema": {"$ref": "#/components/schemas/AccountDeletionScheduledResponse"}
               }
             }
           },
@@ -616,6 +605,98 @@
           },
           "401": {
             "description": "Missing or invalid Bearer token",
+            "content": {
+              "application/json": {
+                "schema": {"$ref": "#/components/schemas/ErrorResponse"}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/reactivate": {
+      "post": {
+        "tags": ["Authentication"],
+        "summary": "Reactivate a deactivated account",
+        "description": "Explicitly reactivate an account using the short-lived recovery token returned by a valid login. No normal session is issued before confirmation.",
+        "operationId": "reactivateAccount",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {"$ref": "#/components/schemas/ReactivateAccountRequest"}
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Account reactivated and fresh tokens issued",
+            "content": {
+              "application/json": {
+                "schema": {"$ref": "#/components/schemas/AuthenticationResponse"}
+              }
+            }
+          },
+          "400": {
+            "description": "Confirmation is missing",
+            "content": {
+              "application/json": {
+                "schema": {"$ref": "#/components/schemas/ErrorResponse"}
+              }
+            }
+          },
+          "401": {
+            "description": "Recovery token is invalid or expired",
+            "content": {
+              "application/json": {
+                "schema": {"$ref": "#/components/schemas/ErrorResponse"}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/account-deletion/cancel": {
+      "post": {
+        "tags": ["Authentication"],
+        "summary": "Cancel pending account deletion",
+        "description": "Cancel a pending deletion during the grace period using the short-lived recovery token returned by a valid login.",
+        "operationId": "cancelAccountDeletion",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {"$ref": "#/components/schemas/CancelAccountDeletionRequest"}
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Deletion cancelled and fresh tokens issued",
+            "content": {
+              "application/json": {
+                "schema": {"$ref": "#/components/schemas/AuthenticationResponse"}
+              }
+            }
+          },
+          "400": {
+            "description": "Confirmation is missing",
+            "content": {
+              "application/json": {
+                "schema": {"$ref": "#/components/schemas/ErrorResponse"}
+              }
+            }
+          },
+          "401": {
+            "description": "Recovery token is invalid or expired",
+            "content": {
+              "application/json": {
+                "schema": {"$ref": "#/components/schemas/ErrorResponse"}
+              }
+            }
+          },
+          "409": {
+            "description": "Deletion is no longer cancellable",
             "content": {
               "application/json": {
                 "schema": {"$ref": "#/components/schemas/ErrorResponse"}
@@ -1253,6 +1334,64 @@
             "type": "string",
             "description": "Alias for otp. Supported for compatibility.",
             "example": "123456"
+          }
+        }
+      },
+      "ReactivateAccountRequest": {
+        "type": "object",
+        "required": ["recoveryToken", "confirmReactivation"],
+        "properties": {
+          "recoveryToken": {"type": "string"},
+          "confirmReactivation": {"type": "boolean", "example": true}
+        }
+      },
+      "CancelAccountDeletionRequest": {
+        "type": "object",
+        "required": ["recoveryToken", "confirmCancellation"],
+        "properties": {
+          "recoveryToken": {"type": "string"},
+          "confirmCancellation": {"type": "boolean", "example": true}
+        }
+      },
+      "TokenPair": {
+        "type": "object",
+        "properties": {
+          "accessToken": {"type": "string"},
+          "refreshToken": {"type": "string"},
+          "accessTokenExpiresIn": {"type": "integer", "example": 86400},
+          "refreshTokenExpiresIn": {"type": "integer", "example": 2592000},
+          "accessTokenExpiresAt": {"type": "string", "format": "date-time"},
+          "refreshTokenExpiresAt": {"type": "string", "format": "date-time"}
+        }
+      },
+      "AuthenticationResponse": {
+        "type": "object",
+        "properties": {
+          "success": {"type": "boolean", "example": true},
+          "data": {
+            "type": "object",
+            "properties": {
+              "user": {"$ref": "#/components/schemas/UserWithVerification"},
+              "tokens": {"$ref": "#/components/schemas/TokenPair"},
+              "message": {"type": "string"}
+            }
+          }
+        }
+      },
+      "AccountDeletionScheduledResponse": {
+        "type": "object",
+        "properties": {
+          "success": {"type": "boolean", "example": true},
+          "data": {
+            "type": "object",
+            "properties": {
+              "message": {"type": "string", "example": "Account deletion scheduled."},
+              "status": {"type": "string", "enum": ["PENDING_DELETION"]},
+              "requestedAt": {"type": "string", "format": "date-time"},
+              "scheduledFor": {"type": "string", "format": "date-time"},
+              "gracePeriodDays": {"type": "integer", "example": 30},
+              "canCancel": {"type": "boolean", "example": true}
+            }
           }
         }
       },

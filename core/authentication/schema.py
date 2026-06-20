@@ -26,11 +26,19 @@ class AuthPayload:
         default=None, description="The authenticated user data"
     )
     access_token: str | None = strawberry.field(
-        default=None, description="JWT access token (valid for 15 minutes)"
+        default=None, description="JWT access token (valid for 24 hours)"
     )
     refresh_token: str | None = strawberry.field(
-        default=None, description="JWT refresh token (valid for 7 days)"
+        default=None, description="JWT refresh token (valid for 30 days)"
     )
+    access_token_expires_in: int | None = strawberry.field(default=None)
+    refresh_token_expires_in: int | None = strawberry.field(default=None)
+    access_token_expires_at: str | None = strawberry.field(default=None)
+    refresh_token_expires_at: str | None = strawberry.field(default=None)
+    requires_account_recovery: bool = strawberry.field(default=False)
+    recovery_reason: str | None = strawberry.field(default=None)
+    recovery_token: str | None = strawberry.field(default=None)
+    deletion_scheduled_for: str | None = strawberry.field(default=None)
     message: str | None = strawberry.field(default=None, description="Success or error message")
     requires_verification: bool = strawberry.field(
         default=False,
@@ -188,6 +196,10 @@ class VerifyOTPPayload:
     refresh_token: str | None = strawberry.field(
         default=None, description="JWT refresh token (if applicable)"
     )
+    access_token_expires_in: int | None = strawberry.field(default=None)
+    refresh_token_expires_in: int | None = strawberry.field(default=None)
+    access_token_expires_at: str | None = strawberry.field(default=None)
+    refresh_token_expires_at: str | None = strawberry.field(default=None)
     reset_token: str | None = strawberry.field(
         default=None, description="Token to use for confirming password reset"
     )
@@ -214,6 +226,14 @@ class GoogleOAuthPayload:
     )
     access_token: str | None = strawberry.field(default=None, description="JWT access token")
     refresh_token: str | None = strawberry.field(default=None, description="JWT refresh token")
+    access_token_expires_in: int | None = strawberry.field(default=None)
+    refresh_token_expires_in: int | None = strawberry.field(default=None)
+    access_token_expires_at: str | None = strawberry.field(default=None)
+    refresh_token_expires_at: str | None = strawberry.field(default=None)
+    requires_account_recovery: bool = strawberry.field(default=False)
+    recovery_reason: str | None = strawberry.field(default=None)
+    recovery_token: str | None = strawberry.field(default=None)
+    deletion_scheduled_for: str | None = strawberry.field(default=None)
     is_new_user: bool = strawberry.field(
         default=False, description="True if a new account was created"
     )
@@ -382,6 +402,7 @@ class AuthMutations:
                 access_token=result["access_token"],
                 refresh_token=result["refresh_token"],
                 message="Email verified successfully",
+                **_token_metadata_kwargs(result),
             )
         except AuthenticationError as e:
             return AuthPayload(
@@ -486,6 +507,11 @@ class AuthMutations:
                 refresh_token=result.get("refresh_token"),
                 message=result.get("message"),
                 requires_verification=result.get("requires_verification", False),
+                requires_account_recovery=result.get("requires_account_recovery", False),
+                recovery_reason=result.get("recovery_reason"),
+                recovery_token=result.get("recovery_token"),
+                deletion_scheduled_for=result.get("deletion_scheduled_for"),
+                **_token_metadata_kwargs(result),
             )
         except AuthenticationError as e:
             return AuthPayload(
@@ -524,6 +550,7 @@ class AuthMutations:
                 success=True,
                 access_token=result["access_token"],
                 refresh_token=result["refresh_token"],
+                **_token_metadata_kwargs(result),
             )
         except AuthenticationError as e:
             return AuthPayload(
@@ -717,9 +744,14 @@ class AuthMutations:
             return GoogleOAuthPayload(
                 success=True,
                 user=AuthenticatedUserType.from_model(result["user"]),
-                access_token=result["access_token"],
-                refresh_token=result["refresh_token"],
+                access_token=result.get("access_token"),
+                refresh_token=result.get("refresh_token"),
                 is_new_user=result["is_new_user"],
+                requires_account_recovery=result.get("requires_account_recovery", False),
+                recovery_reason=result.get("recovery_reason"),
+                recovery_token=result.get("recovery_token"),
+                deletion_scheduled_for=result.get("deletion_scheduled_for"),
+                **_token_metadata_kwargs(result),
             )
         except AuthenticationError as e:
             return GoogleOAuthPayload(
@@ -755,9 +787,14 @@ class AuthMutations:
             return GoogleOAuthPayload(
                 success=True,
                 user=AuthenticatedUserType.from_model(result["user"]),
-                access_token=result["access_token"],
-                refresh_token=result["refresh_token"],
+                access_token=result.get("access_token"),
+                refresh_token=result.get("refresh_token"),
                 is_new_user=result["is_new_user"],
+                requires_account_recovery=result.get("requires_account_recovery", False),
+                recovery_reason=result.get("recovery_reason"),
+                recovery_token=result.get("recovery_token"),
+                deletion_scheduled_for=result.get("deletion_scheduled_for"),
+                **_token_metadata_kwargs(result),
             )
         except AuthenticationError as e:
             return GoogleOAuthPayload(
@@ -871,6 +908,8 @@ class AuthMutations:
                 payload.access_token = result["access_token"]
             if "refresh_token" in result:
                 payload.refresh_token = result["refresh_token"]
+            for field_name, value in _token_metadata_kwargs(result).items():
+                setattr(payload, field_name, value)
 
             return payload
         except AuthenticationError as e:
@@ -970,6 +1009,7 @@ class AuthMutations:
                 access_token=result["access_token"],
                 refresh_token=result["refresh_token"],
                 message="Password reset successfully",
+                **_token_metadata_kwargs(result),
             )
         except AuthenticationError as e:
             return AuthPayload(
@@ -1026,3 +1066,14 @@ class AuthMutations:
                 message=e.message,
                 error_code=e.code,
             )
+
+
+def _token_metadata_kwargs(result: dict) -> dict:
+    """Build GraphQL expiry fields when a result contains a complete token pair."""
+    access_token = result.get("access_token")
+    refresh_token = result.get("refresh_token")
+    if not access_token or not refresh_token:
+        return {}
+    from core.authentication.tokens import TokenService
+
+    return TokenService.get_token_expiry_metadata(access_token, refresh_token)

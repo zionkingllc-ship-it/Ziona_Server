@@ -70,6 +70,12 @@ services:
         value: /etc/secrets/gcp-credentials.json
       - key: FIREBASE_CREDENTIALS_FILE
         value: /etc/secrets/firebase-credentials.json
+      - key: ACCOUNT_RECOVERY_TOKEN_LIFETIME_MINUTES
+        value: "15"
+      - key: ACCOUNT_DELETION_GRACE_DAYS
+        value: "30"
+      - key: ACCOUNT_DELETION_PURGE_MAX_RETRIES
+        value: "5"
 
   - type: worker
     name: ziona-worker-staging
@@ -115,6 +121,12 @@ services:
         value: /etc/secrets/gcp-credentials.json
       - key: FIREBASE_CREDENTIALS_FILE
         value: /etc/secrets/firebase-credentials.json
+      - key: ACCOUNT_RECOVERY_TOKEN_LIFETIME_MINUTES
+        value: "15"
+      - key: ACCOUNT_DELETION_GRACE_DAYS
+        value: "30"
+      - key: ACCOUNT_DELETION_PURGE_MAX_RETRIES
+        value: "5"
       - key: DATABASE_URL
         sync: false
       - key: REDIS_URL
@@ -269,4 +281,16 @@ services:
     schedule: "30 2 * * *"
     buildCommand: *buildCommand
     startCommand: python manage.py enqueue_scheduled_task cleanup-stale-media
+    envVars: *prodEnv
+
+  - type: cron
+    name: ziona-cron-account-deletion-purge
+    runtime: python
+    region: oregon
+    plan: starter
+    branch: main
+    autoDeployTrigger: checksPass
+    schedule: "17 * * * *"
+    buildCommand: *buildCommand
+    startCommand: python manage.py enqueue_scheduled_task purge-due-account-deletions
     envVars: *prodEnv

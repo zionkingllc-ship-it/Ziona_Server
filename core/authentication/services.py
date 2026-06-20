@@ -12,14 +12,18 @@ import logging
 import re
 import secrets
 import string
-from datetime import date
+from datetime import date, timedelta
 from typing import Any
 
+from django.conf import settings
 from django.core.cache import cache
 from django.db import IntegrityError, transaction
 from django.utils import timezone
 
-from core.authentication.account_status import ensure_account_can_authenticate
+from core.authentication.account_status import (
+    build_account_recovery_result,
+    ensure_account_can_authenticate,
+)
 from core.authentication.activity import record_successful_auth
 from core.authentication.otp_service import OTPService
 from core.authentication.tokens import TokenError, TokenInfrastructureError, TokenService
@@ -227,14 +231,24 @@ class AuthService:
                 code="INVALID_CREDENTIALS",
             ) from None
 
-        ensure_account_can_authenticate(user)
-
         if not user.check_password(password):
             logger.warning("Login failed: bad password for user_id=%s", user.id)
             raise AuthenticationError(
                 "Invalid email or password",
                 code="INVALID_CREDENTIALS",
             )
+
+        recovery_result = build_account_recovery_result(user)
+        if recovery_result:
+            log_security_event(
+                "auth.login.recovery_required",
+                user_id=str(user.id),
+                ip_address=ip_address,
+                metadata={"reason": recovery_result["recovery_reason"]},
+            )
+            return recovery_result
+
+        ensure_account_can_authenticate(user)
 
         if not user.is_email_verified:
             logger.info(
@@ -343,10 +357,12 @@ class AuthService:
         )
 
         from core.users.account_lifecycle import revoke_user_sessions
+        from core.users.models import UserLifecycleState
 
         revoke_user_sessions(user.id, delete_device_tokens=False)
+        user.lifecycle_state = UserLifecycleState.DEACTIVATED
         user.is_active = False
-        user.save(update_fields=["is_active", "updated_at"])
+        user.save(update_fields=["lifecycle_state", "is_active", "updated_at"])
         cache.delete(f"user_me_data_{user.id}")
 
         logger.info("Account deactivated: user_id=%s", user.id)
@@ -367,11 +383,11 @@ class AuthService:
         otp: str | None = None,
         acknowledge_permanent_deletion: bool = False,
         ip_address: str | None = None,
-    ) -> bool:
-        """Permanently disable, anonymize, and hide a user account."""
+    ) -> dict:
+        """Schedule reversible deletion and hide the account for 30 days."""
         if not acknowledge_permanent_deletion:
             raise AuthenticationError(
-                "You must acknowledge that account deletion is permanent.",
+                "You must acknowledge the permanent deletion scheduled after the recovery period.",
                 code="DELETION_ACKNOWLEDGEMENT_REQUIRED",
                 details={
                     "field": "acknowledgePermanentDeletion",
@@ -392,8 +408,22 @@ class AuthService:
             logger.error("Delete account failed: user not found id=%s", user_id)
             raise AuthenticationError("User not found", "USER_NOT_FOUND")
 
+        from core.users.models import (
+            AccountDeletionRequest,
+            AccountDeletionStatus,
+            UserLifecycleState,
+        )
+
+        if user.lifecycle_state == UserLifecycleState.PENDING_DELETION:
+            existing = AccountDeletionRequest.objects.filter(user=user).first()
+            if existing and existing.status in {
+                AccountDeletionStatus.PENDING,
+                AccountDeletionStatus.PURGING,
+                AccountDeletionStatus.FAILED,
+            }:
+                return _deletion_request_result(existing)
+
         ensure_account_can_authenticate(user)
-        email_for_audit = mask_email(user.email)
         AuthService._verify_account_action_reauthentication(
             user,
             password=password,
@@ -401,34 +431,142 @@ class AuthService:
             otp_purpose="account_deletion",
         )
 
-        from core.users.account_lifecycle import (
-            anonymize_user_for_permanent_delete,
-            remove_or_hide_user_data,
-            revoke_user_sessions,
-        )
+        from core.users.account_lifecycle import revoke_user_sessions
 
         now = timezone.now()
+        scheduled_for = now + timedelta(days=settings.ACCOUNT_DELETION_GRACE_DAYS)
         revoke_user_sessions(user.id, delete_device_tokens=True)
-        remove_or_hide_user_data(user, now)
+        user.lifecycle_state = UserLifecycleState.PENDING_DELETION
+        user.is_active = False
+        user.save(update_fields=["lifecycle_state", "is_active", "updated_at"])
 
-        try:
-            from core.admin_dashboard.models import ModerationAction
-
-            ModerationAction.objects.filter(user=user).delete()
-        except Exception:
-            logger.debug("Failed to delete moderation history during self-delete", exc_info=True)
-
-        anonymize_user_for_permanent_delete(user, now)
+        deletion_request, _ = AccountDeletionRequest.objects.update_or_create(
+            user=user,
+            defaults={
+                "status": AccountDeletionStatus.PENDING,
+                "requested_at": now,
+                "scheduled_for": scheduled_for,
+                "cancelled_at": None,
+                "completed_at": None,
+                "retry_count": 0,
+                "failure_code": "",
+            },
+        )
         cache.delete(f"user_me_data_{user.id}")
 
-        logger.info("Account permanently deleted: user_id=%s", user_id)
+        logger.info("Account deletion scheduled: user_id=%s", user_id)
         log_security_event(
-            "auth.account_deleted",
+            "auth.account_deletion_requested",
             user_id=str(user_id),
             ip_address=ip_address,
-            metadata={"email": email_for_audit, "identity_anonymized": True},
+            metadata={"scheduled_for": scheduled_for.isoformat()},
         )
-        return True
+        return _deletion_request_result(deletion_request)
+
+    @staticmethod
+    @transaction.atomic
+    def reactivate_account(
+        recovery_token: str,
+        *,
+        confirm_reactivation: bool,
+        ip_address: str | None = None,
+    ) -> dict:
+        """Reactivate a voluntarily deactivated account after explicit confirmation."""
+        if not confirm_reactivation:
+            raise AuthenticationError(
+                "You must confirm account reactivation.",
+                code="REACTIVATION_CONFIRMATION_REQUIRED",
+            )
+        try:
+            payload = TokenService.validate_account_recovery_token(
+                recovery_token,
+                expected_reason="DEACTIVATED",
+            )
+        except TokenError as exc:
+            raise AuthenticationError(str(exc), code="INVALID_RECOVERY_TOKEN") from exc
+
+        from core.users.models import UserLifecycleState
+
+        user = User.all_objects.select_for_update().filter(id=payload["user_id"]).first()
+        if not user or user.lifecycle_state != UserLifecycleState.DEACTIVATED:
+            raise AuthenticationError("Account cannot be reactivated.", "INVALID_RECOVERY_STATE")
+
+        user.lifecycle_state = UserLifecycleState.ACTIVE
+        user.is_active = True
+        user.deleted_at = None
+        user.save(update_fields=["lifecycle_state", "is_active", "deleted_at", "updated_at"])
+        result = _issue_normal_token_pair(user)
+        record_successful_auth(user, ip_address)
+        log_security_event("auth.account_reactivated", user_id=str(user.id), ip_address=ip_address)
+        return {"user": user, **result}
+
+    @staticmethod
+    @transaction.atomic
+    def cancel_account_deletion(
+        recovery_token: str,
+        *,
+        confirm_cancellation: bool,
+        ip_address: str | None = None,
+    ) -> dict:
+        """Cancel a pending deletion during its 30-day recovery window."""
+        if not confirm_cancellation:
+            raise AuthenticationError(
+                "You must confirm deletion cancellation.",
+                code="DELETION_CANCELLATION_CONFIRMATION_REQUIRED",
+            )
+        try:
+            payload = TokenService.validate_account_recovery_token(
+                recovery_token,
+                expected_reason="PENDING_DELETION",
+            )
+        except TokenError as exc:
+            raise AuthenticationError(str(exc), code="INVALID_RECOVERY_TOKEN") from exc
+
+        from core.users.models import (
+            AccountDeletionRequest,
+            AccountDeletionStatus,
+            UserLifecycleState,
+        )
+
+        user = User.all_objects.select_for_update().filter(id=payload["user_id"]).first()
+        deletion_request = (
+            AccountDeletionRequest.objects.select_for_update().filter(user=user).first()
+            if user
+            else None
+        )
+        if (
+            not user
+            or not deletion_request
+            or user.lifecycle_state != UserLifecycleState.PENDING_DELETION
+            or deletion_request.status != AccountDeletionStatus.PENDING
+        ):
+            raise AuthenticationError(
+                "Deletion can no longer be cancelled.", "INVALID_RECOVERY_STATE"
+            )
+        if deletion_request.scheduled_for <= timezone.now():
+            raise AuthenticationError(
+                "The account deletion recovery window has ended.",
+                "RECOVERY_WINDOW_EXPIRED",
+            )
+
+        deletion_request.status = AccountDeletionStatus.CANCELLED
+        deletion_request.cancelled_at = timezone.now()
+        deletion_request.failure_code = ""
+        deletion_request.save(
+            update_fields=["status", "cancelled_at", "failure_code", "updated_at"]
+        )
+        user.lifecycle_state = UserLifecycleState.ACTIVE
+        user.is_active = True
+        user.deleted_at = None
+        user.save(update_fields=["lifecycle_state", "is_active", "deleted_at", "updated_at"])
+        result = _issue_normal_token_pair(user)
+        record_successful_auth(user, ip_address)
+        log_security_event(
+            "auth.account_deletion_cancelled",
+            user_id=str(user.id),
+            ip_address=ip_address,
+        )
+        return {"user": user, **result}
 
     @staticmethod
     def suggest_usernames(email: str, date_of_birth: str | None = None) -> list[str]:
@@ -507,16 +645,32 @@ class AuthService:
             try:
                 result = TokenService.rotate_refresh_token(refresh_token, role)
                 record_successful_auth(user, ip_address)
+                logger.info(
+                    "token_refresh_outcome",
+                    extra={"outcome": "success", "user_id": str(user.id)},
+                )
                 return result
             except TokenInfrastructureError as e:
                 raise AuthenticationError(str(e), code="AUTH_SERVICE_UNAVAILABLE") from e
             except TokenError as e:
                 raise AuthenticationError(str(e), code="INVALID_REFRESH_TOKEN") from e
-        except AuthenticationError:
+        except AuthenticationError as exc:
+            logger.warning(
+                "token_refresh_outcome",
+                extra={"outcome": exc.code},
+            )
             raise
         except TokenInfrastructureError as e:
+            logger.warning(
+                "token_refresh_outcome",
+                extra={"outcome": "AUTH_SERVICE_UNAVAILABLE"},
+            )
             raise AuthenticationError(str(e), code="AUTH_SERVICE_UNAVAILABLE") from e
         except TokenError as e:
+            logger.warning(
+                "token_refresh_outcome",
+                extra={"outcome": "INVALID_REFRESH_TOKEN"},
+            )
             raise AuthenticationError(str(e), code="INVALID_REFRESH_TOKEN") from e
 
     @staticmethod
@@ -657,3 +811,26 @@ class AuthService:
             apple_user=apple_user,
             ip_address=ip_address,
         )
+
+
+def _issue_normal_token_pair(user: User) -> dict[str, str]:
+    """Issue a normal access/refresh pair after lifecycle recovery."""
+    access_token = TokenService.generate_access_token(str(user.id), user.role)
+    try:
+        refresh_token, _ = TokenService.generate_refresh_token(str(user.id))
+    except TokenError as exc:
+        raise AuthenticationError(
+            "Authentication service is temporarily unavailable. Please try again.",
+            code="AUTH_SERVICE_UNAVAILABLE",
+        ) from exc
+    return {"access_token": access_token, "refresh_token": refresh_token}
+
+
+def _deletion_request_result(deletion_request) -> dict:
+    return {
+        "status": "PENDING_DELETION",
+        "requested_at": deletion_request.requested_at.isoformat(),
+        "scheduled_for": deletion_request.scheduled_for.isoformat(),
+        "grace_period_days": settings.ACCOUNT_DELETION_GRACE_DAYS,
+        "can_cancel": deletion_request.status == "pending",
+    }

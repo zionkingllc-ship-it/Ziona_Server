@@ -8,7 +8,7 @@ and interest-based creator suggestions.
 import logging
 
 from django.db import IntegrityError
-from django.db.models import Count, Exists, OuterRef
+from django.db.models import Count, Exists, OuterRef, Q
 
 from core.follows.models import Follow
 from core.shared.decorators import rate_limit
@@ -123,7 +123,11 @@ class FollowService:
 
         qs = (
             Follow.objects.select_related("follower")
-            .filter(following_id=user_id)
+            .filter(
+                following_id=user_id,
+                follower__deleted_at__isnull=True,
+                follower__lifecycle_state="active",
+            )
             # -id tiebreaker for deterministic compound keyset pagination.
             .order_by("-created_at", "-id")
         )
@@ -204,7 +208,11 @@ class FollowService:
 
         qs = (
             Follow.objects.select_related("following")
-            .filter(follower_id=user_id)
+            .filter(
+                follower_id=user_id,
+                following__deleted_at__isnull=True,
+                following__lifecycle_state="active",
+            )
             # -id tiebreaker for deterministic compound keyset pagination.
             .order_by("-created_at", "-id")
         )
@@ -288,7 +296,11 @@ class FollowService:
         )
 
         following_ids = set(
-            Follow.objects.filter(follower_id=user_id).values_list("following_id", flat=True)
+            Follow.objects.filter(
+                follower_id=user_id,
+                following__deleted_at__isnull=True,
+                following__lifecycle_state="active",
+            ).values_list("following_id", flat=True)
         )
         following_ids.add(user_id)
 
@@ -299,8 +311,19 @@ class FollowService:
             .exclude(username="")
             .exclude(id__in=following_ids)
             .annotate(
-                followers_count=Count("follower_set", distinct=True),
-                posts_count=Count("posts", distinct=True),
+                followers_count=Count(
+                    "follower_set",
+                    filter=Q(
+                        follower_set__follower__deleted_at__isnull=True,
+                        follower_set__follower__lifecycle_state="active",
+                    ),
+                    distinct=True,
+                ),
+                posts_count=Count(
+                    "posts",
+                    filter=Q(posts__deleted_at__isnull=True),
+                    distinct=True,
+                ),
             )
             .order_by("-followers_count", "-posts_count", "-created_at")
         )

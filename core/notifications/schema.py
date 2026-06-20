@@ -45,6 +45,7 @@ class NotificationTypeEnum(Enum):
     NEW_ANCHOR = "new_anchor"
     MENTION = "mention"
     NEW_CIRCLE_POST = "new_circle_post"
+    SUPPORT_REPLY = "support_reply"
     ADMIN_ANNOUNCEMENT = "admin_announcement"
 
 
@@ -57,6 +58,7 @@ def _default_notification_title(notification_type: str) -> str:
         NotificationTypeEnum.NEW_ANCHOR.value: "New Anchor",
         NotificationTypeEnum.MENTION.value: "New Mention",
         NotificationTypeEnum.NEW_CIRCLE_POST.value: "New Circle Post",
+        NotificationTypeEnum.SUPPORT_REPLY.value: "Support Reply",
         NotificationTypeEnum.ADMIN_ANNOUNCEMENT.value: "Ziona Update",
     }
     return titles.get(notification_type, "Ziona App")

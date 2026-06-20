@@ -11,7 +11,7 @@ from datetime import datetime
 
 from django.db.models import Q
 
-from core.users.models import UserRole, UserStatus
+from core.users.models import UserLifecycleState, UserRole, UserStatus
 
 
 def revoke_user_sessions(user_id, *, delete_device_tokens: bool) -> None:
@@ -79,17 +79,17 @@ def remove_or_hide_user_data(user, now: datetime) -> None:
     CirclePostEngagement.objects.filter(Q(user=user) | Q(post__user=user)).delete()
     CirclePostCommentLike.objects.filter(Q(user=user) | Q(comment__user=user)).delete()
 
-    AnchorResponse.objects.filter(user=user, deleted_at__isnull=True).update(
+    AnchorResponse.all_objects.filter(user=user, deleted_at__isnull=True).update(
         content="",
         media_url="",
         media_type="",
         deleted_at=now,
     )
-    CirclePostComment.objects.filter(user=user, deleted_at__isnull=True).update(
+    CirclePostComment.all_objects.filter(user=user, deleted_at__isnull=True).update(
         text="",
         deleted_at=now,
     )
-    CirclePost.objects.filter(user=user, deleted_at__isnull=True).update(
+    CirclePost.all_objects.filter(user=user, deleted_at__isnull=True).update(
         text="",
         image_url="",
         media_url="",
@@ -105,7 +105,7 @@ def remove_or_hide_user_data(user, now: datetime) -> None:
         media_count=0,
         deleted_at=now,
     )
-    Anchor.objects.filter(created_by=user, deleted_at__isnull=True).update(
+    Anchor.all_objects.filter(created_by=user, deleted_at__isnull=True).update(
         content="",
         media_url="",
         anchor_image="",
@@ -118,8 +118,12 @@ def remove_or_hide_user_data(user, now: datetime) -> None:
         deleted_at=now,
     )
 
-    Circle.objects.filter(created_by=user).update(created_by=None)
-    Anchor.objects.filter(created_by=user).update(created_by=None)
+    Circle.all_objects.filter(created_by=user).update(
+        created_by=None,
+        is_active=False,
+        deleted_at=now,
+    )
+    Anchor.all_objects.filter(created_by=user).update(created_by=None)
 
     CircleReport.objects.filter(reporter=user).delete()
     CircleReport.objects.filter(resolved_by=user).update(resolved_by=None)
@@ -129,6 +133,34 @@ def remove_or_hide_user_data(user, now: datetime) -> None:
     Notification.objects.filter(Q(user=user) | Q(sender=user)).delete()
     NotificationPreference.objects.filter(user=user).delete()
     MediaFile.objects.filter(user=user).delete()
+
+
+def delete_user_gcs_objects(user) -> int:
+    """Delete canonical and thumbnail objects owned by a user from GCS."""
+    from google.api_core.exceptions import NotFound
+
+    from core.media.models import MediaFile
+    from core.media.services import _get_gcs_bucket
+
+    paths: set[str] = set()
+    for media_file in MediaFile.objects.filter(user=user).only("storage_path", "thumbnail_path"):
+        if media_file.storage_path:
+            paths.add(media_file.storage_path)
+        if media_file.thumbnail_path and not media_file.thumbnail_path.startswith("http"):
+            paths.add(media_file.thumbnail_path)
+
+    if not paths:
+        return 0
+
+    bucket = _get_gcs_bucket()
+    deleted_count = 0
+    for path in paths:
+        try:
+            bucket.blob(path).delete()
+            deleted_count += 1
+        except NotFound:
+            continue
+    return deleted_count
 
 
 def anonymize_user_for_permanent_delete(user, now: datetime) -> None:
@@ -149,6 +181,7 @@ def anonymize_user_for_permanent_delete(user, now: datetime) -> None:
     user.encrypted_dob = None
     user.location = ""
     user.status = UserStatus.ACTIVE
+    user.lifecycle_state = UserLifecycleState.DELETED
     user.warned_at = None
     user.suspended_at = None
     user.suspension_reason = ""
@@ -160,6 +193,7 @@ def anonymize_user_for_permanent_delete(user, now: datetime) -> None:
     user.firebase_uid = None
     user.social_auth_provider = None
     user.google_id = None
+    user.apple_sub = None
     user.set_unusable_password()
     user.save(
         update_fields=[
@@ -176,6 +210,7 @@ def anonymize_user_for_permanent_delete(user, now: datetime) -> None:
             "encrypted_dob",
             "location",
             "status",
+            "lifecycle_state",
             "warned_at",
             "suspended_at",
             "suspension_reason",
@@ -187,6 +222,7 @@ def anonymize_user_for_permanent_delete(user, now: datetime) -> None:
             "firebase_uid",
             "social_auth_provider",
             "google_id",
+            "apple_sub",
             "password",
             "updated_at",
         ]

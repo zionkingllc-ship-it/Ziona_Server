@@ -2,8 +2,8 @@ from django.contrib import admin
 
 from core.admin_dashboard.models import (
     AdminAuditLog,
+    ContactConversationMessage,
     ContactMessage,
-    ContactReply,
     DailyAnalytics,
     ModerationAction,
 )
@@ -48,7 +48,8 @@ class ContactMessageAdmin(admin.ModelAdmin):
     ordering = ("-created_at",)
 
 
-@admin.register(ContactReply)
-class ContactReplyAdmin(admin.ModelAdmin):
-    list_display = ("contact", "sent_by", "sent_at")
-    ordering = ("-sent_at",)
+@admin.register(ContactConversationMessage)
+class ContactConversationMessageAdmin(admin.ModelAdmin):
+    list_display = ("contact", "sender_type", "sender_user", "created_at")
+    list_filter = ("sender_type",)
+    ordering = ("-created_at",)

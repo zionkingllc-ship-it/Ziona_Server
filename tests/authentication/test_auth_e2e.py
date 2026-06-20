@@ -115,6 +115,10 @@ class TestFullAuthFlowE2E:
         assert verify_data["data"]["user"]["isEmailVerified"] is True
         assert "accessToken" in verify_data["data"]["tokens"]
         assert "refreshToken" in verify_data["data"]["tokens"]
+        assert verify_data["data"]["tokens"]["accessTokenExpiresIn"] > 0
+        assert verify_data["data"]["tokens"]["refreshTokenExpiresIn"] > 0
+        assert verify_data["data"]["tokens"]["accessTokenExpiresAt"]
+        assert verify_data["data"]["tokens"]["refreshTokenExpiresAt"]
         refresh_token = verify_data["data"]["tokens"]["refreshToken"]
 
         assert redis_conn.get(otp_key) is None

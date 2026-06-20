@@ -1,3 +1,4 @@
+import json
 import logging
 import threading
 import time
@@ -160,12 +161,17 @@ class RateLimitMiddleware:
                     return self._rate_limit_response(retry_after)
                 break  # Path matched — stop checking other paths
 
-        # --- GraphQL mutation rate limit (per user/IP) ---
+        # --- GraphQL operation rate limit (per user/IP) ---
         if request.path.rstrip("/") == "/graphql" and request.method == "POST":
             user_id = getattr(request, "user_id", None) or ip
-            limit_str = getattr(settings, "RATE_LIMIT_MUTATIONS", "30/60s")
+            operation_kind = _graphql_operation_kind(request)
+            setting_name = (
+                "RATE_LIMIT_MUTATIONS" if operation_kind == "mutation" else "RATE_LIMIT_QUERIES"
+            )
+            default_limit = "30/60s" if operation_kind == "mutation" else "100/60s"
+            limit_str = getattr(settings, setting_name, default_limit)
             max_requests, window_seconds = _parse_rate_limit(limit_str)
-            key = f"ratelimit:graphql:{user_id}"
+            key = f"ratelimit:graphql:{operation_kind}:{user_id}"
 
             is_limited, retry_after = LuaLimiter.check_rate_limit(key, max_requests, window_seconds)
             if is_limited:
@@ -193,6 +199,35 @@ class RateLimitMiddleware:
         )
         response["Retry-After"] = str(retry_after)
         return response
+
+
+def _graphql_operation_kind(request: HttpRequest) -> str:
+    """Return query or mutation for a GraphQL POST without consuming its body."""
+    try:
+        from graphql import OperationDefinitionNode, parse
+
+        payload = json.loads(request.body or b"{}")
+        query = payload.get("query", "") if isinstance(payload, dict) else ""
+        operation_name = payload.get("operationName") if isinstance(payload, dict) else None
+        document = parse(query)
+        operations = [
+            definition
+            for definition in document.definitions
+            if isinstance(definition, OperationDefinitionNode)
+        ]
+        if operation_name:
+            operations = [
+                operation
+                for operation in operations
+                if operation.name and operation.name.value == operation_name
+            ]
+        if len(operations) == 1:
+            return operations[0].operation.value
+    except Exception:
+        logger.debug("Unable to classify GraphQL operation for rate limiting", exc_info=True)
+
+    # Conservative fallback: unknown writes receive the stricter mutation limit.
+    return "mutation"
 
 
 def _get_client_ip(request: HttpRequest) -> str:

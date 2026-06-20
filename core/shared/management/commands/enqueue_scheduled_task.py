@@ -52,6 +52,11 @@ SCHEDULED_TASKS = {
         "attr": "cleanup_stale_media_uploads",
         "lock_timeout": 2 * 60 * 60,
     },
+    "purge-due-account-deletions": {
+        "module": "core.users.tasks",
+        "attr": "purge_due_account_deletions",
+        "lock_timeout": 55 * 60,
+    },
 }
 
 

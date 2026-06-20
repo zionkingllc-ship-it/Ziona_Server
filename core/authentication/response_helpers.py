@@ -44,6 +44,12 @@ ERROR_STATUS_MAP: dict[str, int] = {
     "APPLE_NONCE_MISMATCH": 400,
     "APPLE_NONCE_EXPIRED": 400,
     "ACCOUNT_DEACTIVATED": 401,
+    "ACCOUNT_PENDING_DELETION": 401,
+    "INVALID_RECOVERY_TOKEN": 401,
+    "INVALID_RECOVERY_STATE": 409,
+    "RECOVERY_WINDOW_EXPIRED": 410,
+    "REACTIVATION_CONFIRMATION_REQUIRED": 400,
+    "DELETION_CANCELLATION_CONFIRMATION_REQUIRED": 400,
     "MISSING_TOKEN": 401,
     "INVALID_REFRESH_TOKEN": 401,
     "INVALID_TOKEN": 401,
@@ -76,9 +82,16 @@ def build_user_dict(user: Any) -> dict:
 
 def build_tokens_dict(access_token: str, refresh_token: str) -> dict:
     """Build a standardized camelCase tokens dict."""
+    from core.authentication.tokens import TokenService
+
+    metadata = TokenService.get_token_expiry_metadata(access_token, refresh_token)
     return {
         "accessToken": access_token,
         "refreshToken": refresh_token,
+        "accessTokenExpiresIn": metadata["access_token_expires_in"],
+        "refreshTokenExpiresIn": metadata["refresh_token_expires_in"],
+        "accessTokenExpiresAt": metadata["access_token_expires_at"],
+        "refreshTokenExpiresAt": metadata["refresh_token_expires_at"],
     }
 
 
@@ -137,6 +150,10 @@ def auth_success_response(
     refresh_token: str | None = None,
     message: str | None = None,
     requires_verification: bool = False,
+    requires_account_recovery: bool = False,
+    recovery_reason: str | None = None,
+    recovery_token: str | None = None,
+    deletion_scheduled_for: str | None = None,
     status: int = 200,
 ) -> JsonResponse:
     """Build a standardized auth success response with user + optional tokens.
@@ -164,5 +181,12 @@ def auth_success_response(
 
     if requires_verification:
         data["requiresVerification"] = True
+
+    if requires_account_recovery:
+        data["requiresAccountRecovery"] = True
+        data["recoveryReason"] = recovery_reason
+        data["recoveryToken"] = recovery_token
+        if deletion_scheduled_for:
+            data["deletionScheduledFor"] = deletion_scheduled_for
 
     return success_response(data=data, status=status)

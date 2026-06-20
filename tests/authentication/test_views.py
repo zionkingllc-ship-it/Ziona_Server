@@ -483,8 +483,12 @@ class TestDeleteAccountEndpoint:
         assert body["error"]["code"] == "REAUTHENTICATION_REQUIRED"
 
     def test_delete_account_success(self, api_client: Client, authenticated_user):
-        """Authenticated DELETE anonymizes and soft-deletes the user."""
-        from core.users.models import User
+        """Authenticated DELETE schedules a reversible 30-day deletion."""
+        from core.users.models import (
+            AccountDeletionStatus,
+            User,
+            UserLifecycleState,
+        )
 
         user_id = authenticated_user["user"].id
 
@@ -502,16 +506,19 @@ class TestDeleteAccountEndpoint:
             HTTP_AUTHORIZATION=f"Bearer {authenticated_user['access_token']}",
         )
 
-        assert response.status_code == 200
+        assert response.status_code == 202
         assert response.json()["success"] is True
-        assert "permanently deleted" in response.json()["data"]["message"]
+        assert response.json()["data"]["status"] == "PENDING_DELETION"
+        assert response.json()["data"]["gracePeriodDays"] == 30
+        assert response.json()["data"]["canCancel"] is True
 
         assert not User.objects.filter(id=user_id).exists()
-        tombstone = User.all_objects.get(id=user_id)
-        assert tombstone.deleted_at is not None
-        assert tombstone.is_active is False
-        assert tombstone.email.startswith("deleted-")
-        assert not User.all_objects.filter(email="test@example.com").exists()
+        retained_user = User.all_objects.get(id=user_id)
+        assert retained_user.deleted_at is None
+        assert retained_user.is_active is False
+        assert retained_user.lifecycle_state == UserLifecycleState.PENDING_DELETION
+        assert retained_user.email == "test@example.com"
+        assert retained_user.account_deletion_request.status == AccountDeletionStatus.PENDING
 
     def test_delete_account_unauthorized(self, api_client: Client):
         """Unauthenticated DELETE returns 401."""
@@ -540,9 +547,10 @@ class TestDeleteAccountEndpoint:
             HTTP_AUTHORIZATION=f"Bearer {authenticated_user['access_token']}",
         )
 
-        assert response.status_code == 200
+        assert response.status_code == 202
         assert response.json()["success"] is True
         assert not User.objects.filter(id=user.id).exists()
+        assert User.all_objects.filter(id=user.id, deleted_at__isnull=True).exists()
 
     def test_delete_account_rejects_invalidated_sensitive_token(
         self, api_client: Client, authenticated_user
@@ -587,8 +595,8 @@ class TestDeactivateAccountEndpoint:
     def test_deactivate_with_password_blocks_future_login(
         self, api_client: Client, authenticated_user
     ):
-        """Deactivation keeps data but blocks subsequent authentication."""
-        from core.users.models import User
+        """Deactivation keeps data and requires explicit recovery confirmation."""
+        from core.users.models import User, UserLifecycleState
 
         user = authenticated_user["user"]
 
@@ -605,7 +613,9 @@ class TestDeactivateAccountEndpoint:
         user.refresh_from_db()
         assert user.is_active is False
         assert user.deleted_at is None
-        assert User.objects.filter(id=user.id).exists()
+        assert user.lifecycle_state == UserLifecycleState.DEACTIVATED
+        assert not User.objects.filter(id=user.id).exists()
+        assert User.all_objects.filter(id=user.id).exists()
 
         login_response = api_client.post(
             "/api/auth/login",
@@ -618,8 +628,79 @@ class TestDeactivateAccountEndpoint:
             content_type="application/json",
         )
 
-        assert login_response.status_code == 403
-        assert login_response.json()["error"]["code"] == "ACCOUNT_DEACTIVATED"
+        assert login_response.status_code == 200
+        login_data = login_response.json()["data"]
+        assert login_data["requiresAccountRecovery"] is True
+        assert login_data["recoveryReason"] == "DEACTIVATED"
+        assert "tokens" not in login_data
+
+        reactivate_response = api_client.post(
+            "/api/auth/reactivate",
+            data=json.dumps(
+                {
+                    "recoveryToken": login_data["recoveryToken"],
+                    "confirmReactivation": True,
+                }
+            ),
+            content_type="application/json",
+        )
+
+        assert reactivate_response.status_code == 200
+        assert reactivate_response.json()["data"]["tokens"]["accessToken"]
+        user.refresh_from_db()
+        assert user.lifecycle_state == UserLifecycleState.ACTIVE
+        assert user.is_active is True
+
+    def test_pending_deletion_login_can_cancel_and_restore_account(
+        self, api_client: Client, authenticated_user
+    ):
+        """A valid login can only recover, then explicitly cancel, a pending deletion."""
+        from core.users.models import AccountDeletionStatus, UserLifecycleState
+
+        user = authenticated_user["user"]
+        schedule_response = api_client.post(
+            "/api/auth/delete-account",
+            data=json.dumps(
+                {
+                    "password": "TestPass123!",
+                    "acknowledgePermanentDeletion": True,
+                }
+            ),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {authenticated_user['access_token']}",
+        )
+        assert schedule_response.status_code == 202
+
+        login_response = api_client.post(
+            "/api/auth/login",
+            data=json.dumps({"email": user.email, "password": "TestPass123!"}),
+            content_type="application/json",
+        )
+        assert login_response.status_code == 200
+        login_data = login_response.json()["data"]
+        assert login_data["requiresAccountRecovery"] is True
+        assert login_data["recoveryReason"] == "PENDING_DELETION"
+        assert login_data["deletionScheduledFor"]
+        assert "tokens" not in login_data
+
+        cancel_response = api_client.post(
+            "/api/auth/account-deletion/cancel",
+            data=json.dumps(
+                {
+                    "recoveryToken": login_data["recoveryToken"],
+                    "confirmCancellation": True,
+                }
+            ),
+            content_type="application/json",
+        )
+        assert cancel_response.status_code == 200
+        assert cancel_response.json()["data"]["tokens"]["refreshToken"]
+
+        user.refresh_from_db()
+        user.account_deletion_request.refresh_from_db()
+        assert user.lifecycle_state == UserLifecycleState.ACTIVE
+        assert user.is_active is True
+        assert user.account_deletion_request.status == AccountDeletionStatus.CANCELLED
 
     def test_deactivate_with_otp(self, api_client: Client, authenticated_user):
         """Deactivation can be protected by an account-deactivation OTP."""

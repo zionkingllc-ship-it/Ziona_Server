@@ -77,9 +77,11 @@ class FollowSelector:
 
         ids = [
             str(uid)
-            for uid in Follow.objects.filter(following_id=user_id).values_list(
-                "follower_id", flat=True
-            )
+            for uid in Follow.objects.filter(
+                following_id=user_id,
+                follower__deleted_at__isnull=True,
+                follower__lifecycle_state="active",
+            ).values_list("follower_id", flat=True)
         ]
 
         try:
@@ -116,9 +118,11 @@ class FollowSelector:
 
         ids = [
             str(uid)
-            for uid in Follow.objects.filter(follower_id=user_id).values_list(
-                "following_id", flat=True
-            )
+            for uid in Follow.objects.filter(
+                follower_id=user_id,
+                following__deleted_at__isnull=True,
+                following__lifecycle_state="active",
+            ).values_list("following_id", flat=True)
         ]
 
         try:
@@ -140,7 +144,11 @@ class FollowSelector:
         Returns:
             Number of followers.
         """
-        return Follow.objects.filter(following_id=user_id).count()
+        return Follow.objects.filter(
+            following_id=user_id,
+            follower__deleted_at__isnull=True,
+            follower__lifecycle_state="active",
+        ).count()
 
     @staticmethod
     def get_following_count(user_id: str) -> int:
@@ -152,4 +160,8 @@ class FollowSelector:
         Returns:
             Number of users being followed.
         """
-        return Follow.objects.filter(follower_id=user_id).count()
+        return Follow.objects.filter(
+            follower_id=user_id,
+            following__deleted_at__isnull=True,
+            following__lifecycle_state="active",
+        ).count()

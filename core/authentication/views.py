@@ -73,6 +73,12 @@ def _auth_error_response(
         "INVALID_CREDENTIALS": 401,
         "ACCOUNT_SUSPENDED": 403,
         "ACCOUNT_DEACTIVATED": 403,
+        "ACCOUNT_PENDING_DELETION": 403,
+        "INVALID_RECOVERY_TOKEN": 401,
+        "INVALID_RECOVERY_STATE": 409,
+        "RECOVERY_WINDOW_EXPIRED": 410,
+        "REACTIVATION_CONFIRMATION_REQUIRED": 400,
+        "DELETION_CANCELLATION_CONFIRMATION_REQUIRED": 400,
         "REAUTHENTICATION_REQUIRED": 400,
         "DELETION_ACKNOWLEDGEMENT_REQUIRED": 400,
         "INVALID_DELETION_ACKNOWLEDGEMENT": 400,
@@ -145,6 +151,21 @@ def _account_action_payload(data: dict) -> dict[str, object]:
         "otp": data.get("otp") or data.get("code") or "",
         "acknowledge_permanent_deletion": acknowledge_permanent_deletion,
     }
+
+
+def _deletion_scheduled_response(result: dict) -> JsonResponse:
+    """Return the shared 202 contract for both deletion endpoint aliases."""
+    return success_response(
+        data={
+            "message": "Account deletion scheduled.",
+            "status": result["status"],
+            "requestedAt": result["requested_at"],
+            "scheduledFor": result["scheduled_for"],
+            "gracePeriodDays": result["grace_period_days"],
+            "canCancel": result["can_cancel"],
+        },
+        status=202,
+    )
 
 
 def _parse_deletion_acknowledgement(value: object) -> bool:
@@ -342,6 +363,15 @@ class LoginView(BaseAuthView):
                     user=result["user"],
                     message=result["message"],
                     requires_verification=True,
+                )
+
+            if result.get("requires_account_recovery"):
+                return auth_success_response(
+                    user=result["user"],
+                    requires_account_recovery=True,
+                    recovery_reason=result["recovery_reason"],
+                    recovery_token=result["recovery_token"],
+                    deletion_scheduled_for=result.get("deletion_scheduled_for"),
                 )
 
             return auth_success_response(
@@ -705,12 +735,22 @@ class GoogleOAuthView(BaseAuthView):
                         result["user"], "needs_username_selection", False
                     ),
                 },
-                "tokens": build_tokens_dict(
-                    result["access_token"],
-                    result["refresh_token"],
-                ),
                 "isNewUser": result["is_new_user"],
             }
+            if result.get("requires_account_recovery"):
+                response_data.update(
+                    {
+                        "requiresAccountRecovery": True,
+                        "recoveryReason": result["recovery_reason"],
+                        "recoveryToken": result["recovery_token"],
+                        "deletionScheduledFor": result.get("deletion_scheduled_for"),
+                    }
+                )
+            else:
+                response_data["tokens"] = build_tokens_dict(
+                    result["access_token"],
+                    result["refresh_token"],
+                )
             return success_response(data=response_data)
         except AuthenticationError as e:
             logger.warning("Google OAuth failed: code=%s", e.code)
@@ -773,12 +813,22 @@ class AppleOAuthView(BaseAuthView):
                         result["user"], "needs_username_selection", False
                     ),
                 },
-                "tokens": build_tokens_dict(
-                    result["access_token"],
-                    result["refresh_token"],
-                ),
                 "isNewUser": result["is_new_user"],
             }
+            if result.get("requires_account_recovery"):
+                response_data.update(
+                    {
+                        "requiresAccountRecovery": True,
+                        "recoveryReason": result["recovery_reason"],
+                        "recoveryToken": result["recovery_token"],
+                        "deletionScheduledFor": result.get("deletion_scheduled_for"),
+                    }
+                )
+            else:
+                response_data["tokens"] = build_tokens_dict(
+                    result["access_token"],
+                    result["refresh_token"],
+                )
             return success_response(data=response_data)
         except AuthenticationError as e:
             logger.warning("Apple OAuth failed: code=%s", e.code)
@@ -835,7 +885,7 @@ class MeView(BaseAuthView):
                 request,
                 allow_query_acknowledgement=True,
             )
-            AuthService.delete_account(
+            result = AuthService.delete_account(
                 user_id=user_id,
                 password=payload["password"],
                 otp=payload["otp"],
@@ -843,9 +893,7 @@ class MeView(BaseAuthView):
                 ip_address=_get_client_ip(request),
             )
 
-            return success_response(
-                data={"message": "Account permanently deleted."},
-            )
+            return _deletion_scheduled_response(result)
         except AuthenticationError as e:
             logger.warning("Account deletion failed: code=%s", e.code)
             return _auth_error_response(e)
@@ -889,16 +937,68 @@ class DeleteAccountView(BaseAuthView):
         try:
             user_id = _authenticated_user_id_from_request(request)
             payload = _account_action_payload_from_request(request)
-            AuthService.delete_account(
+            result = AuthService.delete_account(
                 user_id=user_id,
                 password=payload["password"],
                 otp=payload["otp"],
                 acknowledge_permanent_deletion=payload["acknowledge_permanent_deletion"],
                 ip_address=_get_client_ip(request),
             )
-            return success_response(data={"message": "Account permanently deleted."})
+            return _deletion_scheduled_response(result)
         except AuthenticationError as e:
             logger.warning("Account deletion failed: code=%s", e.code)
+            return _auth_error_response(e)
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class ReactivateAccountView(BaseAuthView):
+    """Confirm recovery of a voluntarily deactivated account."""
+
+    def post(self, request: HttpRequest) -> JsonResponse:
+        data = _parse_json_body(request)
+        recovery_token = data.get("recoveryToken") or data.get("recovery_token") or ""
+        confirmed = (
+            data.get("confirmReactivation") is True or data.get("confirm_reactivation") is True
+        )
+        try:
+            result = AuthService.reactivate_account(
+                recovery_token,
+                confirm_reactivation=confirmed,
+                ip_address=_get_client_ip(request),
+            )
+            return auth_success_response(
+                user=result["user"],
+                access_token=result["access_token"],
+                refresh_token=result["refresh_token"],
+                message="Account reactivated successfully.",
+            )
+        except AuthenticationError as e:
+            return _auth_error_response(e)
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class CancelAccountDeletionView(BaseAuthView):
+    """Cancel a pending deletion using a recovery-only login token."""
+
+    def post(self, request: HttpRequest) -> JsonResponse:
+        data = _parse_json_body(request)
+        recovery_token = data.get("recoveryToken") or data.get("recovery_token") or ""
+        confirmed = (
+            data.get("confirmCancellation") is True or data.get("confirm_cancellation") is True
+        )
+        try:
+            result = AuthService.cancel_account_deletion(
+                recovery_token,
+                confirm_cancellation=confirmed,
+                ip_address=_get_client_ip(request),
+            )
+            return auth_success_response(
+                user=result["user"],
+                access_token=result["access_token"],
+                refresh_token=result["refresh_token"],
+                message="Account deletion cancelled.",
+            )
+        except AuthenticationError as e:
             return _auth_error_response(e)
 
 

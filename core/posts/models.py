@@ -7,7 +7,12 @@ supporting image, video, and text post types.
 
 from django.db import models
 
-from core.shared.models import SoftDeleteModel, TimestampedModel
+from core.shared.models import (
+    ActiveUserContentManager,
+    AllObjectsManager,
+    SoftDeleteModel,
+    TimestampedModel,
+)
 
 
 class PostType(models.TextChoices):
@@ -77,6 +82,9 @@ class Post(SoftDeleteModel):
     scripture_verse_start = models.IntegerField(blank=True, null=True)
     scripture_verse_end = models.IntegerField(blank=True, null=True)
     scripture_translation = models.CharField(max_length=10, default="KJV")
+
+    objects = ActiveUserContentManager()
+    all_objects = AllObjectsManager()
 
     class Meta:
         db_table = "posts"

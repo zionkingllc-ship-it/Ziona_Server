@@ -79,6 +79,60 @@ class TokenService:
         )
 
     @staticmethod
+    def generate_account_recovery_token(user_id: str, reason: str) -> str:
+        """Issue a short-lived token usable only by account recovery endpoints."""
+        now = datetime.now(timezone.utc)
+        payload = {
+            "user_id": str(user_id),
+            "type": "account_recovery",
+            "recovery_reason": reason,
+            "iat": now,
+            "exp": now + settings.ACCOUNT_RECOVERY_TOKEN_LIFETIME,
+            "jti": str(uuid.uuid4()),
+        }
+        return jwt.encode(payload, settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
+
+    @staticmethod
+    def validate_account_recovery_token(token: str, expected_reason: str | None = None) -> dict:
+        """Validate a recovery-only token and optionally enforce its lifecycle reason."""
+        try:
+            payload = jwt.decode(
+                token,
+                settings.JWT_SECRET_KEY,
+                algorithms=[settings.JWT_ALGORITHM],
+                leeway=settings.JWT_LEEWAY_SECONDS,
+            )
+        except jwt.ExpiredSignatureError:
+            raise TokenError("Account recovery token has expired") from None
+        except jwt.InvalidTokenError as exc:
+            raise TokenError(f"Invalid account recovery token: {exc}") from exc
+
+        if payload.get("type") != "account_recovery":
+            raise TokenError("Token is not an account recovery token")
+        if expected_reason and payload.get("recovery_reason") != expected_reason:
+            raise TokenError("Account recovery token has the wrong purpose")
+        return payload
+
+    @staticmethod
+    def get_token_expiry_metadata(access_token: str, refresh_token: str) -> dict:
+        """Return additive expiry metadata derived from the issued JWT pair."""
+        now = datetime.now(timezone.utc)
+
+        def _expiry(token: str) -> tuple[int, str]:
+            payload = jwt.decode(token, options={"verify_signature": False})
+            expiry = datetime.fromtimestamp(int(payload["exp"]), tz=timezone.utc)
+            return max(0, int((expiry - now).total_seconds())), expiry.isoformat()
+
+        access_in, access_at = _expiry(access_token)
+        refresh_in, refresh_at = _expiry(refresh_token)
+        return {
+            "access_token_expires_in": access_in,
+            "refresh_token_expires_in": refresh_in,
+            "access_token_expires_at": access_at,
+            "refresh_token_expires_at": refresh_at,
+        }
+
+    @staticmethod
     def generate_refresh_token(user_id: str) -> tuple[str, str]:
         """Generate a long-lived JWT refresh token and store in Redis.
 

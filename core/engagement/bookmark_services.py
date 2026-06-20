@@ -193,7 +193,12 @@ class BookmarkService:
             # post_media (FK reverse) is the legacy relation and is not populated
             # by the current post creation flow.
             .prefetch_related("post__media_files")
-            .filter(user_id=user_id, post__deleted_at__isnull=True)
+            .filter(
+                user_id=user_id,
+                post__deleted_at__isnull=True,
+                post__user__deleted_at__isnull=True,
+                post__user__lifecycle_state="active",
+            )
             # -id tiebreaker on the Save record for deterministic pagination.
             .order_by("-created_at", "-id")
         )

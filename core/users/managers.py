@@ -8,8 +8,15 @@ class UserManager(BaseUserManager):
     """
 
     def get_queryset(self):
-        """Return only non-deleted users."""
-        return super().get_queryset().filter(deleted_at__isnull=True)
+        """Return only users visible to normal application queries."""
+        return (
+            super()
+            .get_queryset()
+            .filter(
+                deleted_at__isnull=True,
+                lifecycle_state="active",
+            )
+        )
 
     def create_user(
         self,

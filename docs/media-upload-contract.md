@@ -60,5 +60,19 @@ Apply it:
 python manage.py configure_gcs_cors --apply
 ```
 
+Verify the live bucket still matches the configured release policy:
+
+```bash
+python manage.py configure_gcs_cors --check
+```
+
+Release mapping must remain environment-specific:
+
+- `admin.ziona.app` -> `api.ziona.app` -> `ziona-media-prod`
+- staging admin -> staging API -> `ziona-media-dev`
+
+The browser PUT must use the exact declared `Content-Type` and must not include
+the application's Bearer token.
+
 The command reads origins from `GCS_CORS_ALLOWED_ORIGINS`, falling back to the
 backend `CORS_ALLOWED_ORIGINS` list when unset.

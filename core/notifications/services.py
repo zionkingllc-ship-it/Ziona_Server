@@ -35,6 +35,7 @@ def _is_notification_enabled(user_id: int, notification_type: str) -> bool:
         NotificationType.LIKE_COMMENT: pref.in_app_likes and pref.interaction_likes,
         NotificationType.MENTION: pref.in_app_mention_and_tags,
         NotificationType.NEW_CIRCLE_POST: pref.circle_anchor_post,
+        NotificationType.SUPPORT_REPLY: True,
         # Admin/system announcements do not have a user-facing granular toggle.
         NotificationType.ADMIN_ANNOUNCEMENT: True,
     }
@@ -51,6 +52,7 @@ def create_notification(
     title: str = "",
     respect_preferences: bool = True,
     bypass_duplicate_check: bool = False,
+    push_data: dict[str, str] | None = None,
 ) -> Notification | None:
     """
     Create an in-app notification and trigger a push notification.
@@ -92,16 +94,20 @@ def create_notification(
     )
 
     # Trigger push notification asynchronously (would be a Celery task in prod)
+    notification_data = {
+        "type": type_str,
+        "reference_id": str(reference_id) if reference_id else "",
+        "reference_type": reference_type,
+        "screen": "NotificationDetail",
+    }
+    if push_data:
+        notification_data.update({key: str(value) for key, value in push_data.items()})
+
     send_push_notification(
         user_id=user_id,
         title=title or "Ziona App",
         body=message,
-        data={
-            "type": type_str,
-            "reference_id": str(reference_id) if reference_id else "",
-            "reference_type": reference_type,
-            "screen": "NotificationDetail",
-        },
+        data=notification_data,
     )
 
     return notification

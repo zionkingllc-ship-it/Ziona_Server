@@ -13,6 +13,7 @@ from core.authentication.otp_views import (
 from core.authentication.views import (
     AppleNonceView,
     AppleOAuthView,
+    CancelAccountDeletionView,
     ChangePasswordView,
     CheckEmailView,
     DeactivateAccountView,
@@ -24,6 +25,7 @@ from core.authentication.views import (
     MeView,
     PasswordResetConfirmView,
     PasswordResetRequestView,
+    ReactivateAccountView,
     RegisterView,
     ResendOTPView,
     SuggestUsernamesView,
@@ -55,7 +57,13 @@ urlpatterns = [
     path("apple", AppleOAuthView.as_view(), name="apple-oauth"),
     path("me", MeView.as_view(), name="me"),
     path("deactivate", DeactivateAccountView.as_view(), name="deactivate-account"),
+    path("reactivate", ReactivateAccountView.as_view(), name="reactivate-account"),
     path("delete-account", DeleteAccountView.as_view(), name="delete-account"),
+    path(
+        "account-deletion/cancel",
+        CancelAccountDeletionView.as_view(),
+        name="cancel-account-deletion",
+    ),
     path("check-email", CheckEmailView.as_view(), name="check-email"),
     path("finalize-username", FinalizeUsernameView.as_view(), name="finalize_username"),
 ]

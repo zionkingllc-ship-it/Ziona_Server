@@ -23,6 +23,25 @@ class UserStatus(models.TextChoices):
     SUSPENDED = "suspended", "Suspended"
 
 
+class UserLifecycleState(models.TextChoices):
+    """User-controlled account lifecycle, separate from moderation status."""
+
+    ACTIVE = "active", "Active"
+    DEACTIVATED = "deactivated", "Deactivated"
+    PENDING_DELETION = "pending_deletion", "Pending deletion"
+    DELETED = "deleted", "Deleted"
+
+
+class AccountDeletionStatus(models.TextChoices):
+    """Operational status for reversible account-deletion requests."""
+
+    PENDING = "pending", "Pending"
+    CANCELLED = "cancelled", "Cancelled"
+    PURGING = "purging", "Purging"
+    COMPLETED = "completed", "Completed"
+    FAILED = "failed", "Failed"
+
+
 class User(AbstractBaseUser, PermissionsMixin):
     """Custom User model with email-based authentication.
 
@@ -93,6 +112,13 @@ class User(AbstractBaseUser, PermissionsMixin):
         default=UserStatus.ACTIVE,
         db_index=True,
         help_text="Admin-managed moderation status. Separate from Django is_active.",
+    )
+    lifecycle_state = models.CharField(
+        max_length=24,
+        choices=UserLifecycleState.choices,
+        default=UserLifecycleState.ACTIVE,
+        db_index=True,
+        help_text="User-controlled lifecycle state, separate from moderation status.",
     )
     warned_at = models.DateTimeField(null=True, blank=True)
     suspended_at = models.DateTimeField(null=True, blank=True)
@@ -177,13 +203,52 @@ class User(AbstractBaseUser, PermissionsMixin):
         """Soft delete the user account."""
         self.deleted_at = timezone.now()
         self.is_active = False
-        self.save(update_fields=["deleted_at", "is_active", "updated_at"])
+        self.lifecycle_state = UserLifecycleState.DELETED
+        self.save(update_fields=["deleted_at", "is_active", "lifecycle_state", "updated_at"])
 
     def restore(self) -> None:
         """Restore a soft-deleted user account."""
         self.deleted_at = None
         self.is_active = True
-        self.save(update_fields=["deleted_at", "is_active", "updated_at"])
+        self.lifecycle_state = UserLifecycleState.ACTIVE
+        self.save(update_fields=["deleted_at", "is_active", "lifecycle_state", "updated_at"])
+
+
+class AccountDeletionRequest(models.Model):
+    """Tracks a reversible user deletion and its eventual purge."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.OneToOneField(
+        User,
+        on_delete=models.CASCADE,
+        related_name="account_deletion_request",
+    )
+    status = models.CharField(
+        max_length=16,
+        choices=AccountDeletionStatus.choices,
+        default=AccountDeletionStatus.PENDING,
+        db_index=True,
+    )
+    requested_at = models.DateTimeField()
+    scheduled_for = models.DateTimeField(db_index=True)
+    cancelled_at = models.DateTimeField(null=True, blank=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+    retry_count = models.PositiveIntegerField(default=0)
+    failure_code = models.CharField(max_length=80, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "account_deletion_requests"
+        indexes = [
+            models.Index(
+                fields=["status", "scheduled_for"],
+                name="idx_deletion_status_due",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"Deletion request for {self.user_id} ({self.status})"
 
 
 class InterestCategory(models.TextChoices):

@@ -120,9 +120,13 @@ class ContactService:
             )
 
             if not is_spam:
-                from core.admin_dashboard.models import ContactMessage
+                from core.admin_dashboard.models import (
+                    ContactConversationMessage,
+                    ContactMessage,
+                    ContactSenderType,
+                )
 
-                ContactMessage.objects.create(
+                contact = ContactMessage.objects.create(
                     name=name,
                     email=email,
                     message=message,
@@ -130,6 +134,13 @@ class ContactService:
                     brand=submission.brand,
                     ip_address=ip_address or None,
                 )
+                initial_message = ContactConversationMessage.objects.create(
+                    contact=contact,
+                    sender_type=ContactSenderType.USER,
+                    message=message,
+                )
+                contact.last_message_at = initial_message.created_at
+                contact.save(update_fields=["last_message_at", "updated_at"])
 
                 submission_brand = submission.brand
 

@@ -40,12 +40,12 @@ class UserManagementService:
             Dict with users list, total_count, page, page_size, total_pages,
             and summary counts (total, active, warned, suspended, inactive, deleted).
         """
-        from core.users.models import User, UserStatus
+        from core.users.models import User, UserLifecycleState, UserStatus
 
         page_size = min(page_size, 50)
         offset = (page - 1) * page_size
 
-        qs = User.all_objects.annotate(
+        qs = User.all_objects.select_related("account_deletion_request").annotate(
             posts_count=Count("posts", filter=Q(posts__deleted_at__isnull=True)),
         )
 
@@ -60,6 +60,11 @@ class UserManagementService:
             normalized_status = status_filter.strip().lower()
             if normalized_status == "deleted":
                 qs = qs.filter(deleted_at__isnull=False)
+            elif normalized_status in {
+                UserLifecycleState.DEACTIVATED,
+                UserLifecycleState.PENDING_DELETION,
+            }:
+                qs = qs.filter(lifecycle_state=normalized_status)
             elif normalized_status == "inactive":
                 qs = qs.filter(deleted_at__isnull=True, is_active=False)
             else:
@@ -85,6 +90,14 @@ class UserManagementService:
             ),
             inactive=Count("id", filter=Q(deleted_at__isnull=True, is_active=False)),
             deleted=Count("id", filter=Q(deleted_at__isnull=False)),
+            deactivated=Count(
+                "id",
+                filter=Q(lifecycle_state=UserLifecycleState.DEACTIVATED),
+            ),
+            pending_deletion=Count(
+                "id",
+                filter=Q(lifecycle_state=UserLifecycleState.PENDING_DELETION),
+            ),
         )
 
         return {
@@ -265,7 +278,7 @@ class UserManagementService:
             AdminError: If user not found or admin tries to delete self.
         """
         from core.admin_dashboard.models import ModerationAction, ModerationActionType
-        from core.users.models import User
+        from core.users.models import User, UserLifecycleState
 
         if str(admin_user.id) == user_id:
             raise AdminError(
@@ -294,7 +307,8 @@ class UserManagementService:
         deletion_time = datetime.now(timezone.utc)
         user.deleted_at = deletion_time
         user.is_active = False
-        user.save(update_fields=["deleted_at", "is_active", "updated_at"])
+        user.lifecycle_state = UserLifecycleState.DELETED
+        user.save(update_fields=["deleted_at", "is_active", "lifecycle_state", "updated_at"])
         audit_details = _build_minimal_user_audit_details(user, deleted_at=deletion_time)
 
         # Revoke all tokens and device tokens.
@@ -340,7 +354,7 @@ class UserManagementService:
         constraints remain valid, but the old email/login identity can no longer
         authenticate or be recovered.
         """
-        from core.users.models import User, UserRole, UserStatus
+        from core.users.models import User
 
         reason = _validate_reason(reason)
 
@@ -382,9 +396,11 @@ class UserManagementService:
         now = datetime.now(timezone.utc)
         before_status = user.status
         user_id_str = str(user.id)
-        id_token = user.id.hex if hasattr(user.id, "hex") else user_id_str.replace("-", "")
 
         _revoke_user_sessions(user.id, delete_device_tokens=True)
+        from core.users.account_lifecycle import delete_user_gcs_objects
+
+        delete_user_gcs_objects(user)
         _remove_or_hide_user_data(user, now)
 
         # Moderation history tied directly to the deleted identity is removed;
@@ -393,59 +409,9 @@ class UserManagementService:
 
         ModerationAction.objects.filter(user=user).delete()
 
-        user.email = f"deleted-{id_token}@deleted.ziona.local"[:255]
-        user.username = f"deleted_{id_token[:22]}"
-        user.full_name = ""
-        user.bio = ""
-        user.avatar_url = ""
-        user.role = UserRole.USER
-        user.is_email_verified = False
-        user.needs_username_selection = False
-        user.hide_like_count = False
-        user.encrypted_dob = None
-        user.location = ""
-        user.status = UserStatus.ACTIVE
-        user.warned_at = None
-        user.suspended_at = None
-        user.suspension_reason = ""
-        user.is_active = False
-        user.is_staff = False
-        user.deleted_at = now
-        user.last_login_ip = None
-        user.auth_provider = "email"
-        user.firebase_uid = None
-        user.social_auth_provider = None
-        user.google_id = None
-        user.set_unusable_password()
-        user.save(
-            update_fields=[
-                "email",
-                "username",
-                "full_name",
-                "bio",
-                "avatar_url",
-                "role",
-                "is_email_verified",
-                "needs_username_selection",
-                "hide_like_count",
-                "encrypted_dob",
-                "location",
-                "status",
-                "warned_at",
-                "suspended_at",
-                "suspension_reason",
-                "is_active",
-                "is_staff",
-                "deleted_at",
-                "last_login_ip",
-                "auth_provider",
-                "firebase_uid",
-                "social_auth_provider",
-                "google_id",
-                "password",
-                "updated_at",
-            ]
-        )
+        from core.users.account_lifecycle import anonymize_user_for_permanent_delete
+
+        anonymize_user_for_permanent_delete(user, now)
 
         log_admin_action(
             admin_user=admin_user,
@@ -473,9 +439,11 @@ class UserManagementService:
     def reactivate_user(user_id: str, admin_user, ip_address: str = "") -> dict:
         """Reactivate a suspended user. Resets status to ACTIVE."""
         from core.admin_dashboard.models import ModerationAction, ModerationActionType
-        from core.users.models import User, UserStatus
+        from core.users.models import User, UserLifecycleState, UserStatus
 
-        user = User.objects.select_for_update().filter(id=user_id, deleted_at__isnull=True).first()
+        user = (
+            User.all_objects.select_for_update().filter(id=user_id, deleted_at__isnull=True).first()
+        )
 
         if not user:
             raise AdminError(
@@ -492,6 +460,7 @@ class UserManagementService:
         user.suspended_at = None
         user.suspension_reason = ""
         user.is_active = True
+        user.lifecycle_state = UserLifecycleState.ACTIVE
         user.save(
             update_fields=[
                 "status",
@@ -499,6 +468,7 @@ class UserManagementService:
                 "suspended_at",
                 "suspension_reason",
                 "is_active",
+                "lifecycle_state",
                 "updated_at",
             ]
         )
@@ -595,6 +565,7 @@ def _user_to_dict(user) -> dict:
     """Convert User model to admin-facing dict."""
     posts_count = getattr(user, "posts_count", 0)
 
+    deletion_request = getattr(user, "account_deletion_request", None)
     return {
         "id": str(user.id),
         "username": user.username,
@@ -608,6 +579,14 @@ def _user_to_dict(user) -> dict:
         "is_active": user.is_active,
         "deleted_at": user.deleted_at.isoformat() if user.deleted_at else None,
         "account_state": _account_state(user),
+        "lifecycle_state": user.lifecycle_state,
+        "deletion_status": deletion_request.status if deletion_request else None,
+        "deletion_requested_at": (
+            deletion_request.requested_at.isoformat() if deletion_request else None
+        ),
+        "deletion_scheduled_for": (
+            deletion_request.scheduled_for.isoformat() if deletion_request else None
+        ),
         "posts_count": posts_count,
         "warned_at": user.warned_at.isoformat() if user.warned_at else None,
         "suspended_at": user.suspended_at.isoformat() if user.suspended_at else None,
@@ -650,11 +629,13 @@ def _validate_reason(reason: str) -> str:
 
 
 def _available_actions(user) -> list[str]:
-    from core.users.models import UserStatus
+    from core.users.models import UserLifecycleState, UserStatus
 
     if getattr(user, "is_admin", False):
         return []
     if getattr(user, "deleted_at", None):
+        return []
+    if user.lifecycle_state == UserLifecycleState.PENDING_DELETION:
         return []
     if not getattr(user, "is_active", True):
         return ["reactivate", "delete"]
@@ -666,10 +647,12 @@ def _available_actions(user) -> list[str]:
 
 
 def _account_state(user) -> str:
-    from core.users.models import UserStatus
+    from core.users.models import UserLifecycleState, UserStatus
 
     if getattr(user, "deleted_at", None):
         return "deleted"
+    if user.lifecycle_state != UserLifecycleState.ACTIVE:
+        return user.lifecycle_state
     if not getattr(user, "is_active", True):
         return "inactive"
     if user.status == UserStatus.SUSPENDED:

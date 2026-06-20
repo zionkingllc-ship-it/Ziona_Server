@@ -5,7 +5,12 @@ from django.core.validators import MinLengthValidator
 from django.db import models
 from django.db.models import Q
 
-from core.shared.models import TimestampedModel
+from core.shared.models import (
+    ActiveCreatorContentManager,
+    ActiveUserContentManager,
+    AllObjectsManager,
+    TimestampedModel,
+)
 
 User = settings.AUTH_USER_MODEL
 
@@ -32,6 +37,9 @@ class Circle(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     deleted_at = models.DateTimeField(null=True, blank=True)
+
+    objects = ActiveCreatorContentManager()
+    all_objects = AllObjectsManager()
 
     class Meta:
         db_table = "circles"
@@ -210,6 +218,9 @@ class Anchor(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
     deleted_at = models.DateTimeField(null=True, blank=True)
 
+    objects = ActiveCreatorContentManager()
+    all_objects = AllObjectsManager()
+
     class Meta:
         db_table = "anchors"
         ordering = ["-published_at"]
@@ -315,6 +326,9 @@ class AnchorResponse(models.Model):
 
     # Denormalized count for Trending Sort algorithm: (reaction_count * 2) - hours_since
     reaction_count = models.IntegerField(default=0)
+
+    objects = ActiveUserContentManager()
+    all_objects = AllObjectsManager()
 
     class Meta:
         db_table = "anchor_responses"
@@ -480,6 +494,9 @@ class CirclePost(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
     deleted_at = models.DateTimeField(null=True, blank=True)
 
+    objects = ActiveUserContentManager()
+    all_objects = AllObjectsManager()
+
     class Meta:
         db_table = "circle_posts"
         ordering = ["-created_at"]
@@ -592,6 +609,9 @@ class CirclePostComment(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     deleted_at = models.DateTimeField(null=True, blank=True)
+
+    objects = ActiveUserContentManager()
+    all_objects = AllObjectsManager()
 
     class Meta:
         db_table = "circle_post_comments"

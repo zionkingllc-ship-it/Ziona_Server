@@ -3,7 +3,7 @@ import json
 import pytest
 from django.test import Client
 
-from core.admin_dashboard.models import ContactMessage
+from core.admin_dashboard.models import ContactConversationMessage, ContactMessage
 
 
 @pytest.mark.django_db
@@ -255,3 +255,100 @@ def test_resolve_help_conversation_marks_thread_resolved(authenticated_user):
 
     contact.refresh_from_db()
     assert contact.status == "resolved"
+
+
+@pytest.mark.django_db
+def test_support_thread_append_is_idempotent_and_admin_reply_is_pollable(
+    authenticated_user, authenticated_admin
+):
+    from core.admin_dashboard.contact_services import ContactService
+
+    user = authenticated_user["user"]
+    created = ContactService.submit_help_message(
+        message="My first support message.",
+        category_slug="account-management",
+        user=user,
+    )
+    contact_id = created["contact_id"]
+    contact = ContactMessage.objects.get(id=contact_id)
+    contact.status = "resolved"
+    contact.save(update_fields=["status", "updated_at"])
+
+    client = Client()
+    client.defaults["HTTP_AUTHORIZATION"] = f"Bearer {authenticated_user['access_token']}"
+    mutation = """
+        mutation SendHelpMessage(
+          $contactId: String!,
+          $message: String!,
+          $clientMessageId: String!
+        ) {
+          sendHelpMessage(
+            contactId: $contactId,
+            message: $message,
+            clientMessageId: $clientMessageId
+          ) {
+            success
+            contact { id status messages { id senderType message } }
+            error { code message }
+          }
+        }
+    """
+    variables = {
+        "contactId": contact_id,
+        "message": "Here is a little more detail.",
+        "clientMessageId": "mobile-message-001",
+    }
+
+    for _ in range(2):
+        response = client.post(
+            "/graphql/",
+            data=json.dumps({"query": mutation, "variables": variables}),
+            content_type="application/json",
+        )
+        payload = response.json()["data"]["sendHelpMessage"]
+        assert payload["success"] is True
+        assert payload["contact"]["status"] == "pending"
+
+    assert (
+        ContactConversationMessage.objects.filter(
+            contact_id=contact_id,
+            client_message_id="mobile-message-001",
+        ).count()
+        == 1
+    )
+
+    cursor = str(
+        ContactConversationMessage.objects.filter(contact_id=contact_id)
+        .order_by("created_at", "id")
+        .last()
+        .id
+    )
+    ContactService.reply_to_contact(
+        contact_id,
+        "Thanks. We are looking into it.",
+        admin_user=authenticated_admin["user"],
+    )
+
+    poll_response = client.post(
+        "/graphql/",
+        data=json.dumps(
+            {
+                "query": """
+                    query PollSupport($contactId: String!, $after: String!) {
+                      helpConversationMessages(contactId: $contactId, after: $after) {
+                        messages { senderType message }
+                        nextCursor
+                        hasMore
+                      }
+                    }
+                """,
+                "variables": {"contactId": contact_id, "after": cursor},
+            }
+        ),
+        content_type="application/json",
+    )
+    poll_payload = poll_response.json()["data"]["helpConversationMessages"]
+    assert poll_payload["messages"] == [
+        {"senderType": "ADMIN", "message": "Thanks. We are looking into it."}
+    ]
+    assert poll_payload["nextCursor"]

@@ -11,7 +11,10 @@ from django.conf import settings
 from google.auth.transport import requests as google_requests
 from google.oauth2 import id_token as google_id_token
 
-from core.authentication.account_status import ensure_account_can_authenticate
+from core.authentication.account_status import (
+    build_account_recovery_result,
+    ensure_account_can_authenticate,
+)
 from core.authentication.activity import record_successful_auth
 from core.authentication.tokens import TokenService
 from core.authentication.validators import AuthenticationError
@@ -94,6 +97,10 @@ class OAuthService:
         picture = google_user_info.get("picture", "")
 
         if existing_user:
+            if existing_user.google_id == google_id:
+                recovery_result = build_account_recovery_result(existing_user)
+                if recovery_result:
+                    return {**recovery_result, "is_new_user": False}
             ensure_account_can_authenticate(existing_user)
 
             if existing_user.google_id and existing_user.google_id != google_id:
@@ -217,6 +224,9 @@ class OAuthService:
         is_new_user = False
 
         if user:
+            recovery_result = build_account_recovery_result(user)
+            if recovery_result:
+                return {**recovery_result, "is_new_user": False}
             ensure_account_can_authenticate(user)
             _link_apple_account(
                 user,

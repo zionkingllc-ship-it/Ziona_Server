@@ -145,6 +145,10 @@ class AdminUserType:
     bio: str
     status: str
     account_state: str = strawberry.field(name="accountState")
+    lifecycle_state: str = strawberry.field(name="lifecycleState")
+    deletion_status: str | None = strawberry.field(name="deletionStatus", default=None)
+    deletion_requested_at: str | None = strawberry.field(name="deletionRequestedAt", default=None)
+    deletion_scheduled_for: str | None = strawberry.field(name="deletionScheduledFor", default=None)
     role: str
     is_email_verified: bool = strawberry.field(name="isEmailVerified")
     is_active: bool = strawberry.field(name="isActive")
@@ -168,6 +172,8 @@ class UserSummaryType:
     suspended: int
     inactive: int = 0
     deleted: int = 0
+    deactivated: int = 0
+    pending_deletion: int = strawberry.field(name="pendingDeletion", default=0)
 
 
 @strawberry.type
@@ -417,6 +423,7 @@ class ContactReplyType:
     id: str
     message: str
     sent_by_name: str = strawberry.field(name="sentByName")
+    sender_type: str = strawberry.field(name="senderType")
     sent_at: str = strawberry.field(name="sentAt")
 
 
@@ -436,6 +443,8 @@ class AdminContactType:
     replies: list[ContactReplyType]
     replied_at: str | None = strawberry.field(name="repliedAt", default=None)
     created_at: str = strawberry.field(name="createdAt")
+    updated_at: str = strawberry.field(name="updatedAt")
+    last_message_at: str | None = strawberry.field(name="lastMessageAt", default=None)
 
 
 @strawberry.type
@@ -538,8 +547,23 @@ class HelpConversationType:
     topic: str
     status: str
     created_at: str = strawberry.field(name="createdAt")
+    updated_at: str = strawberry.field(name="updatedAt")
+    last_message_at: str | None = strawberry.field(name="lastMessageAt", default=None)
     replied_at: str | None = strawberry.field(name="repliedAt", default=None)
+    latest_message: HelpConversationMessageType | None = strawberry.field(
+        name="latestMessage",
+        default=None,
+    )
+    messages: list[HelpConversationMessageType] = strawberry.field(default_factory=list)
+
+
+@strawberry.type
+class HelpConversationMessagesPageType:
+    """Cursor page used by mobile while polling an open support thread."""
+
     messages: list[HelpConversationMessageType]
+    next_cursor: str | None = strawberry.field(name="nextCursor", default=None)
+    has_more: bool = strawberry.field(name="hasMore", default=False)
 
 
 @strawberry.type
@@ -582,6 +606,10 @@ def _map_user(data: dict) -> AdminUserType:
         bio=data["bio"],
         status=data["status"],
         account_state=data.get("account_state", data["status"]),
+        lifecycle_state=data.get("lifecycle_state", "active"),
+        deletion_status=data.get("deletion_status"),
+        deletion_requested_at=data.get("deletion_requested_at"),
+        deletion_scheduled_for=data.get("deletion_scheduled_for"),
         role=data["role"],
         is_email_verified=data["is_email_verified"],
         is_active=data.get("is_active", True),
@@ -691,6 +719,7 @@ def _map_contact(data: dict) -> AdminContactType:
             id=r["id"],
             message=r["message"],
             sent_by_name=r.get("sent_by_name", ""),
+            sender_type=r.get("sender_type", "ADMIN"),
             sent_at=r["sent_at"],
         )
         for r in data.get("replies", [])
@@ -709,6 +738,8 @@ def _map_contact(data: dict) -> AdminContactType:
         replies=replies,
         replied_at=data.get("replied_at"),
         created_at=data["created_at"],
+        updated_at=data.get("updated_at", data["created_at"]),
+        last_message_at=data.get("last_message_at"),
     )
 
 
@@ -1062,6 +1093,55 @@ class AdminDashboardQueries:
                 status_filter=status,
             )
         ]
+
+    @strawberry.field(
+        name="helpConversation",
+        description="Return one support conversation owned by the authenticated user.",
+    )
+    def help_conversation(self, info: Info, contact_id: str) -> HelpConversationType | None:
+        from core.admin_dashboard.contact_services import ContactService
+        from core.shared.exceptions import AuthenticationError
+        from core.users.models import User
+        from core.users.schema import _get_authenticated_user_id
+
+        user_id = _get_authenticated_user_id(info)
+        user = User.objects.filter(id=user_id).first() if user_id else None
+        if not user:
+            raise AuthenticationError("Authentication required", "UNAUTHENTICATED")
+        return _map_help_conversation(ContactService.get_help_conversation(contact_id, user=user))
+
+    @strawberry.field(
+        name="helpConversationMessages",
+        description="Poll new support messages after the last received message cursor.",
+    )
+    def help_conversation_messages(
+        self,
+        info: Info,
+        contact_id: str,
+        after: str = "",
+        first: int = 50,
+    ) -> HelpConversationMessagesPageType:
+        from core.admin_dashboard.contact_services import ContactService
+        from core.shared.exceptions import AuthenticationError
+        from core.users.models import User
+        from core.users.schema import _get_authenticated_user_id
+
+        user_id = _get_authenticated_user_id(info)
+        user = User.objects.filter(id=user_id).first() if user_id else None
+        if not user:
+            raise AuthenticationError("Authentication required", "UNAUTHENTICATED")
+
+        result = ContactService.list_help_conversation_messages(
+            contact_id,
+            user=user,
+            after=after,
+            first=first,
+        )
+        return HelpConversationMessagesPageType(
+            messages=[_map_help_conversation_message(item) for item in result["messages"]],
+            next_cursor=result["next_cursor"],
+            has_more=result["has_more"],
+        )
 
 
 # ──────────────────────────────────────────────
@@ -1774,6 +1854,14 @@ class AdminDashboardMutations:
                 if user_id
                 else None
             )
+            if not user:
+                return HelpConversationPayload(
+                    success=False,
+                    error=ErrorType(
+                        code="UNAUTHENTICATED",
+                        message="Authentication is required for in-app support.",
+                    ),
+                )
             result = ContactService.submit_help_message(
                 message=message,
                 category_slug=category_slug or "",
@@ -1789,7 +1877,42 @@ class AdminDashboardMutations:
         except AdminError as e:
             return HelpConversationPayload(
                 success=False,
-                error=ErrorType(code=e.code, message=e.message),
+                error=ErrorType(code=e.code, message=e.message, details=e.extensions or None),
+            )
+
+    @strawberry.mutation(
+        name="sendHelpMessage",
+        description="Append an idempotent message to an existing in-app support thread.",
+    )
+    def send_help_message(
+        self,
+        info: Info,
+        contact_id: str,
+        message: str,
+        client_message_id: str,
+    ) -> HelpConversationPayload:
+        from core.admin_dashboard.contact_services import ContactService
+        from core.shared.exceptions import AdminError
+        from core.users.models import User
+        from core.users.schema import _get_authenticated_user_id
+
+        try:
+            user_id = _get_authenticated_user_id(info)
+            user = User.objects.filter(id=user_id).first() if user_id else None
+            result = ContactService.send_help_message(
+                contact_id,
+                message=message,
+                client_message_id=client_message_id,
+                user=user,
+            )
+            return HelpConversationPayload(
+                success=True,
+                contact=_map_help_conversation(result["contact"]),
+            )
+        except AdminError as e:
+            return HelpConversationPayload(
+                success=False,
+                error=ErrorType(code=e.code, message=e.message, details=e.extensions or None),
             )
 
     @strawberry.mutation(
@@ -1886,15 +2009,25 @@ def _map_help_conversation(conversation: dict) -> HelpConversationType:
         topic=conversation.get("topic", ""),
         status=conversation["status"],
         created_at=conversation["created_at"],
+        updated_at=conversation["updated_at"],
+        last_message_at=conversation.get("last_message_at"),
         replied_at=conversation.get("replied_at"),
+        latest_message=(
+            _map_help_conversation_message(conversation["latest_message"])
+            if conversation.get("latest_message")
+            else None
+        ),
         messages=[
-            HelpConversationMessageType(
-                id=message["id"],
-                message=message["message"],
-                sent_at=message["sent_at"],
-                sender_type=message["sender_type"],
-                sender_name=message["sender_name"],
-            )
-            for message in conversation.get("messages", [])
+            _map_help_conversation_message(message) for message in conversation.get("messages", [])
         ],
+    )
+
+
+def _map_help_conversation_message(message: dict) -> HelpConversationMessageType:
+    return HelpConversationMessageType(
+        id=message["id"],
+        message=message["message"],
+        sent_at=message["sent_at"],
+        sender_type=message["sender_type"],
+        sender_name=message["sender_name"],
     )

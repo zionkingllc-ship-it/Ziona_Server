@@ -15,7 +15,7 @@ from enum import Enum
 import strawberry
 from strawberry.types import Info
 
-from core.shared.exceptions import AdminError
+from core.shared.exceptions import AdminError, ErrorCode
 from core.shared.request_utils import get_client_ip
 from core.shared.types import ErrorType
 
@@ -222,8 +222,14 @@ class LandingMutations:
         honeypot: str = "",
     ) -> ContactPayload:
         from core.landing.services import ContactService
+        from core.users.schema import _get_authenticated_user_id
 
         try:
+            if _get_authenticated_user_id(info):
+                raise AdminError(
+                    "Use the authenticated in-app help flow for support conversations.",
+                    ErrorCode.USE_HELP_SUPPORT_FLOW,
+                )
             result = ContactService.submit(
                 brand=brand.value,
                 name=name,

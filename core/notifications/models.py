@@ -17,6 +17,7 @@ class NotificationType(models.TextChoices):
     NEW_ANCHOR = "new_anchor", "New Anchor"
     MENTION = "mention", "Mention"
     NEW_CIRCLE_POST = "new_circle_post", "New Circle Post"
+    SUPPORT_REPLY = "support_reply", "Support Reply"
     ADMIN_ANNOUNCEMENT = "admin_announcement", "Admin Announcement"
 
 
