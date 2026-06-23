@@ -126,6 +126,8 @@ class RateLimitMiddleware:
         "/api/auth/register": "RATE_LIMIT_REGISTER",
         "/api/auth/check-email": "RATE_LIMIT_CHECK_EMAIL",
         "/api/auth/password-reset": "RATE_LIMIT_PASSWORD_RESET",
+        "/api/payments/support-once": "RATE_LIMIT_SUPPORT_CHECKOUT",
+        "/api/payments/support-monthly": "RATE_LIMIT_SUPPORT_CHECKOUT",
     }
 
     def __init__(self, get_response):

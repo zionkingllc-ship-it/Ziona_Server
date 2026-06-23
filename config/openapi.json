@@ -19,7 +19,8 @@
     {"name": "Email Verification", "description": "OTP-based email verification flow"},
     {"name": "Username", "description": "Username suggestions for onboarding"},
     {"name": "Password Reset", "description": "Password reset via OTP"},
-    {"name": "OAuth", "description": "Third-party authentication"}
+    {"name": "OAuth", "description": "Third-party authentication"},
+    {"name": "Support", "description": "Hosted Stripe support and customer portal"}
   ],
   "paths": {
     "/auth/register": {
@@ -1230,6 +1231,84 @@
               }
             }
           }
+        }
+      }
+    },
+"/payments/support-once": {
+      "post": {
+        "tags": ["Support"],
+        "summary": "Create a one-time hosted Stripe Checkout session",
+        "operationId": "createOneTimeSupportCheckout",
+        "requestBody": {
+          "required": true,
+          "content": {"application/json": {"schema": {
+            "type": "object",
+            "required": ["amountUsd"],
+            "properties": {
+              "amountUsd": {"type": "number", "minimum": 1, "example": 25},
+              "email": {"type": "string", "format": "email"},
+              "name": {"type": "string"}
+            }
+          }}}
+        },
+        "responses": {
+          "201": {"description": "Checkout session created"},
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "429": {"description": "Rate limit exceeded"}
+        }
+      }
+    },
+    "/payments/support-monthly": {
+      "post": {
+        "tags": ["Support"],
+        "summary": "Create a monthly hosted Stripe Checkout session",
+        "operationId": "createMonthlySupportCheckout",
+        "requestBody": {
+          "required": true,
+          "content": {"application/json": {"schema": {
+            "type": "object",
+            "required": ["amountUsd"],
+            "properties": {
+              "amountUsd": {"type": "number", "minimum": 1, "example": 10},
+              "email": {"type": "string", "format": "email"},
+              "name": {"type": "string"}
+            }
+          }}}
+        },
+        "responses": {
+          "201": {"description": "Checkout session created"},
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "429": {"description": "Rate limit exceeded"}
+        }
+      }
+    },
+    "/payments/session-status/{checkoutSessionId}": {
+      "get": {
+        "tags": ["Support"],
+        "summary": "Read the locally reconciled checkout status",
+        "operationId": "getSupportCheckoutStatus",
+        "parameters": [{
+          "name": "checkoutSessionId",
+          "in": "path",
+          "required": true,
+          "schema": {"type": "string"}
+        }],
+        "responses": {
+          "200": {"description": "Checkout status"},
+          "404": {"description": "Checkout session not found"}
+        }
+      }
+    },
+    "/payments/customer-portal": {
+      "post": {
+        "tags": ["Support"],
+        "summary": "Create an authenticated Stripe customer portal session",
+        "operationId": "createSupportCustomerPortal",
+        "security": [{"BearerAuth": []}],
+        "responses": {
+          "200": {"description": "Portal URL created"},
+          "401": {"description": "Authentication required"},
+          "404": {"description": "No Stripe customer linked to this account"}
         }
       }
     }

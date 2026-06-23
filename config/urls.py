@@ -33,6 +33,7 @@ def build_urlpatterns():
             name="graphql_no_slash",
         ),
         path("api/auth/", include("core.authentication.urls")),
+        path("api/payments/", include("core.donations.urls")),
         path(
             ".well-known/apple-app-site-association",
             apple_app_site_association,

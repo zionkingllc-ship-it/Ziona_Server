@@ -9,6 +9,15 @@ from core.users.models import User
 logger = logging.getLogger("core.users")
 
 
+def _user_is_early_supporter(user: User) -> bool:
+    from core.donations.models import SupporterIdentity
+
+    return SupporterIdentity.objects.filter(
+        user_id=user.id,
+        is_early_supporter=True,
+    ).exists()
+
+
 @strawberry.type
 class UserType:
     """Safe public GraphQL representation of a user."""
@@ -22,6 +31,7 @@ class UserType:
     needs_username_selection: bool
     location: str
     created_at: str
+    is_early_supporter: bool = strawberry.field(name="isEarlySupporter", default=False)
 
     @classmethod
     def from_model(cls, user: User) -> "UserType":
@@ -36,6 +46,7 @@ class UserType:
             needs_username_selection=getattr(user, "needs_username_selection", False),
             location=user.location,
             created_at=user.created_at.isoformat(),
+            is_early_supporter=_user_is_early_supporter(user),
         )
 
     @classmethod
@@ -60,6 +71,7 @@ class AuthenticatedUserType:
     needs_username_selection: bool
     location: str
     created_at: str
+    is_early_supporter: bool = strawberry.field(name="isEarlySupporter", default=False)
 
     @classmethod
     def from_model(cls, user: User) -> "AuthenticatedUserType":
@@ -77,6 +89,7 @@ class AuthenticatedUserType:
             needs_username_selection=getattr(user, "needs_username_selection", False),
             location=user.location,
             created_at=user.created_at.isoformat(),
+            is_early_supporter=_user_is_early_supporter(user),
         )
 
     @classmethod
@@ -135,6 +148,7 @@ class CurrentUserResponse:
     # Exposed so the mobile app can hide like counts on the current user's
     # own posts without requiring a separate profile query.
     hideLikeCount: bool
+    isEarlySupporter: bool
 
     profile: Annotated["UserProfileType", strawberry.lazy("core.profiles.schema")]  # noqa: F821
     stats: Annotated["ProfileStatsType", strawberry.lazy("core.profiles.schema")]  # noqa: F821
@@ -231,6 +245,7 @@ class UserQueries:
             isEmailVerified=data["isEmailVerified"],
             hasPassword=data["hasPassword"],
             hideLikeCount=data.get("hideLikeCount", False),
+            isEarlySupporter=data.get("isEarlySupporter", False),
             profile=UserProfileType(
                 id=data["id"],
                 username=data["username"],

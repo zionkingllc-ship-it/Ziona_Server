@@ -95,6 +95,9 @@ class AuthService:
             # Expose the privacy setting so the mobile app can hide like counts
             # on the current user's own posts without a separate API call.
             "hideLikeCount": user.hide_like_count,
+            "isEarlySupporter": user.supporter_identity.is_early_supporter
+            if hasattr(user, "supporter_identity")
+            else False,
             "profile": {
                 "bio": profile_dto.bio,
                 "bioLink": profile_dto.bio_link,

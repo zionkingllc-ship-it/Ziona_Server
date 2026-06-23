@@ -433,6 +433,26 @@ ZIONKING_CONTACT_EMAIL = env("ZIONKING_CONTACT_EMAIL", default="info@zionking.or
 STRIPE_SECRET_KEY = env("STRIPE_SECRET_KEY", default="")
 STRIPE_WEBHOOK_SECRET = env("STRIPE_WEBHOOK_SECRET", default="")
 STRIPE_MONTHLY_PRICE_ID = env("STRIPE_MONTHLY_PRICE_ID", default="")
+STRIPE_ONE_TIME_PRODUCT_ID = env("STRIPE_ONE_TIME_PRODUCT_ID", default="")
+STRIPE_MONTHLY_PRODUCT_ID = env("STRIPE_MONTHLY_PRODUCT_ID", default="")
+STRIPE_CHECKOUT_SUCCESS_URL = env(
+    "STRIPE_CHECKOUT_SUCCESS_URL",
+    default="https://ziona.app/support/success",
+)
+STRIPE_CHECKOUT_CANCEL_URL = env(
+    "STRIPE_CHECKOUT_CANCEL_URL",
+    default="https://ziona.app/support",
+)
+STRIPE_PORTAL_RETURN_URL = env(
+    "STRIPE_PORTAL_RETURN_URL",
+    default="https://ziona.app/settings/support",
+)
+STRIPE_PORTAL_LOGIN_URL = env("STRIPE_PORTAL_LOGIN_URL", default="")
+STRIPE_SUPPORT_MAX_AMOUNT_USD = env(
+    "STRIPE_SUPPORT_MAX_AMOUNT_USD",
+    default="10000",
+)
+STRIPE_CURRENCY = env("STRIPE_CURRENCY", default="usd")
 
 # App Store Links (used by seed_app_links management command)
 IOS_APP_STORE_URL = env("IOS_APP_STORE_URL", default="https://apps.apple.com/app/ziona")
@@ -518,6 +538,7 @@ BCRYPT_COST_FACTOR = env.int("BCRYPT_COST_FACTOR", default=12)
 
 RATE_LIMIT_LOGIN = env("RATE_LIMIT_LOGIN", default="5/15m")
 RATE_LIMIT_REGISTER = env("RATE_LIMIT_REGISTER", default="3/60m")
+RATE_LIMIT_SUPPORT_CHECKOUT = env("RATE_LIMIT_SUPPORT_CHECKOUT", default="10/60m")
 RATE_LIMIT_CHECK_EMAIL = env("RATE_LIMIT_CHECK_EMAIL", default="10/60s")
 RATE_LIMIT_PASSWORD_RESET = env("RATE_LIMIT_PASSWORD_RESET", default="3/60m")
 RATE_LIMIT_MUTATIONS = env("RATE_LIMIT_MUTATIONS", default="30/60s")

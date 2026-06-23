@@ -13,6 +13,7 @@ from enum import Enum
 import strawberry
 from strawberry.types import Info
 
+from core.admin_dashboard.permissions import get_admin_user
 from core.shared.exceptions import AdminError
 from core.shared.types import ErrorType
 
@@ -51,6 +52,13 @@ class DonationConfirmationType:
     created_at: str = strawberry.field(name="createdAt")
 
 
+def _require_admin(info: Info):
+    admin = get_admin_user(info)
+    if admin is None:
+        raise AdminError("Admin access required.", "NOT_AUTHORIZED")
+    return admin
+
+
 # ──────────────────────────────────────────────────────────────
 # Queries
 # ──────────────────────────────────────────────────────────────
@@ -80,6 +88,113 @@ class DonationQueries:
             )
         except AdminError:
             return None
+
+    @strawberry.field(name="adminSupportStats")
+    def admin_support_stats(self, info: Info) -> strawberry.scalars.JSON:
+        _require_admin(info)
+        from django.db.models import Count, Sum
+
+        from core.donations.models import (
+            Donation,
+            DonationStatus,
+            Subscription,
+            SubscriptionStatus,
+            SupporterIdentity,
+            SupportPayment,
+            SupportPaymentStatus,
+        )
+
+        totals = SupportPayment.objects.filter(status=SupportPaymentStatus.SUCCEEDED).aggregate(
+            totalAmount=Sum("amount"), paymentCount=Count("id")
+        )
+        return {
+            "totalAmount": totals["totalAmount"] or 0,
+            "paymentCount": totals["paymentCount"] or 0,
+            "successfulDonations": Donation.objects.filter(status=DonationStatus.SUCCEEDED).count(),
+            "activeSubscriptions": Subscription.objects.filter(
+                status__in=[SubscriptionStatus.ACTIVE, SubscriptionStatus.TRIALING]
+            ).count(),
+            "earlySupporters": SupporterIdentity.objects.filter(is_early_supporter=True).count(),
+        }
+
+    @strawberry.field(name="adminSupportDonations")
+    def admin_support_donations(
+        self,
+        info: Info,
+        limit: int = 50,
+    ) -> strawberry.scalars.JSON:
+        _require_admin(info)
+        from core.donations.models import Donation
+
+        rows = Donation.objects.select_related("user", "supporter_identity")[
+            : max(1, min(limit, 200))
+        ]
+        return [
+            {
+                "id": str(row.id),
+                "name": row.donor_name,
+                "email": row.donor_email,
+                "amount": row.amount,
+                "currency": row.currency,
+                "type": row.type,
+                "status": row.status,
+                "source": row.source,
+                "isEarlySupporter": row.is_early_supporter,
+                "createdAt": row.created_at.isoformat(),
+            }
+            for row in rows
+        ]
+
+    @strawberry.field(name="adminSupportSubscriptions")
+    def admin_support_subscriptions(
+        self,
+        info: Info,
+        limit: int = 50,
+    ) -> strawberry.scalars.JSON:
+        _require_admin(info)
+        from core.donations.models import Subscription
+
+        rows = Subscription.objects.select_related("donation")[: max(1, min(limit, 200))]
+        return [
+            {
+                "id": str(row.id),
+                "stripeSubscriptionId": row.stripe_subscription_id,
+                "email": row.donation.donor_email,
+                "amount": row.amount,
+                "currency": row.currency,
+                "status": row.status,
+                "cancelAtPeriodEnd": row.cancel_at_period_end,
+                "currentPeriodEnd": (
+                    row.current_period_end.isoformat() if row.current_period_end else None
+                ),
+            }
+            for row in rows
+        ]
+
+    @strawberry.field(name="adminFailedSupportPayments")
+    def admin_failed_support_payments(
+        self,
+        info: Info,
+        limit: int = 50,
+    ) -> strawberry.scalars.JSON:
+        _require_admin(info)
+        from core.donations.models import SupportPayment, SupportPaymentStatus
+
+        rows = SupportPayment.objects.filter(status=SupportPaymentStatus.FAILED).select_related(
+            "donation"
+        )[: max(1, min(limit, 200))]
+        return [
+            {
+                "id": str(row.id),
+                "email": row.donation.donor_email if row.donation else "",
+                "amount": row.amount,
+                "currency": row.currency,
+                "failureCode": row.failure_code,
+                "failureMessage": row.failure_message,
+                "createdAt": row.created_at.isoformat(),
+            }
+            for row in rows
+        ]
 
 
 # ──────────────────────────────────────────────────────────────
@@ -188,6 +303,35 @@ class DonationMutations:
                 user_email=user.email,
                 subscription_id=subscription_id,
             )
+            return CancelPayload(success=True)
+        except AdminError as e:
+            return CancelPayload(
+                success=False,
+                error=ErrorType(code=e.code, message=e.message),
+            )
+
+    @strawberry.mutation(name="adminCancelSupportSubscription")
+    def admin_cancel_support_subscription(
+        self,
+        info: Info,
+        subscription_id: str,
+    ) -> CancelPayload:
+        try:
+            _require_admin(info)
+            from django.utils import timezone
+
+            from core.donations.hosted_services import get_stripe
+            from core.donations.models import Subscription, SubscriptionStatus
+
+            subscription = Subscription.objects.filter(
+                stripe_subscription_id=subscription_id
+            ).first()
+            if not subscription:
+                raise AdminError("Subscription not found.", "NOT_FOUND")
+            get_stripe().Subscription.cancel(subscription_id)
+            subscription.status = SubscriptionStatus.CANCELLED
+            subscription.cancelled_at = timezone.now()
+            subscription.save(update_fields=["status", "cancelled_at", "updated_at"])
             return CancelPayload(success=True)
         except AdminError as e:
             return CancelPayload(
