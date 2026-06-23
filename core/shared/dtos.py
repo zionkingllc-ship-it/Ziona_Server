@@ -9,7 +9,9 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_validator
+
+from core.shared.utils import normalize_duration_seconds
 
 
 def _to_camel(field_name: str) -> str:
@@ -62,6 +64,12 @@ class VideoMediaDTO(CamelCaseModel):
     duration: int
     width: int | None = None
     height: int | None = None
+
+    @field_validator("duration", mode="before")
+    @classmethod
+    def normalize_duration(cls, value):
+        """Defensively enforce the integer API contract for precise media metadata."""
+        return normalize_duration_seconds(value) or 0
 
 
 class TextMediaDTO(CamelCaseModel):

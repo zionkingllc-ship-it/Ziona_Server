@@ -83,6 +83,18 @@ class TestMobileAnchorAlignment(TestCase):
         )
         CircleMembership.objects.create(circle=self.circle, user=self.admin, role="admin")
 
+    def test_circle_media_normalizes_fractional_video_duration(self):
+        from core.circles.schema import _media_file_to_graphql
+
+        media = _make_media_file(
+            user=self.admin,
+            storage_path="uploads/test/videos/fractional.mp4",
+            media_type=StoredMediaType.VIDEO,
+            duration=6.83,
+        )
+
+        self.assertEqual(_media_file_to_graphql(media).duration, 7)
+
     def test_create_anchor_accepts_mobile_text_type_with_visual_fields(self):
         anchor = create_anchor(
             creator_id=str(self.admin.id),

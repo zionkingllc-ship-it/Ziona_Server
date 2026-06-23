@@ -511,6 +511,8 @@ class CirclePostAuthorType:
 
 
 def _media_file_to_graphql(media_file) -> MediaFileType:
+    from core.shared.utils import normalize_duration_seconds
+
     return MediaFileType(
         id=str(media_file.id),
         url=media_file.url,
@@ -518,7 +520,7 @@ def _media_file_to_graphql(media_file) -> MediaFileType:
         width=media_file.width,
         height=media_file.height,
         thumbnail_url=media_file.thumbnail_url,
-        duration=int(media_file.duration) if media_file.duration is not None else None,
+        duration=normalize_duration_seconds(media_file.duration),
     )
 
 

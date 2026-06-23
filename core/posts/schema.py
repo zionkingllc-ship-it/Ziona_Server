@@ -498,6 +498,7 @@ class Post:
                     width=getattr(self._dto.media, "width", 0),
                     height=getattr(self._dto.media, "height", 0),
                     thumbnail_url=getattr(self._dto.media, "thumbnail_url", ""),
+                    duration=getattr(self._dto.media, "duration", None),
                 )
             )
         elif raw_type == "image":

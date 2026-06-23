@@ -169,6 +169,47 @@ class TestCreatePost:
         assert excinfo.value.code == "VIDEO_TOO_LONG"
         assert excinfo.value.extensions["maxVideoDurationSeconds"] == 90
 
+    def test_create_video_post_normalizes_fractional_duration(self, user_a):
+        from core.media.models import MediaFile
+        from core.posts.services import PostService
+
+        media = MediaFile.objects.create(
+            user=user_a,
+            file_name="short.mp4",
+            storage_path="uploads/test/videos/short.mp4",
+            file_type="video/mp4",
+            file_size=1024,
+            media_type="video",
+            duration=6.83,
+            status="ready",
+        )
+
+        result = PostService.create_post(
+            user_id=str(user_a.id),
+            post_type="video",
+            caption="Fractional duration",
+            media_ids=[str(media.id)],
+        )
+
+        assert result.media.duration == 7
+
+    def test_create_post_rolls_back_when_response_dto_fails(self, user_a, monkeypatch):
+        from core.posts.services import PostService
+
+        def fail_dto(*args, **kwargs):
+            raise ValueError("bad dto")
+
+        monkeypatch.setattr(PostService, "_build_post_dto", staticmethod(fail_dto))
+
+        with pytest.raises(ValueError, match="bad dto"):
+            PostService.create_post(
+                user_id=str(user_a.id),
+                post_type="text",
+                caption="Must roll back",
+            )
+
+        assert not Post.objects.filter(user=user_a, caption="Must roll back").exists()
+
 
 class TestPostViewerState:
     """Tests for viewer-specific post read contracts."""

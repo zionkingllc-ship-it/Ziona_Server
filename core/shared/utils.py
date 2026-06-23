@@ -5,9 +5,31 @@ Provides common helper functions used across all modules.
 """
 
 import logging
+import math
 from urllib.parse import quote
 
 logger = logging.getLogger("core.shared")
+
+
+def normalize_duration_seconds(duration: int | float | None) -> int | None:
+    """Normalize precise media duration to whole API seconds.
+
+    Media processing retains fractional seconds for validation and diagnostics,
+    while the public GraphQL contract exposes duration as an integer. Rounding
+    up avoids understating playback length (for example, 6.83 becomes 7).
+    """
+    if duration is None:
+        return None
+
+    try:
+        value = float(duration)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Media duration must be numeric") from exc
+
+    if not math.isfinite(value) or value < 0:
+        raise ValueError("Media duration must be a finite, non-negative number")
+
+    return math.ceil(value)
 
 
 def normalize_url(url: str) -> str:

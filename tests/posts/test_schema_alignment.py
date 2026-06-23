@@ -91,7 +91,7 @@ class TestSchemaAlignment:
             media_type="video",
             storage_path="uploads/test/videos/clip.mp4",
             thumbnail_path="uploads/test/videos/clip.jpg",
-            duration=70,
+            duration=6.83,
             status="ready",
         )
 
@@ -132,6 +132,7 @@ class TestSchemaAlignment:
         assert post["mediaType"] == "video"
         assert post["mediaUrl"] == post["media"][0]["url"]
         assert post["mediaUrl"].endswith("/uploads/test/videos/clip.mp4")
+        assert post["media"][0]["duration"] == 7
 
         query = """
         query Feed {
@@ -140,7 +141,7 @@ class TestSchemaAlignment:
               id
               mediaUrl
               mediaType
-              video { url }
+              video { url duration }
               image { items { url } }
             }
           }
@@ -160,6 +161,7 @@ class TestSchemaAlignment:
         )
         assert feed_post["mediaType"] == "video"
         assert feed_post["mediaUrl"] == feed_post["video"]["url"]
+        assert feed_post["video"]["duration"] == 7
         assert feed_post["image"] is None
 
     def test_feed_query_alignment(self, auth_client):

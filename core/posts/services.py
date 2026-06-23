@@ -8,6 +8,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 
 from django.conf import settings
+from django.db import transaction
 
 from core.engagement.models import Like, Save
 from core.follows.models import Follow
@@ -26,7 +27,7 @@ from core.shared.dtos import (
     ViewerStateDTO,
 )
 from core.shared.exceptions import ErrorCode, PostError
-from core.shared.utils import build_post_share_url
+from core.shared.utils import build_post_share_url, normalize_duration_seconds
 
 logger = logging.getLogger("core.posts")
 
@@ -245,18 +246,27 @@ class PostService:
         elif any(m.media_type == "image" for m in resolved_media_files):
             internal_post_type = "image"
 
-        post = Post.objects.create(
-            user=user,
-            post_type=internal_post_type,
-            caption=caption or "",
-            category=category_obj,
-            media_count=len(resolved_media_files),
-            **scripture_fields,
-        )
+        # Keep post persistence and response construction atomic. A serialization
+        # failure must not leave a post behind while reporting success=False.
+        with transaction.atomic():
+            post = Post.objects.create(
+                user=user,
+                post_type=internal_post_type,
+                caption=caption or "",
+                category=category_obj,
+                media_count=len(resolved_media_files),
+                **scripture_fields,
+            )
 
-        # 4. Associate Media
-        if resolved_media_files:
-            post.media_files.set(resolved_media_files)
+            if resolved_media_files:
+                post.media_files.set(resolved_media_files)
+
+            post_dto = PostService._build_post_dto(
+                post,
+                resolved_media_files,
+                viewer_id=str(user.id),
+                is_owner=True,
+            )
 
         # 5. Invalidate user stats cache so `me.stats.postsCount` reflects immediately.
         try:
@@ -290,12 +300,7 @@ class PostService:
         except (ConnectionError, TimeoutError, OSError):
             logger.warning("Failed to increment post counter cache")
 
-        return PostService._build_post_dto(
-            post,
-            resolved_media_files,
-            viewer_id=str(user.id),
-            is_owner=True,
-        )
+        return post_dto
 
     @staticmethod
     def get_post(post_id: str, viewer_id: str | None = None) -> PostResponseDTO:
@@ -515,7 +520,7 @@ class PostService:
             v = media_items[0]
             v_url = getattr(v, "url", getattr(v, "media_url", ""))
             v_thumb = getattr(v, "thumbnail_url", getattr(v, "thumbnail_path", ""))
-            v_duration = getattr(v, "duration", 0)
+            v_duration = normalize_duration_seconds(getattr(v, "duration", None))
             media = VideoMediaDTO(
                 url=v_url,
                 thumbnail_url=v_thumb or "",
