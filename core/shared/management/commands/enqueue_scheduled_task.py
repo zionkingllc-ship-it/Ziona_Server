@@ -50,7 +50,7 @@ SCHEDULED_TASKS = {
     "cleanup-stale-media": {
         "module": "core.media.tasks",
         "attr": "cleanup_stale_media_uploads",
-        "lock_timeout": 2 * 60 * 60,
+        "lock_timeout": 10 * 60,
     },
     "purge-due-account-deletions": {
         "module": "core.users.tasks",

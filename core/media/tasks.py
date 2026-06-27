@@ -7,6 +7,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 
+from billiard.exceptions import SoftTimeLimitExceeded
 from celery import chain, shared_task
 from django.conf import settings
 from django.db import DatabaseError
@@ -21,6 +22,7 @@ logger = logging.getLogger("core.media")
 
 DETERMINISTIC_MEDIA_EXCEPTIONS = (
     RuntimeError,
+    SoftTimeLimitExceeded,
     subprocess.TimeoutExpired,
     UnidentifiedImageError,
     ValueError,
@@ -32,7 +34,17 @@ TRANSIENT_MEDIA_EXCEPTIONS = (
 )
 
 
-@shared_task(bind=True, max_retries=2, default_retry_delay=15, time_limit=60)
+def _media_setting(name: str, default: int) -> int:
+    return int(getattr(settings, name, default))
+
+
+@shared_task(
+    bind=True,
+    max_retries=2,
+    default_retry_delay=15,
+    soft_time_limit=_media_setting("MEDIA_PROCESS_TASK_SOFT_TIME_LIMIT_SECONDS", 45),
+    time_limit=60,
+)
 def process_media_upload(self, media_id: str) -> str | None:
     """Queue a staged processing pipeline for the uploaded media."""
     media_file = _get_media_file(media_id)
@@ -92,6 +104,7 @@ def process_media_upload(self, media_id: str) -> str | None:
     default_retry_delay=30,
     retry_backoff=True,
     retry_jitter=True,
+    soft_time_limit=_media_setting("MEDIA_IMAGE_TASK_SOFT_TIME_LIMIT_SECONDS", 150),
     time_limit=180,
 )
 def optimize_image_media_stage(self, media_id: str) -> str:
@@ -114,6 +127,7 @@ def optimize_image_media_stage(self, media_id: str) -> str:
     default_retry_delay=45,
     retry_backoff=True,
     retry_jitter=True,
+    soft_time_limit=_media_setting("MEDIA_VIDEO_TASK_SOFT_TIME_LIMIT_SECONDS", 270),
     time_limit=300,
 )
 def optimize_video_media_stage(self, media_id: str) -> str:
@@ -136,6 +150,7 @@ def optimize_video_media_stage(self, media_id: str) -> str:
     default_retry_delay=30,
     retry_backoff=True,
     retry_jitter=True,
+    soft_time_limit=_media_setting("MEDIA_THUMBNAIL_TASK_SOFT_TIME_LIMIT_SECONDS", 100),
     time_limit=120,
 )
 def generate_video_thumbnail_stage(self, media_id: str) -> str:
@@ -152,7 +167,13 @@ def generate_video_thumbnail_stage(self, media_id: str) -> str:
     return str(media_file.id)
 
 
-@shared_task(bind=True, max_retries=1, default_retry_delay=30, time_limit=60)
+@shared_task(
+    bind=True,
+    max_retries=1,
+    default_retry_delay=30,
+    soft_time_limit=_media_setting("MEDIA_FINALIZE_TASK_SOFT_TIME_LIMIT_SECONDS", 45),
+    time_limit=60,
+)
 def finalize_media_ready(self, media_id: str) -> str | None:
     """Mark processed media READY once every prior pipeline stage has succeeded."""
     media_file = _get_media_file(media_id)
@@ -173,10 +194,17 @@ def finalize_media_ready(self, media_id: str) -> str | None:
     return str(media_file.id)
 
 
-@shared_task(bind=True, max_retries=1, default_retry_delay=60, time_limit=180)
+@shared_task(
+    bind=True,
+    max_retries=1,
+    default_retry_delay=60,
+    soft_time_limit=_media_setting("MEDIA_CLEANUP_TASK_SOFT_TIME_LIMIT_SECONDS", 150),
+    time_limit=180,
+)
 def cleanup_stale_media_uploads(self) -> int:
     """Mark stale unprocessed media failed and remove abandoned GCS objects."""
-    cutoff = timezone.now() - timezone.timedelta(hours=settings.MEDIA_STALE_UPLOAD_HOURS)
+    stale_minutes = _media_setting("MEDIA_STALE_UPLOAD_MINUTES", 15)
+    cutoff = timezone.now() - timezone.timedelta(minutes=stale_minutes)
     stale_media = list(
         MediaFile.objects.filter(
             status__in=[MediaStatus.PENDING, MediaStatus.PROCESSING],
@@ -196,8 +224,11 @@ def cleanup_stale_media_uploads(self) -> int:
                         "stale_media_blob_delete_failed",
                         extra={"media_id": str(media_file.id), "error": str(exc)},
                     )
-            media_file.status = MediaStatus.FAILED
-            media_file.save(update_fields=["status", "updated_at"])
+            _mark_media_failed(
+                media_file,
+                stage="stale_cleanup",
+                exc=subprocess.TimeoutExpired("media processing", stale_minutes * 60),
+            )
     except Exception as exc:  # noqa: BLE001
         logger.error("stale_media_cleanup_failed", exc_info=True)
         raise self.retry(exc=exc) from exc
@@ -550,6 +581,14 @@ def _classify_processing_failure(media_file: MediaFile, exc: Exception) -> tuple
     media_kind = "Video" if media_file.media_type == MediaType.VIDEO else "Media"
     error_text = str(exc)
     lowered_error = error_text.lower()
+
+    if isinstance(exc, SoftTimeLimitExceeded):
+        return (
+            "VIDEO_PROCESSING_TIMEOUT"
+            if media_file.media_type == MediaType.VIDEO
+            else "MEDIA_PROCESSING_TIMEOUT",
+            f"{media_kind} processing exceeded the worker time limit. Please try a shorter or lower-resolution file.",
+        )
 
     if isinstance(exc, subprocess.TimeoutExpired):
         return (

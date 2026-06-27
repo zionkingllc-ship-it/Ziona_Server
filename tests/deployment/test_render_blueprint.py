@@ -24,6 +24,9 @@ def test_render_blueprint_uses_cron_jobs_not_prod_beat(settings):
     assert "-Q email,default,media,cron" in blueprint
     assert 'schedule: "*/5 * * * *"' in blueprint
     assert 'schedule: "*/15 * * * *"' in blueprint
+    assert "name: ziona-cron-stale-media-cleanup" in blueprint
+    assert 'schedule: "*/10 * * * *"' in blueprint
+    assert "MEDIA_STALE_UPLOAD_MINUTES" in blueprint
 
 
 def test_render_cron_task_allowlist_covers_expected_schedules():

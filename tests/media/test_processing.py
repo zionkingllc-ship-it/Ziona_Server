@@ -1,6 +1,8 @@
 from pathlib import Path
 
 import pytest
+from billiard.exceptions import SoftTimeLimitExceeded
+from django.utils import timezone
 
 from core.media.models import MediaFile
 from core.media.tasks import (
@@ -8,6 +10,7 @@ from core.media.tasks import (
     _optimize_image_file,
     _optimize_video_file,
     _optimize_video_media,
+    cleanup_stale_media_uploads,
     finalize_media_ready,
     generate_video_thumbnail_stage,
     optimize_image_media_stage,
@@ -93,6 +96,24 @@ def test_classify_video_resource_limit_failure(create_user):
 
     assert code == "VIDEO_PROCESSING_RESOURCE_LIMIT"
     assert "server resources" in message
+
+
+@pytest.mark.django_db
+def test_classify_video_soft_time_limit_failure(create_user):
+    media = MediaFile.objects.create(
+        user=create_user(),
+        file_name="clip.mp4",
+        file_type="video/mp4",
+        file_size=2048,
+        media_type="video",
+        storage_path="uploads/test/videos/clip.mp4",
+        status="processing",
+    )
+
+    code, message = _classify_processing_failure(media, SoftTimeLimitExceeded())
+
+    assert code == "VIDEO_PROCESSING_TIMEOUT"
+    assert "worker time limit" in message
 
 
 @pytest.mark.django_db
@@ -237,3 +258,57 @@ def test_optimize_video_media_persists_duration_and_dimensions(create_user, monk
     assert media.width == 720
     assert media.height == 1280
     assert media.duration == 89.5
+
+
+@pytest.mark.django_db
+def test_cleanup_stale_media_uploads_uses_minutes_window(settings, create_user, monkeypatch):
+    settings.MEDIA_STALE_UPLOAD_MINUTES = 15
+    user = create_user()
+    stale = MediaFile.objects.create(
+        user=user,
+        file_name="stale.jpg",
+        file_type="image/jpeg",
+        file_size=2048,
+        media_type="image",
+        storage_path="uploads/test/images/stale.jpg",
+        status="processing",
+    )
+    fresh = MediaFile.objects.create(
+        user=user,
+        file_name="fresh.jpg",
+        file_type="image/jpeg",
+        file_size=2048,
+        media_type="image",
+        storage_path="uploads/test/images/fresh.jpg",
+        status="processing",
+    )
+    MediaFile.objects.filter(id=stale.id).update(
+        updated_at=timezone.now() - timezone.timedelta(minutes=16)
+    )
+    MediaFile.objects.filter(id=fresh.id).update(
+        updated_at=timezone.now() - timezone.timedelta(minutes=14)
+    )
+    deleted_paths = []
+
+    class FakeBlob:
+        def __init__(self, path):
+            self.path = path
+
+        def delete(self):
+            deleted_paths.append(self.path)
+
+    class FakeBucket:
+        def blob(self, path):
+            return FakeBlob(path)
+
+    monkeypatch.setattr("core.media.tasks._get_gcs_bucket", lambda: FakeBucket())
+
+    assert cleanup_stale_media_uploads() == 1
+
+    stale.refresh_from_db()
+    fresh.refresh_from_db()
+    assert stale.status == "failed"
+    assert stale.processing_error_code == "MEDIA_PROCESSING_TIMEOUT"
+    assert stale.processing_failed_stage == "stale_cleanup"
+    assert fresh.status == "processing"
+    assert deleted_paths == ["uploads/test/images/stale.jpg"]
