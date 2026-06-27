@@ -353,7 +353,7 @@ class TestPasswordResetEndpoint:
         assert email_kwargs["message"]
         assert "html_message" in email_kwargs
         assert "resetuser" in email_kwargs["html_message"]
-        assert "Reset Code" in email_kwargs["html_message"]
+        assert "Forgot your password?" in email_kwargs["html_message"]
 
 
 class TestStandardizedResponseFormat:
