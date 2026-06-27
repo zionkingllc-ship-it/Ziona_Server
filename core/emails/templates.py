@@ -173,21 +173,14 @@ def render_verify_email(
     """Render email verification template."""
     name = _display_name(user_name)
     b = _brand(brand)
-    subject = f"Verify your {b['name']} account"
-    plain = (
-        f"Hi {name},\n\n"
-        f"Your verification code is: {otp_code}\n"
-        f"This code expires in {expiry_minutes} minutes.\n\n"
-        f"The {b['name']} Team"
+    subject = "Verify your " + b["name"] + " account"
+    context = _base_context(
+        username=name,
+        verification_code=otp_code,
+        expiry_minutes=expiry_minutes,
     )
-    html = render_to_string(
-        "emails/email_verification.html",
-        _base_context(
-            username=name,
-            verification_code=otp_code,
-            expiry_minutes=expiry_minutes,
-        ),
-    )
+    plain = render_to_string("emails/text/email_verification.txt", context)
+    html = render_to_string("emails/email_verification.html", context)
     return subject, plain, html
 
 
@@ -205,22 +198,14 @@ def render_reset_password(
     """Render password reset OTP template."""
     name = _display_name(user_name)
     b = _brand(brand)
-    subject = f"Reset your {b['name']} password"
-    plain = (
-        f"Hi {name},\n\n"
-        f"Your password reset code is: {otp_code}\n"
-        f"This code expires in {expiry_minutes} minutes.\n\n"
-        f"If you didn't request this, please ignore.\n\n"
-        f"The {b['name']} Team"
+    subject = "Reset your " + b["name"] + " password"
+    context = _base_context(
+        username=name,
+        reset_code=otp_code,
+        expiry_minutes=expiry_minutes,
     )
-    html = render_to_string(
-        "emails/password_reset.html",
-        _base_context(
-            username=name,
-            reset_code=otp_code,
-            expiry_minutes=expiry_minutes,
-        ),
-    )
+    plain = render_to_string("emails/text/password_reset.txt", context)
+    html = render_to_string("emails/password_reset.html", context)
     return subject, plain, html
 
 

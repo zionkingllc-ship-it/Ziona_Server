@@ -6,23 +6,47 @@
   <title>Welcome to Ziona</title>
 </head>
 <body style="margin:0;padding:0">
-<div style="margin:0;padding:32px 16px;background-color:#F5F2F8;font-family:Arial, Helvetica, sans-serif;color:#1C1820">
-  <div style="width:100%;max-width:600px;margin:0 auto;background-color:#FFFFFF;border-radius:24px;overflow:hidden;border:1px solid #E9DDF0">
-    <div style="padding:40px 32px">
-      <img src="{{ asset_base_url }}/assets/brand-logo.png" alt="Ziona logo" width="132" style="display:block;width:132px;height:auto;margin-bottom:24px"/>
-      <div style="display:inline-block;margin-bottom:16px;padding:6px 12px;border-radius:999px;background-color:#F3E8FF;color:#742092;font-size:12px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase">Welcome to Ziona</div>
-      <h1 style="margin:0 0 16px;font-size:28px;line-height:36px;font-weight:700;color:#1C1820">Hi {{ username }}, welcome aboard.</h1>
-      <p style="margin:0 0 16px;font-size:16px;line-height:26px;color:#4E4252">We are glad to have you join the Ziona community. Your account is ready, and you can finish setting things up using the action below.</p>
-      <div style="margin-top:24px;padding:20px;border-radius:16px;background-color:#F9F5FC;border:1px solid #E9DDF0">
-        <img src="{{ asset_base_url }}/assets/welcome-hero.png" alt="Welcome illustration" width="520" style="display:block;width:100%;height:auto;border-radius:12px"/>
+<div style="margin:0;padding:32px 16px;background-color:#F5F2F8;font-family:Arial,Helvetica,sans-serif;color:#1C1820">
+  <div style="width:100%;max-width:600px;margin:0 auto;background-color:#FFFFFF;border-radius:28px;overflow:hidden;border:1px solid #E9DDF0">
+    <div style="padding:40px 32px 16px">
+      <img src="{{ asset_base_url }}/assets/brand-logo.png" alt="Ziona logo" width="132" style="display:block;width:132px;height:auto;margin-bottom:32px" />
+      <p style="margin:0 0 12px;font-size:16px;line-height:24px;color:#1C1820">Hi {{ username }},</p>
+      <h1 style="margin:0 0 8px;font-size:28px;line-height:34px;font-weight:700;color:#1C1820">WELCOME TO ZIONA</h1>
+      <p style="margin:0 0 8px;font-size:18px;line-height:26px;font-weight:600;color:#1C1820">Let us get started</p>
+      <p style="margin:0 0 24px;font-size:15px;line-height:24px;color:#4E4252">
+        Your account is ready. Here are three easy ways to begin building your experience inside Ziona.
+      </p>
+      <div style="margin:0 0 24px;padding:24px 20px;border-radius:20px;background-color:#EDE7F6">
+        <div style="margin:0 0 20px">
+          <p style="margin:0 0 4px;font-size:14px;line-height:20px;font-weight:700;color:#1C1820">Make a post</p>
+          <p style="margin:0;font-size:14px;line-height:22px;color:#4E4252">Share your first post and let people connect with your thoughts. It is the easiest way to start conversations.</p>
+        </div>
+        <div style="margin:0 0 20px">
+          <p style="margin:0 0 4px;font-size:14px;line-height:20px;font-weight:700;color:#1C1820">Find other creators</p>
+          <p style="margin:0;font-size:14px;line-height:22px;color:#4E4252">Discover creators with similar interests, follow them, and grow your network with people who inspire you.</p>
+        </div>
+        <div>
+          <p style="margin:0 0 4px;font-size:14px;line-height:20px;font-weight:700;color:#1C1820">Join a circle</p>
+          <p style="margin:0;font-size:14px;line-height:22px;color:#4E4252">Be part of a circle that fits your Christian needs. Connect, learn, and grow with community.</p>
+        </div>
       </div>
-      <a href="{{ app_link }}" style="display:inline-block;margin-top:24px;padding:14px 24px;border-radius:999px;background-color:#742092;color:#FFFFFF;font-size:15px;font-weight:700;text-decoration:none">Complete Setup</a>
-      <div style="margin-top:24px;padding:20px;border-radius:16px;background-color:#F9F5FC;border:1px solid #E9DDF0">
-        <p style="margin:0 0 16px;font-size:16px;line-height:26px;color:#4E4252">If the button above does not work, copy and paste this link into your browser:</p>
-        <p style="margin:0;font-size:16px;line-height:26px;color:#4E4252;word-break:break-all">{{ app_link }}</p>
+      <div style="padding:0 0 24px;text-align:center">
+        <a href="{{ app_link }}" style="display:inline-block;border-radius:999px;background-color:#742092;padding:12px 32px;font-size:14px;font-weight:700;line-height:20px;color:#FFFFFF;text-decoration:none">Go to App</a>
       </div>
+      <p style="margin:0;font-size:14px;line-height:22px;color:#4E4252">If the button does not open correctly, use this link:</p>
+      <p style="margin:12px 0 0;font-size:13px;line-height:21px;color:#742092;word-break:break-all">
+        <a href="{{ app_link }}" style="color:#742092;text-decoration:underline">{{ app_link }}</a>
+      </p>
     </div>
-    <div style="padding:20px 32px 32px;font-size:13px;line-height:22px;color:#8D7D96">This email was generated for {{ username }}. If you did not expect this message, you can safely ignore it.</div>
+    <div style="padding:24px 32px 32px;text-align:center;border-top:1px solid #F0E8F4">
+      <p style="margin:0 0 6px;font-size:12px;line-height:18px;color:#7A717F">Copyright {{ year }}. All Rights Reserved</p>
+      <p style="margin:0 0 20px;font-size:11px;line-height:17px;font-weight:700;color:#1C1820">ZionKingLLC</p>
+      <p style="margin:0;font-size:11px;line-height:17px;color:#7A717F">
+        If you no longer want to receive mails like this, use this link to
+        <a href="{{ unsubscribe_link }}" style="color:#7A717F;text-decoration:underline">unsubscribe</a>
+        from all our emails.
+      </p>
+    </div>
   </div>
 </div>
 </body>

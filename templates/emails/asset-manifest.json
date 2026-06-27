@@ -3,23 +3,19 @@
   "assetsDirectory": "assets",
   "templates": {
     "admin_announcement.html": [
-      "brandLogo",
-      "announcementHero"
+      "brandLogo"
     ],
     "notification_digest.html": [
       "brandLogo"
     ],
     "support_donation.html": [
-      "brandLogo",
-      "successIllustration"
+      "brandLogo"
     ],
     "email_verification.html": [
-      "brandLogo",
-      "warningIllustration"
+      "brandLogo"
     ],
     "welcome.html": [
-      "brandLogo",
-      "welcomeHero"
+      "brandLogo"
     ],
     "password_reset.html": [
       "brandLogo"
@@ -30,26 +26,6 @@
       "outputPath": "assets/brand-logo.png",
       "publicUrl": "{{ asset_base_url }}/assets/brand-logo.png",
       "alt": "Ziona logo"
-    },
-    "announcementHero": {
-      "outputPath": "assets/announcement-hero.png",
-      "publicUrl": "{{ asset_base_url }}/assets/announcement-hero.png",
-      "alt": "Announcement illustration"
-    },
-    "successIllustration": {
-      "outputPath": "assets/success-illustration.png",
-      "publicUrl": "{{ asset_base_url }}/assets/success-illustration.png",
-      "alt": "Success illustration"
-    },
-    "warningIllustration": {
-      "outputPath": "assets/warning-illustration.png",
-      "publicUrl": "{{ asset_base_url }}/assets/warning-illustration.png",
-      "alt": "Warning illustration"
-    },
-    "welcomeHero": {
-      "outputPath": "assets/welcome-hero.png",
-      "publicUrl": "{{ asset_base_url }}/assets/welcome-hero.png",
-      "alt": "Welcome illustration"
     }
   }
 }

@@ -6,28 +6,37 @@
   <title>Admin Announcement</title>
 </head>
 <body style="margin:0;padding:0">
-<div style="margin:0;padding:32px 16px;background-color:#F5F2F8;font-family:Arial, Helvetica, sans-serif;color:#1C1820">
-  <div style="width:100%;max-width:600px;margin:0 auto;background-color:#FFFFFF;border-radius:24px;overflow:hidden;border:1px solid #E9DDF0">
-    <div style="padding:40px 32px">
-      <img src="{{ asset_base_url }}/assets/brand-logo.png" alt="Ziona logo" width="132" style="display:block;width:132px;height:auto;margin-bottom:24px"/>
-      <div style="display:inline-block;margin-bottom:16px;padding:6px 12px;border-radius:999px;background-color:#F3E8FF;color:#742092;font-size:12px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase">Admin Announcement</div>
-      <h1 style="margin:0 0 16px;font-size:28px;line-height:36px;font-weight:700;color:#1C1820">{{ announcement_heading }}</h1>
-      <p style="margin:0 0 16px;font-size:16px;line-height:26px;color:#4E4252">Hello {{ username }},</p>
-      <div style="margin-top:24px;padding:20px;border-radius:16px;background-color:#F9F5FC;border:1px solid #E9DDF0">
-        <img src="{{ asset_base_url }}/assets/announcement-hero.png" alt="Announcement illustration" width="520" style="display:block;width:100%;height:auto;border-radius:12px"/>
+<div style="margin:0;padding:32px 16px;background-color:#F5F2F8;font-family:Arial,Helvetica,sans-serif;color:#1C1820">
+  <div style="width:100%;max-width:600px;margin:0 auto;background-color:#FFFFFF;border-radius:28px;overflow:hidden;border:1px solid #E9DDF0">
+    <div style="padding:40px 32px 16px">
+      <img src="{{ asset_base_url }}/assets/brand-logo.png" alt="Ziona logo" width="132" style="display:block;width:132px;height:auto;margin-bottom:32px" />
+      <p style="margin:0 0 8px;font-size:12px;font-weight:700;line-height:18px;letter-spacing:0.18em;text-transform:uppercase;color:#742092">Admin Announcement</p>
+      <h1 style="margin:0 0 24px;font-size:28px;line-height:34px;font-weight:700;color:#1C1820">{{ announcement_heading }}</h1>
+      <div style="margin:0 0 24px;padding:24px;border-radius:24px;background-color:#F8F3FB">
+        <p style="margin:0 0 16px;font-size:14px;line-height:22px;font-weight:700;color:#742092">Hello {{ username }},</p>
+        <div style="margin:0;font-size:15px;line-height:24px;color:#4E4252">{{ announcement_body|linebreaksbr }}</div>
       </div>
-      <div style="margin-top:24px;padding:20px;border-radius:16px;background-color:#F9F5FC;border:1px solid #E9DDF0">
-        <p style="margin:0;font-size:16px;line-height:26px;color:#4E4252;white-space:pre-line">{{ announcement_body }}</p>
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 24px;border:1px solid #EEE6F3;border-radius:24px;background-color:#FCFAFD">
+        <tr>
+          <td style="padding:20px 20px 8px;vertical-align:top;width:50%">
+            <p style="margin:0;font-size:12px;font-weight:700;line-height:18px;letter-spacing:0.18em;text-transform:uppercase;color:#8D7D96">Circle</p>
+            <p style="margin:10px 0 0;font-size:18px;line-height:26px;font-weight:700;color:#1C1820">{{ circle_name }}</p>
+          </td>
+          <td style="padding:20px 20px 8px;vertical-align:top;width:50%">
+            <p style="margin:0;font-size:12px;font-weight:700;line-height:18px;letter-spacing:0.18em;text-transform:uppercase;color:#8D7D96">Published</p>
+            <p style="margin:10px 0 0;font-size:18px;line-height:26px;font-weight:700;color:#1C1820">{{ announcement_published_at }}</p>
+          </td>
+        </tr>
+      </table>
+      <div style="padding:0 0 24px">
+        <a href="{{ announcement_cta_link }}" style="display:inline-block;border-radius:18px;background-color:#742092;padding:13px 24px;font-size:14px;font-weight:700;line-height:20px;color:#FFFFFF;text-decoration:none">{{ announcement_cta_label }}</a>
       </div>
-      <div style="margin-top:24px;padding:20px;border-radius:16px;background-color:#F9F5FC;border:1px solid #E9DDF0">
-        <p style="margin:0 0 8px;font-size:12px;line-height:18px;font-weight:700;color:#742092;letter-spacing:0.06em;text-transform:uppercase">Circle</p>
-        <p style="margin:0 0 16px;font-size:16px;line-height:26px;color:#1C1820;font-weight:700">{{ circle_name }}</p>
-        <p style="margin:0 0 8px;font-size:12px;line-height:18px;font-weight:700;color:#742092;letter-spacing:0.06em;text-transform:uppercase">Published</p>
-        <p style="margin:0;font-size:16px;line-height:26px;color:#1C1820;font-weight:700">{{ announcement_published_at }}</p>
-      </div>
-      <a href="{{ announcement_cta_link }}" style="display:inline-block;margin-top:24px;padding:14px 24px;border-radius:999px;background-color:#742092;color:#FFFFFF;font-size:15px;font-weight:700;text-decoration:none">{{ announcement_cta_label }}</a>
     </div>
-    <div style="padding:20px 32px 32px;font-size:13px;line-height:22px;color:#8D7D96">This message was published for {{ circle_name }} on {{ announcement_published_at }}.</div>
+    <div style="padding:24px 32px 32px;text-align:center;border-top:1px solid #F0E8F4">
+      <p style="margin:0;font-size:11px;line-height:17px;color:#7A717F">
+        This message was published for {{ circle_name }} on {{ announcement_published_at }}.
+      </p>
+    </div>
   </div>
 </div>
 </body>

@@ -1,11 +1,14 @@
 Hi {{ username }},
 
-Welcome to Ziona! Please verify your email address by visiting the link below:
+Please verify your email to complete account setup.
 
-{{ verification_url }}
+Verification code: {{ verification_code }}
 
-This link expires in 24 hours.
+Open Ziona with this link and enter the code:
+{{ verify_link }}
 
-If you didn't create an account, you can safely ignore this email.
+This code expires in {{ expiry_minutes }} minutes.
+
+If you did not create an account, you can safely ignore this email.
 
 - The Ziona Team
