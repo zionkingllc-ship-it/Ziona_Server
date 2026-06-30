@@ -199,7 +199,9 @@ class AnchorManagementService:
             )
 
         anchor = (
-            Anchor.objects.select_for_update().filter(id=anchor_id, deleted_at__isnull=True).first()
+            Anchor.objects.select_for_update(of=("self",))
+            .filter(id=anchor_id, deleted_at__isnull=True)
+            .first()
         )
 
         if not anchor:
@@ -270,7 +272,9 @@ class AnchorManagementService:
         from core.circles.models import Anchor
 
         anchor = (
-            Anchor.objects.select_for_update().filter(id=anchor_id, deleted_at__isnull=True).first()
+            Anchor.objects.select_for_update(of=("self",))
+            .filter(id=anchor_id, deleted_at__isnull=True)
+            .first()
         )
 
         if not anchor:
@@ -343,7 +347,9 @@ class AnchorManagementService:
         from core.circles.models import Anchor
 
         anchor = (
-            Anchor.objects.select_for_update().filter(id=anchor_id, deleted_at__isnull=True).first()
+            Anchor.objects.select_for_update(of=("self",))
+            .filter(id=anchor_id, deleted_at__isnull=True)
+            .first()
         )
 
         if not anchor:
@@ -418,7 +424,9 @@ class AnchorManagementService:
         from core.circles.models import Anchor
 
         anchor = (
-            Anchor.objects.select_for_update().filter(id=anchor_id, deleted_at__isnull=True).first()
+            Anchor.objects.select_for_update(of=("self",))
+            .filter(id=anchor_id, deleted_at__isnull=True)
+            .first()
         )
 
         if not anchor:

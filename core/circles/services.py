@@ -32,14 +32,18 @@ def _exclude_hidden_circles(queryset, viewer_id: str | None):
 
 
 def get_circle_by_id(circle_id: str, viewer_id: str | None = None) -> Circle | None:
-    """Fetch a single visible circle for the viewer."""
+    """Fetch a single active, visible circle.
+
+    Circle detail/feed preview is intentionally readable by non-members so users
+    can decide whether to join. Mutations and engagement paths still call
+    ``require_circle_membership`` and remain member-only.
+    """
     queryset = Circle.objects.filter(id=circle_id, is_active=True, deleted_at__isnull=True)
     queryset = _exclude_hidden_circles(queryset, viewer_id)
     circle = queryset.first()
     if not circle:
         return None
-    if not has_circle_membership(viewer_id, str(circle.id)):
-        return None
+    circle._is_viewer_subscribed = has_circle_membership(viewer_id, str(circle.id))
     return circle
 
 
@@ -377,7 +381,7 @@ def get_circle_post(post_id: str, viewer_id: str | None = None) -> CirclePost:
     """
     queryset = (
         CirclePost.objects.filter(id=post_id, deleted_at__isnull=True)
-        .select_related("user")
+        .select_related("user", "circle")
         .prefetch_related("media_files")
     )
     queryset = exclude_hidden_circle_content(
@@ -411,7 +415,7 @@ def get_circle_post(post_id: str, viewer_id: str | None = None) -> CirclePost:
         )
 
     post = queryset.first()
-    if not post or not has_circle_membership(viewer_id, str(post.circle_id)):
+    if not post or not post.circle.is_active or post.circle.deleted_at:
         raise ZionaError(message="Post not found", code=CIRCLE_POST_NOT_FOUND)
     return post
 

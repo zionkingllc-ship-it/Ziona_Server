@@ -83,7 +83,9 @@ def post_scheduled_anchor(self, anchor_id: str):
 
     with transaction.atomic():
         anchor = (
-            Anchor.objects.select_for_update().filter(id=anchor_id, deleted_at__isnull=True).first()
+            Anchor.objects.select_for_update(of=("self",))
+            .filter(id=anchor_id, deleted_at__isnull=True)
+            .first()
         )
 
         if not anchor:
@@ -116,6 +118,10 @@ def post_scheduled_anchor(self, anchor_id: str):
                 "updated_at",
             ]
         )
+
+    from core.circles.anchor_services import invalidate_active_anchor_cache
+
+    invalidate_active_anchor_cache(str(anchor.circle_id))
 
     # Trigger notifications outside the transaction to avoid holding the lock
     try:
@@ -153,7 +159,9 @@ def expire_anchor(self, anchor_id: str):
 
     with transaction.atomic():
         anchor = (
-            Anchor.objects.select_for_update().filter(id=anchor_id, deleted_at__isnull=True).first()
+            Anchor.objects.select_for_update(of=("self",))
+            .filter(id=anchor_id, deleted_at__isnull=True)
+            .first()
         )
 
         if not anchor:
@@ -168,6 +176,10 @@ def expire_anchor(self, anchor_id: str):
 
         anchor.anchor_status = "expired"
         anchor.save(update_fields=["anchor_status", "updated_at"])
+
+    from core.circles.anchor_services import invalidate_active_anchor_cache
+
+    invalidate_active_anchor_cache(str(anchor.circle_id))
 
     logger.info("anchor_expired", extra={"anchor_id": anchor_id})
 
@@ -189,8 +201,10 @@ def check_scheduled_anchors(self):
 
     now = datetime.now(timezone.utc)
 
+    posted_circle_ids: set[str] = set()
+
     with transaction.atomic():
-        overdue_anchors = Anchor.objects.select_for_update(skip_locked=True).filter(
+        overdue_anchors = Anchor.objects.select_for_update(skip_locked=True, of=("self",)).filter(
             anchor_status="scheduled",
             scheduled_for__lte=now,
             deleted_at__isnull=True,
@@ -213,6 +227,8 @@ def check_scheduled_anchors(self):
                 ]
             )
 
+            posted_circle_ids.add(str(anchor.circle_id))
+
             # Schedule expiry
             expire_anchor.apply_async(args=[str(anchor.id)], eta=anchor.expires_at)
 
@@ -220,6 +236,12 @@ def check_scheduled_anchors(self):
                 "overdue_anchor_posted",
                 extra={"anchor_id": str(anchor.id)},
             )
+
+    if posted_circle_ids:
+        from core.circles.anchor_services import invalidate_active_anchor_cache
+
+        for circle_id in posted_circle_ids:
+            invalidate_active_anchor_cache(circle_id)
 
     logger.info("check_scheduled_anchors_complete")
 

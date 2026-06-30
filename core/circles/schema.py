@@ -495,6 +495,7 @@ class JoinCirclePayload:
 @strawberry.type
 class CirclePostAuthorType:
     id: str
+    username: str | None = None
     name: str | None = None
     avatar_url: str | None = strawberry.field(name="avatarUrl", default=None)
 
@@ -505,6 +506,7 @@ class CirclePostAuthorType:
     @classmethod
     def from_user(cls, user) -> "CirclePostAuthorType":
         instance = cls(id=str(user.id))
+        instance.username = getattr(user, "username", None) or ""
         instance.name = getattr(user, "full_name", None) or getattr(user, "username", None) or ""
         instance.avatar_url = getattr(user, "avatar_url", None)
         return instance

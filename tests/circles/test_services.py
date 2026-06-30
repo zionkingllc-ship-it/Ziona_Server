@@ -24,6 +24,7 @@ from core.circles.services import (
     ensure_circle_post_liked,
     get_all_circles,
     get_circle_by_id,
+    get_circle_feed,
     get_circle_post,
     get_my_circles,
     get_suggested_circles,
@@ -237,11 +238,12 @@ class TestCirclePostEngagement(TestCase):
             1,
         )
 
-    def test_get_circle_post_requires_membership(self):
-        with self.assertRaises(ZionaError) as ctx:
-            get_circle_post(str(self.post.id), viewer_id=str(self.outsider.id))
+    def test_get_circle_post_allows_preview_for_non_members(self):
+        post = get_circle_post(str(self.post.id), viewer_id=str(self.outsider.id))
 
-        self.assertEqual(ctx.exception.code, "CIRCLE_POST_NOT_FOUND")
+        self.assertEqual(post.id, self.post.id)
+        self.assertFalse(post.is_liked_by_viewer)
+        self.assertFalse(post.is_prayed_by_viewer)
 
     def test_ensure_circle_post_liked_requires_membership(self):
         with self.assertRaises(ZionaError) as ctx:
@@ -282,12 +284,25 @@ class TestCircleContentVisibility(TestCase):
             expires_at=timezone.now() + timedelta(days=1),
         )
 
-    def test_get_circle_by_id_requires_membership(self):
-        assert get_circle_by_id(str(self.circle.id), viewer_id=str(self.outsider.id)) is None
-        assert (
-            get_circle_by_id(str(self.circle.id), viewer_id=str(self.member.id)).id
-            == self.circle.id
+    def test_get_circle_by_id_allows_preview_for_non_members(self):
+        preview_circle = get_circle_by_id(str(self.circle.id), viewer_id=str(self.outsider.id))
+        member_circle = get_circle_by_id(str(self.circle.id), viewer_id=str(self.member.id))
+
+        assert preview_circle.id == self.circle.id
+        assert preview_circle._is_viewer_subscribed is False
+        assert member_circle.id == self.circle.id
+        assert member_circle._is_viewer_subscribed is True
+
+    def test_get_circle_feed_allows_preview_for_non_members(self):
+        post = CirclePost.objects.create(circle=self.circle, user=self.author, text="Preview post")
+
+        posts, has_next, total_count = get_circle_feed(
+            str(self.circle.id), viewer_id=str(self.outsider.id)
         )
+
+        assert has_next is False
+        assert total_count == 1
+        assert [item.id for item in posts] == [post.id]
 
     def test_pray_for_anchor_requires_membership(self):
         with self.assertRaises(ZionaError) as ctx:
@@ -307,6 +322,47 @@ class TestCirclePostMediaCreation(TestCase):
             created_by=self.author,
         )
         CircleMembership.objects.create(circle=self.circle, user=self.author, role="admin")
+
+    def test_create_circle_post_accepts_text_only(self):
+        post = create_circle_post(
+            user_id=str(self.author.id),
+            circle_id=str(self.circle.id),
+            text="Text-only circle post",
+        )
+
+        self.assertEqual(post.text, "Text-only circle post")
+        self.assertEqual(post.media_files.count(), 0)
+
+    def test_create_circle_post_accepts_media_only(self):
+        media_file = _make_media_file(
+            user=self.author,
+            storage_path="circle-posts/media-only.jpg",
+        )
+
+        post = create_circle_post(
+            user_id=str(self.author.id),
+            circle_id=str(self.circle.id),
+            media_ids=[str(media_file.id)],
+        )
+
+        self.assertEqual(post.text, "")
+        self.assertEqual(list(post.media_files.values_list("id", flat=True)), [media_file.id])
+
+    def test_create_circle_post_accepts_text_and_media(self):
+        media_file = _make_media_file(
+            user=self.author,
+            storage_path="circle-posts/text-and-media.jpg",
+        )
+
+        post = create_circle_post(
+            user_id=str(self.author.id),
+            circle_id=str(self.circle.id),
+            text="Text with image",
+            media_ids=[str(media_file.id)],
+        )
+
+        self.assertEqual(post.text, "Text with image")
+        self.assertEqual(list(post.media_files.values_list("id", flat=True)), [media_file.id])
 
     @override_settings(MEDIA_URL_ALLOWLIST=["cdn.example.com"])
     def test_create_circle_post_accepts_media_urls_fallback(self):

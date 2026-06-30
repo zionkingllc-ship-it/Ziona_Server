@@ -7,6 +7,34 @@ from core.users.schema import _get_authenticated_user_id
 
 
 @strawberry.type
+class ReportMediaPreviewType:
+    """Media metadata used by admin moderation previews."""
+
+    url: str
+    media_type: str = strawberry.field(name="mediaType")
+    thumbnail_url: str | None = strawberry.field(name="thumbnailUrl", default=None)
+    order: int = 0
+    width: int | None = None
+    height: int | None = None
+    duration: float | None = None
+
+
+@strawberry.type
+class ReportContentPreviewType:
+    """Resolved reported-content preview payload for moderation UIs."""
+
+    target_type: str = strawberry.field(name="targetType")
+    target_id: str = strawberry.field(name="targetId")
+    available: bool
+    unavailable_reason: str | None = strawberry.field(name="unavailableReason", default=None)
+    owner_id: str | None = strawberry.field(name="ownerId", default=None)
+    owner_username: str | None = strawberry.field(name="ownerUsername", default=None)
+    owner_name: str | None = strawberry.field(name="ownerName", default=None)
+    text: str | None = None
+    media: list[ReportMediaPreviewType] = strawberry.field(default_factory=list)
+
+
+@strawberry.type
 class ReportType:
     """A content report."""
 
@@ -20,6 +48,9 @@ class ReportType:
     reviewed_by: str | None = None
     reviewed_at: str | None = None
     created_at: str
+    content_preview: ReportContentPreviewType | None = strawberry.field(
+        name="contentPreview", default=None
+    )
 
 
 @strawberry.type
@@ -107,22 +138,7 @@ class ModerationMutations:
                 comment_id=comment_id,
                 description=description,
             )
-            from core.moderation.models import Report
-
-            r = Report.objects.get(id=result["report_id"])
-            report_obj = ReportType(
-                id=str(r.id),
-                reporter_id=str(r.reporter_id),
-                post_id=str(r.post_id) if r.post_id else None,
-                comment_id=str(r.comment_id) if r.comment_id else None,
-                reason=r.reason,
-                description=r.description,
-                status=r.status,
-                reviewed_by=str(r.reviewed_by_id) if r.reviewed_by_id else None,
-                reviewed_at=r.reviewed_at.isoformat() if r.reviewed_at else None,
-                created_at=r.created_at.isoformat(),
-            )
-            return ReportPayload(success=True, report=report_obj)
+            return ReportPayload(success=True, report=_get_report_type(result["report_id"]))
         except ModerationError as e:
             return ReportPayload(
                 success=False,
@@ -183,22 +199,7 @@ class ModerationMutations:
                 action=action,
                 internal_notes=internal_notes or "",
             )
-            from core.moderation.models import Report
-
-            r = Report.objects.get(id=result["report_id"])
-            report_obj = ReportType(
-                id=str(r.id),
-                reporter_id=str(r.reporter_id),
-                post_id=str(r.post_id) if r.post_id else None,
-                comment_id=str(r.comment_id) if r.comment_id else None,
-                reason=r.reason,
-                description=r.description,
-                status=r.status,
-                reviewed_by=str(r.reviewed_by_id) if r.reviewed_by_id else None,
-                reviewed_at=r.reviewed_at.isoformat() if r.reviewed_at else None,
-                created_at=r.created_at.isoformat(),
-            )
-            return ReportPayload(success=True, report=report_obj)
+            return ReportPayload(success=True, report=_get_report_type(result["report_id"]))
         except ModerationError as e:
             return ReportPayload(
                 success=False,
@@ -244,22 +245,140 @@ class ModerationQueries:
 
         result = ReportService.list_reports(status=status, cursor=cursor, limit=limit)
 
+        report_ids = [r["id"] for r in result["reports"]]
+        report_map = {
+            str(report.id): _report_to_type(report)
+            for report in _report_queryset().filter(id__in=report_ids)
+        }
+
         return ReportListResponse(
-            reports=[
-                ReportType(
-                    id=r["id"],
-                    reporter_id=r["reporter_id"],
-                    post_id=r["post_id"],
-                    comment_id=r["comment_id"],
-                    reason=r["reason"],
-                    description=r["description"],
-                    status=r["status"],
-                    reviewed_by=r["reviewed_by"],
-                    reviewed_at=r["reviewed_at"],
-                    created_at=r["created_at"],
-                )
-                for r in result["reports"]
-            ],
+            reports=[report_map[r["id"]] for r in result["reports"] if r["id"] in report_map],
             next_cursor=result["next_cursor"],
             has_more=result["has_more"],
         )
+
+
+def _report_queryset():
+    from core.moderation.models import Report
+
+    return Report.objects.select_related(
+        "reporter",
+        "post",
+        "post__user",
+        "comment",
+        "comment__user",
+        "comment__post",
+        "comment__post__user",
+        "reviewed_by",
+    ).prefetch_related(
+        "post__post_media",
+        "post__media_files",
+        "comment__post__post_media",
+        "comment__post__media_files",
+    )
+
+
+def _get_report_type(report_id: str) -> ReportType:
+    report = _report_queryset().get(id=report_id)
+    return _report_to_type(report)
+
+
+def _report_to_type(report) -> ReportType:
+    return ReportType(
+        id=str(report.id),
+        reporter_id=str(report.reporter_id),
+        post_id=str(report.post_id) if report.post_id else None,
+        comment_id=str(report.comment_id) if report.comment_id else None,
+        reason=report.reason,
+        description=report.description,
+        status=report.status,
+        reviewed_by=str(report.reviewed_by_id) if report.reviewed_by_id else None,
+        reviewed_at=report.reviewed_at.isoformat() if report.reviewed_at else None,
+        created_at=report.created_at.isoformat(),
+        content_preview=_build_content_preview(report),
+    )
+
+
+def _build_content_preview(report) -> ReportContentPreviewType:
+    target_type = (report.target_type or ("post" if report.post_id else "comment")).lower()
+    target_id = str(report.target_id or report.post_id or report.comment_id or "")
+
+    if target_type == "comment" and report.comment:
+        comment = report.comment
+        owner = comment.user
+        post = getattr(comment, "post", None)
+        return ReportContentPreviewType(
+            target_type=target_type,
+            target_id=target_id,
+            available=comment.deleted_at is None,
+            unavailable_reason="deleted" if comment.deleted_at else None,
+            owner_id=str(owner.id) if owner else None,
+            owner_username=getattr(owner, "username", None),
+            owner_name=_user_display_name(owner),
+            text=comment.text,
+            media=_post_media_preview(post) if post else [],
+        )
+
+    post = report.post
+    if not post and target_type == "comment" and report.comment:
+        post = report.comment.post
+
+    if post:
+        owner = post.user
+        return ReportContentPreviewType(
+            target_type=target_type,
+            target_id=target_id,
+            available=post.deleted_at is None,
+            unavailable_reason="deleted" if post.deleted_at else None,
+            owner_id=str(owner.id) if owner else None,
+            owner_username=getattr(owner, "username", None),
+            owner_name=_user_display_name(owner),
+            text=post.caption or "",
+            media=_post_media_preview(post),
+        )
+
+    return ReportContentPreviewType(
+        target_type=target_type,
+        target_id=target_id,
+        available=False,
+        unavailable_reason="unavailable",
+    )
+
+
+def _post_media_preview(post) -> list[ReportMediaPreviewType]:
+    media_items = []
+    for media in post.post_media.all():
+        media_items.append(
+            ReportMediaPreviewType(
+                url=media.media_url,
+                media_type=media.media_type,
+                thumbnail_url=media.thumbnail_url,
+                order=media.order,
+                width=media.width,
+                height=media.height,
+                duration=media.duration,
+            )
+        )
+
+    if media_items:
+        return media_items
+
+    for index, media in enumerate(post.media_files.all()):
+        media_items.append(
+            ReportMediaPreviewType(
+                url=media.url,
+                media_type=media.media_type,
+                thumbnail_url=media.thumbnail_url,
+                order=index,
+                width=media.width,
+                height=media.height,
+                duration=media.duration,
+            )
+        )
+    return media_items
+
+
+def _user_display_name(user) -> str | None:
+    if not user:
+        return None
+    return user.full_name or user.username or user.email

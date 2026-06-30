@@ -1,10 +1,13 @@
 from datetime import timedelta
+from unittest.mock import patch
 
 import pytest
 from django.utils import timezone
 
 from core.admin_dashboard.anchor_services import AnchorManagementService
-from core.circles.models import Anchor, Circle
+from core.circles.anchor_services import create_anchor as create_public_anchor
+from core.circles.anchor_services import get_active_anchor
+from core.circles.models import Anchor, Circle, CircleMembership
 
 
 @pytest.mark.django_db
@@ -140,3 +143,47 @@ def test_admin_create_anchor_mutation_accepts_typed_media(
     assert result["anchor"]["anchorImage"] == "https://example.com/image.jpg"
     assert result["anchor"]["anchorVideo"] == "https://example.com/video.mp4"
     assert result["anchor"]["anchorThumbnail"] == "https://example.com/thumb.jpg"
+
+
+@pytest.mark.django_db
+def test_public_create_anchor_schedules_future_anchor_without_replacing_active(authenticated_admin):
+    admin = authenticated_admin["user"]
+    circle = Circle.objects.create(
+        name="Scheduled Preview Circle",
+        description="Scheduling coverage",
+        cover_image="https://example.com/cover.jpg",
+        created_by=admin,
+    )
+    CircleMembership.objects.create(circle=circle, user=admin, role="admin")
+    now = timezone.now()
+    active_anchor = Anchor.objects.create(
+        circle=circle,
+        created_by=admin,
+        anchor_type="text",
+        title="Active anchor",
+        content="Still active",
+        anchor_status="posted",
+        published_at=now,
+        posted_at=now,
+        expires_at=now + timedelta(hours=24),
+    )
+    scheduled_for = now + timedelta(days=2)
+
+    with patch("core.admin_dashboard.tasks.post_scheduled_anchor.apply_async") as apply_async:
+        apply_async.return_value.id = "scheduled-anchor-task"
+        scheduled_anchor = create_public_anchor(
+            creator_id=str(admin.id),
+            circle_id=str(circle.id),
+            anchor_type="text",
+            title="Future anchor",
+            content="Do not publish yet",
+            published_at=scheduled_for,
+        )
+
+    scheduled_anchor.refresh_from_db()
+    assert scheduled_anchor.anchor_status == "scheduled"
+    assert scheduled_anchor.scheduled_for == scheduled_for
+    assert scheduled_anchor.posted_at is None
+    assert scheduled_anchor.celery_task_id == "scheduled-anchor-task"
+    assert get_active_anchor(str(circle.id), viewer_id=str(admin.id)).id == active_anchor.id
+    apply_async.assert_called_once()

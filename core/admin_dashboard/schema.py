@@ -88,6 +88,8 @@ class AdminDashboardType:
     engagement: MetricCardType = strawberry.field(name="engagement")
     statistics: StatisticsType
     content_health: list[ContentHealthItemType] = strawberry.field(name="contentHealth")
+    last_updated: str = strawberry.field(name="lastUpdated")
+    cache_ttl_seconds: int = strawberry.field(name="cacheTtlSeconds")
 
 
 # ──────────────────────────────────────────────
@@ -126,6 +128,8 @@ class AdminAnalyticsType:
     user_growth: ChartDataType = strawberry.field(name="userGrowth")
     engagement_metrics: ChartDataType = strawberry.field(name="engagementMetrics")
     content_health: ChartDataType = strawberry.field(name="contentHealth")
+    last_updated: str = strawberry.field(name="lastUpdated")
+    cache_ttl_seconds: int = strawberry.field(name="cacheTtlSeconds")
 
 
 # ──────────────────────────────────────────────
@@ -795,6 +799,8 @@ class AdminDashboardQueries:
                 avg_resolution_minutes=stats["avg_resolution_minutes"],
             ),
             content_health=[ContentHealthItemType(**item) for item in health],
+            last_updated=_cache_generated_at(metrics, stats),
+            cache_ttl_seconds=_cache_ttl_seconds(metrics, stats, default=300),
         )
 
     @strawberry.field(
@@ -824,6 +830,8 @@ class AdminDashboardQueries:
             user_growth=_to_chart_data(growth),
             engagement_metrics=_to_chart_data(engagement),
             content_health=_to_chart_data(health),
+            last_updated=_cache_generated_at(growth, engagement, health),
+            cache_ttl_seconds=_cache_ttl_seconds(growth, engagement, health, default=900),
         )
 
     @strawberry.field(name="adminUsers", description="List users with search and filter.")
@@ -1955,6 +1963,24 @@ class AdminDashboardMutations:
 # ──────────────────────────────────────────────
 #  Chart helpers
 # ──────────────────────────────────────────────
+
+
+def _cache_generated_at(*payloads: dict) -> str:
+    from datetime import datetime, timezone
+
+    for payload in payloads:
+        value = payload.get("_cache_generated_at") if isinstance(payload, dict) else None
+        if value:
+            return str(value)
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _cache_ttl_seconds(*payloads: dict, default: int) -> int:
+    for payload in payloads:
+        value = payload.get("_cache_ttl_seconds") if isinstance(payload, dict) else None
+        if value is not None:
+            return int(value)
+    return default
 
 
 def _to_chart_data(data: dict) -> ChartDataType:

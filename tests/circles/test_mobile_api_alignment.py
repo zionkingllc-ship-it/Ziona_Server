@@ -414,7 +414,7 @@ class TestMobileGraphQLAlignment(TestCase):
               circleFeed(circleId: $circleId) {
                 posts {
                   id
-                  user { name avatar avatarUrl }
+                  user { name username avatar avatarUrl }
                   likes
                   likesCount
                   likeCount
@@ -429,7 +429,7 @@ class TestMobileGraphQLAlignment(TestCase):
                 pageInfo { totalCount hasNextPage currentPage }
               }
               circlePosts(circleId: $circleId) {
-                posts { id likes comments user { avatar } }
+                posts { id likes comments user { avatar username } }
                 pageInfo { totalCount hasNextPage currentPage }
               }
             }
@@ -454,6 +454,8 @@ class TestMobileGraphQLAlignment(TestCase):
         self.assertEqual(feed_post["savedCount"], 0)
         self.assertEqual(feed_post["sharedCount"], 0)
         self.assertEqual(feed_post["user"]["avatar"], "https://example.com/avatar.jpg")
+        self.assertEqual(feed_post["user"]["username"], "post_author")
+        self.assertEqual(alias_post["user"]["username"], "post_author")
         self.assertEqual(data["circleFeed"]["pageInfo"]["totalCount"], 3)
         self.assertEqual(data["circlePosts"]["pageInfo"]["totalCount"], 3)
 
@@ -535,6 +537,31 @@ class TestMobileGraphQLAlignment(TestCase):
         self.assertEqual(detail_post["mediaUrl"], self.post_image_media.url)
         self.assertEqual(detail_post["image"]["items"][0]["url"], self.post_image_media.url)
         self.assertIsNone(detail_post["video"])
+
+    def test_create_circle_post_accepts_text_only_without_media(self):
+        data = _graphql(
+            """
+            mutation CreateCirclePost($circleId: String!) {
+              createCirclePost(circleId: $circleId, text: "Text-only testimony") {
+                success
+                error { code message }
+                post { id text media { id } mediaUrl mediaType image { items { id } } video { url } }
+              }
+            }
+            """,
+            {"circleId": str(self.circle.id)},
+            access_token=self.author_access_token,
+        )
+
+        payload = data["createCirclePost"]
+        self.assertTrue(payload["success"])
+        self.assertIsNone(payload["error"])
+        self.assertEqual(payload["post"]["text"], "Text-only testimony")
+        self.assertEqual(payload["post"]["media"], [])
+        self.assertIsNone(payload["post"]["mediaUrl"])
+        self.assertIsNone(payload["post"]["mediaType"])
+        self.assertIsNone(payload["post"]["image"])
+        self.assertIsNone(payload["post"]["video"])
 
     def test_create_circle_post_accepts_ready_image_media_ids(self):
         create_media = _make_media_file(

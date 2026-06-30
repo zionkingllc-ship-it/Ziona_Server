@@ -115,14 +115,37 @@ def create_notification(
 
 def send_push_notification(user_id: int, title: str, body: str, data: dict[str, Any]) -> None:
     """Send push notification to all active device tokens for the user."""
-    tokens = DeviceToken.objects.filter(user_id=user_id, is_active=True).values_list(
-        "token", flat=True
+    tokens = list(
+        DeviceToken.objects.filter(user_id=user_id, is_active=True).values_list("token", flat=True)
     )
     if not tokens:
+        logger.info(
+            "push_notification_skipped_no_tokens",
+            extra={"user_id": str(user_id), "notification_type": (data or {}).get("type")},
+        )
         return
 
-    # Call FCM (Firebase Cloud Messaging) integration
-    send_fcm_notification(list(tokens), title, body, data)
+    logger.info(
+        "push_notification_dispatch_started",
+        extra={
+            "user_id": str(user_id),
+            "token_count": len(tokens),
+            "notification_type": (data or {}).get("type"),
+            "reference_id": (data or {}).get("reference_id"),
+        },
+    )
+
+    summary = send_fcm_notification(tokens, title, body, data) or {}
+    logger.info(
+        "push_notification_dispatch_finished",
+        extra={
+            "user_id": str(user_id),
+            "token_count": len(tokens),
+            "success_count": summary.get("success_count", 0),
+            "failure_count": summary.get("failure_count", 0),
+            "invalid_token_count": summary.get("invalid_token_count", 0),
+        },
+    )
 
     # Track analytics
     if data and "type" in data:
@@ -206,7 +229,7 @@ def register_device_token(user_id: int, token: str, platform: str) -> str:
         raise ValueError("DEVICE_PLATFORM_REQUIRED")
 
     with transaction.atomic():
-        DeviceToken.objects.update_or_create(
+        token_obj, created = DeviceToken.objects.update_or_create(
             token=token,
             defaults={
                 "user_id": user_id,
@@ -216,6 +239,17 @@ def register_device_token(user_id: int, token: str, platform: str) -> str:
         )
 
         _enforce_device_token_limit(user_id=user_id, keep_token=token)
+
+        logger.info(
+            "device_token_registered",
+            extra={
+                "user_id": str(user_id),
+                "platform": platform,
+                "device_token_id": str(token_obj.id),
+                "was_created": created,
+                "token_tail": token[-8:],
+            },
+        )
 
         return "Success"
 

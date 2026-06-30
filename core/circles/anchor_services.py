@@ -9,7 +9,6 @@ from django.core.cache import cache
 from django.db import transaction
 from django.utils import timezone
 
-from core.circles.access import has_circle_membership
 from core.circles.models import Anchor, AnchorPage, Circle, CircleMembership
 from core.engagement.cache import EngagementCache
 from core.engagement.hidden_content import exclude_hidden_circle_content
@@ -47,10 +46,10 @@ def get_active_anchor(circle_id: str, viewer_id: str | None = None) -> Anchor | 
     """
     Get the currently active anchor for a circle.
     Cached for 5 minutes. Invalidated on create/delete/expire.
-    """
-    if not has_circle_membership(viewer_id, str(circle_id)):
-        return None
 
+    Active anchor preview is readable by non-members for circle discovery;
+    engagement and comments remain member-only in mutation services.
+    """
     if viewer_id and EngagementCache.is_circle_content_hidden(viewer_id, "circle", circle_id):
         return None
 
@@ -62,6 +61,7 @@ def get_active_anchor(circle_id: str, viewer_id: str | None = None) -> Anchor | 
         anchor = (
             Anchor.objects.filter(
                 circle_id=circle_id,
+                anchor_status="posted",
                 published_at__lte=now,
                 expires_at__gt=now,
                 deleted_at__isnull=True,
@@ -90,14 +90,12 @@ def invalidate_active_anchor_cache(circle_id: str) -> None:
 
 def get_anchor_by_date(circle_id: str, date, viewer_id: str | None = None) -> Anchor | None:
     """Get anchor that was active on a specific date."""
-    if not has_circle_membership(viewer_id, str(circle_id)):
-        return None
-
     if viewer_id and EngagementCache.is_circle_content_hidden(viewer_id, "circle", circle_id):
         return None
 
     queryset = Anchor.objects.filter(
         circle_id=circle_id,
+        anchor_status="posted",
         published_at__date=date,
         deleted_at__isnull=True,
     ).select_related("created_by", "circle")
@@ -117,6 +115,7 @@ def get_anchor_by_id(anchor_id: str, viewer_id: str | None = None) -> Anchor:
 
     queryset = Anchor.objects.select_related("created_by", "circle").filter(
         id=anchor_id,
+        anchor_status="posted",
         deleted_at__isnull=True,
     )
     queryset = exclude_hidden_circle_content(queryset, viewer_id, target_type="anchor")
@@ -128,7 +127,7 @@ def get_anchor_by_id(anchor_id: str, viewer_id: str | None = None) -> Anchor:
     )
 
     anchor = queryset.first()
-    if not anchor or not has_circle_membership(viewer_id, str(anchor.circle_id)):
+    if not anchor:
         raise ZionaError(message="Anchor not found", code="ANCHOR_NOT_FOUND") from None
     return anchor
 
@@ -148,15 +147,13 @@ def get_anchor_history(
                       many days in the past are returned. This enforces the
                       5-day display window without waiting for the purge task.
     """
-    if not has_circle_membership(viewer_id, str(circle_id)):
-        return []
-
     if viewer_id and EngagementCache.is_circle_content_hidden(viewer_id, "circle", circle_id):
         return []
 
     queryset = (
         Anchor.objects.filter(
             circle_id=circle_id,
+            anchor_status="posted",
             deleted_at__isnull=True,
         )
         .select_related("created_by", "circle")
@@ -266,10 +263,12 @@ def create_anchor(
         )
 
     expires_at = published_at + timedelta(hours=24)
+    is_scheduled = published_at > now
 
     # ── Prevent overlapping active anchors ──
     overlapping = Anchor.objects.filter(
         circle_id=circle_id,
+        anchor_status__in=["scheduled", "posted"],
         published_at__lt=expires_at,
         expires_at__gt=published_at,
         deleted_at__isnull=True,
@@ -309,6 +308,9 @@ def create_anchor(
         anchor_text=anchor_text,
         anchor_verse=anchor_verse,
         anchor_image_text=anchor_image_text,
+        anchor_status="scheduled" if is_scheduled else "posted",
+        scheduled_for=published_at if is_scheduled else None,
+        posted_at=None if is_scheduled else now,
         published_at=published_at,
         expires_at=expires_at,
     )
@@ -324,7 +326,17 @@ def create_anchor(
                 media_url=page_data.get("media_url", ""),
             )
 
-    # ── Invalidate cache ──
-    invalidate_active_anchor_cache(circle_id)
+    if is_scheduled:
+        from core.admin_dashboard.tasks import post_scheduled_anchor
+
+        task = post_scheduled_anchor.apply_async(
+            args=[str(anchor.id)],
+            eta=published_at,
+        )
+        anchor.celery_task_id = task.id
+        anchor.save(update_fields=["celery_task_id", "updated_at"])
+    else:
+        # ── Invalidate cache only for anchors that are active immediately ──
+        invalidate_active_anchor_cache(circle_id)
 
     return anchor

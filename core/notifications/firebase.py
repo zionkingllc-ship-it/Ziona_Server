@@ -38,14 +38,19 @@ def initialize_firebase():
             if not firebase_admin._apps:
                 firebase_admin.initialize_app(cred, options)
             _firebase_initialized = True
-            logger.info("Firebase Admin SDK initialized.")
+            logger.info(
+                "firebase_admin_initialized",
+                extra={"project_id": project_id or "default"},
+            )
         else:
             logger.warning("FIREBASE_CREDENTIALS_FILE not set. Push notifications will fail.")
     except Exception as e:
         logger.error(f"Failed to initialize Firebase: {e}", exc_info=True)
 
 
-def send_fcm_notification(tokens: list[str], title: str, body: str, data: dict[str, Any]):
+def send_fcm_notification(
+    tokens: list[str], title: str, body: str, data: dict[str, Any]
+) -> dict[str, int]:
     """
     Send push notification via FCM using multicast.
 
@@ -53,17 +58,18 @@ def send_fcm_notification(tokens: list[str], title: str, body: str, data: dict[s
     Each chunk is dispatched independently so a failure in one chunk does not
     prevent the remaining chunks from being sent.
     """
+    summary = {"success_count": 0, "failure_count": 0, "invalid_token_count": 0}
     if not tokens:
-        return
+        return summary
 
     if firebase_admin is None:
         logger.error("Cannot send FCM message: firebase-admin package not installed.")
-        return
+        return summary
 
     initialize_firebase()
     if not _firebase_initialized:
         logger.error("Cannot send FCM message: Firebase not initialized.")
-        return
+        return summary
 
     # Ensure data values are strings as required by FCM
     formatted_data = {str(k): str(v) for k, v in data.items() if v is not None}
@@ -87,9 +93,16 @@ def send_fcm_notification(tokens: list[str], title: str, body: str, data: dict[s
 
         try:
             response = messaging.send_each_for_multicast(message)
+            summary["success_count"] += response.success_count
+            summary["failure_count"] += response.failure_count
             logger.info(
-                f"FCM chunk [{chunk_start}:{chunk_start + len(chunk)}]: "
-                f"{response.success_count} successes, {response.failure_count} failures."
+                "fcm_chunk_sent",
+                extra={
+                    "chunk_start": chunk_start,
+                    "chunk_size": len(chunk),
+                    "success_count": response.success_count,
+                    "failure_count": response.failure_count,
+                },
             )
 
             if response.failure_count > 0:
@@ -112,4 +125,10 @@ def send_fcm_notification(tokens: list[str], title: str, body: str, data: dict[s
 
     if all_invalid_tokens:
         DeviceToken.objects.filter(token__in=all_invalid_tokens).update(is_active=False)
-        logger.info(f"Deactivated {len(all_invalid_tokens)} invalid device tokens.")
+        summary["invalid_token_count"] = len(all_invalid_tokens)
+        logger.info(
+            "fcm_invalid_tokens_deactivated",
+            extra={"invalid_token_count": len(all_invalid_tokens)},
+        )
+
+    return summary

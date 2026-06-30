@@ -16,6 +16,7 @@ from core.notifications.services import (
     get_unread_count,
     mark_as_read,
     register_device_token,
+    send_push_notification,
 )
 
 User = get_user_model()
@@ -201,3 +202,42 @@ def test_create_admin_announcement(db, user, other_user):
     assert Notification.objects.filter(
         user=other_user, notification_type=NotificationType.ADMIN_ANNOUNCEMENT
     ).exists()
+
+
+def test_register_device_token_logs_without_full_token(db, user, monkeypatch):
+    log_calls = []
+
+    def fake_info(message, *args, **kwargs):
+        log_calls.append((message, kwargs.get("extra", {})))
+
+    monkeypatch.setattr("core.notifications.services.logger.info", fake_info)
+
+    register_device_token(user.id, "ExponentPushToken[private-secret-token]", "ios")
+
+    assert any(message == "device_token_registered" for message, _ in log_calls)
+    assert "private-secret-token" not in str(log_calls)
+
+
+def test_send_push_notification_logs_provider_summary(db, user, monkeypatch):
+    register_device_token(user.id, "ExponentPushToken[device-1]", "ios")
+    log_calls = []
+
+    def fake_info(message, *args, **kwargs):
+        log_calls.append((message, kwargs.get("extra", {})))
+
+    def fake_send(tokens, title, body, data):
+        return {"success_count": 1, "failure_count": 0, "invalid_token_count": 0}
+
+    monkeypatch.setattr("core.notifications.services.send_fcm_notification", fake_send)
+    monkeypatch.setattr("core.notifications.services.logger.info", fake_info)
+
+    send_push_notification(
+        user_id=user.id,
+        title="Hello",
+        body="World",
+        data={"type": NotificationType.ADMIN_ANNOUNCEMENT, "reference_id": "abc"},
+    )
+
+    messages = [message for message, _ in log_calls]
+    assert "push_notification_dispatch_started" in messages
+    assert "push_notification_dispatch_finished" in messages

@@ -125,7 +125,7 @@ class AdminModerationService:
             )
 
         report = (
-            Report.objects.select_for_update()
+            Report.objects.select_for_update(of=("self",))
             .filter(id=report_id)
             .select_related("reporter", "post", "comment")
             .first()

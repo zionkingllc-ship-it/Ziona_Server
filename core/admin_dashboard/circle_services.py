@@ -341,7 +341,9 @@ class CircleManagementService:
         from core.circles.models import Circle
 
         circle = (
-            Circle.objects.select_for_update().filter(id=circle_id, deleted_at__isnull=True).first()
+            Circle.objects.select_for_update(of=("self",))
+            .filter(id=circle_id, deleted_at__isnull=True)
+            .first()
         )
 
         if not circle:
@@ -416,7 +418,9 @@ class CircleManagementService:
         from core.circles.models import Circle
 
         circle = (
-            Circle.objects.select_for_update().filter(id=circle_id, deleted_at__isnull=True).first()
+            Circle.objects.select_for_update(of=("self",))
+            .filter(id=circle_id, deleted_at__isnull=True)
+            .first()
         )
 
         if not circle:
@@ -443,7 +447,9 @@ class CircleManagementService:
         from core.circles.models import Circle
 
         circle = (
-            Circle.objects.select_for_update().filter(id=circle_id, deleted_at__isnull=True).first()
+            Circle.objects.select_for_update(of=("self",))
+            .filter(id=circle_id, deleted_at__isnull=True)
+            .first()
         )
 
         if not circle:
@@ -470,7 +476,9 @@ class CircleManagementService:
         from core.circles.models import Circle
 
         circle = (
-            Circle.objects.select_for_update().filter(id=circle_id, deleted_at__isnull=True).first()
+            Circle.objects.select_for_update(of=("self",))
+            .filter(id=circle_id, deleted_at__isnull=True)
+            .first()
         )
 
         if not circle:

@@ -17,6 +17,8 @@ CACHE_DASHBOARD_STATS = "admin:dashboard:stats"
 CACHE_DASHBOARD_HEALTH = "admin:dashboard:health"
 CACHE_TTL_SHORT = 300  # 5 minutes
 CACHE_TTL_ANALYTICS = 900  # 15 minutes
+CACHE_GENERATED_AT_KEY = "_cache_generated_at"
+CACHE_TTL_SECONDS_KEY = "_cache_ttl_seconds"
 
 
 class DashboardService:
@@ -102,6 +104,7 @@ class DashboardService:
             },
         }
 
+        result = _with_cache_metadata(result, CACHE_TTL_SHORT)
         cache.set(CACHE_DASHBOARD_METRICS, result, CACHE_TTL_SHORT)
         return result
 
@@ -163,6 +166,7 @@ class DashboardService:
             "avg_resolution_minutes": avg_resolution,
         }
 
+        result = _with_cache_metadata(result, CACHE_TTL_SHORT)
         cache.set(CACHE_DASHBOARD_STATS, result, CACHE_TTL_SHORT)
         return result
 
@@ -291,6 +295,7 @@ class AnalyticsService:
                 ),
             },
         }
+        result = _with_cache_metadata(result, CACHE_TTL_ANALYTICS)
         cache.set(cache_key, result, CACHE_TTL_ANALYTICS)
         return result
 
@@ -336,6 +341,7 @@ class AnalyticsService:
                 "total_comments": sum(comments_data),
             },
         }
+        result = _with_cache_metadata(result, CACHE_TTL_ANALYTICS)
         cache.set(cache_key, result, CACHE_TTL_ANALYTICS)
         return result
 
@@ -386,8 +392,18 @@ class AnalyticsService:
                 ),
             },
         }
+        result = _with_cache_metadata(result, CACHE_TTL_ANALYTICS)
         cache.set(cache_key, result, CACHE_TTL_ANALYTICS)
         return result
+
+
+def _with_cache_metadata(result: dict, ttl_seconds: int) -> dict:
+    """Attach cache freshness metadata without changing existing payload fields."""
+    return {
+        **result,
+        CACHE_GENERATED_AT_KEY: datetime.now(timezone.utc).isoformat(),
+        CACHE_TTL_SECONDS_KEY: ttl_seconds,
+    }
 
 
 # ─────────────────────────────────────────
