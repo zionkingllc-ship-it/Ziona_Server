@@ -5,7 +5,6 @@ from django.utils import timezone
 
 from core.admin_dashboard.circle_services import CircleManagementService
 from core.circles.models import Anchor, Circle, CircleMembership, CirclePost
-from core.shared.exceptions import AdminError
 
 
 @pytest.mark.django_db
@@ -24,29 +23,36 @@ def test_create_circle(authenticated_admin):
 
 
 @pytest.mark.django_db
-def test_edit_circle_cooldown(authenticated_admin):
-    # Cooldown test limit
+def test_edit_circle_has_no_cooldown(authenticated_admin):
+    # Circles were previously locked for 60 days after an edit. That cooldown
+    # has been removed — admins can edit at any time, even right after a prior edit.
     circle = Circle.objects.create(
         name="Old Circle",
         description="Old",
         created_by=authenticated_admin["user"],
-        last_edited_at=timezone.now() - timedelta(days=10),  # Less than 60 days
+        last_edited_at=timezone.now() - timedelta(days=1),  # Edited yesterday
     )
 
-    with pytest.raises(AdminError) as exc_info:
-        CircleManagementService.edit_circle(
-            str(circle.id), authenticated_admin["user"], name="New Name"
-        )
-
-    assert exc_info.value.code == "CIRCLE_EDIT_COOLDOWN"
-
-    # valid cooldown
-    circle.last_edited_at = timezone.now() - timedelta(days=61)
-    circle.save()
     updated = CircleManagementService.edit_circle(
         str(circle.id), authenticated_admin["user"], name="New Name"
     )
     assert updated["name"] == "New Name"
+
+
+@pytest.mark.django_db
+def test_list_circle_members_includes_email(authenticated_admin, create_user):
+    circle = Circle.objects.create(
+        name="Members Circle",
+        description="With members",
+        created_by=authenticated_admin["user"],
+    )
+    member = create_user(email="member@example.com", username="memberuser")
+    CircleMembership.objects.create(circle=circle, user=member, role="member")
+
+    result = CircleManagementService.list_circle_members(str(circle.id))
+
+    assert result["total_count"] == 1
+    assert result["members"][0]["email"] == "member@example.com"
 
 
 @pytest.mark.django_db

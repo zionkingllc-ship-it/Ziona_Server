@@ -91,11 +91,14 @@ class TestEmailTasks:
                     recipient_list=["user@example.com"],
                 )
 
-    def test_task_queuing_non_blocking(self):
-        """Test that .delay() returns immediately without blocking."""
-        import time
+    @patch("core.shared.tasks.email_tasks.send_mail")
+    def test_task_queuing_non_blocking(self, mock_send_mail):
+        """Enqueuing is fire-and-forget: it must not run the task body inline.
 
-        start = time.time()
+        Asserts the behavioral guarantee (the email backend is never touched
+        synchronously during enqueue) rather than a wall-clock threshold, which
+        is flaky because it depends on real broker/publish latency.
+        """
         task = send_email_async.apply_async(
             kwargs={
                 "subject": "Test",
@@ -104,9 +107,9 @@ class TestEmailTasks:
                 "recipient_list": ["test@example.com"],
             }
         )
-        elapsed = time.time() - start
 
-        assert elapsed < 0.1
+        # Queued, not executed (CELERY_TASK_ALWAYS_EAGER is False in tests).
+        mock_send_mail.assert_not_called()
         assert task.id is not None
 
     @patch("core.shared.tasks.email_tasks.send_mail")

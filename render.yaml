@@ -109,7 +109,7 @@ services:
     branch: staging
     autoDeployTrigger: checksPass
     buildCommand: *buildCommand
-    startCommand: python manage.py check_media_runtime && celery -A config worker --loglevel=info --concurrency=1 -Q email,default,media,cron
+    startCommand: python manage.py check_media_runtime && celery -A config worker --loglevel=info --concurrency=1 -Q email,default,media,cron,celery
     envVars: *stagingEnv
 
   - type: web
@@ -214,7 +214,7 @@ services:
     branch: main
     autoDeployTrigger: checksPass
     buildCommand: *buildCommand
-    startCommand: python manage.py check_media_runtime && celery -A config worker --loglevel=info --concurrency=1 -Q email,default,media,cron
+    startCommand: python manage.py check_media_runtime && celery -A config worker --loglevel=info --concurrency=1 -Q email,default,media,cron,celery
     envVars: *prodEnv
 
   - type: cron

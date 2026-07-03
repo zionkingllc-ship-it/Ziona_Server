@@ -1,3 +1,4 @@
+import logging
 import mimetypes
 import os
 from urllib.parse import urlparse
@@ -19,6 +20,8 @@ from core.media.models import MediaFile, MediaStatus
 from core.media.models import MediaType as StoredMediaType
 from core.media.services import validate_trusted_external_image_url
 from core.shared.exceptions import ZionaError
+
+logger = logging.getLogger("core.circles")
 
 # Shorthand error codes
 CIRCLE_NOT_FOUND = "CIRCLE_NOT_FOUND"
@@ -552,7 +555,25 @@ def create_circle_post(
     if resolved_media_files:
         post.media_files.set(resolved_media_files)
 
-    return CirclePost.objects.select_related("user").prefetch_related("media_files").get(id=post.id)
+    full_post = (
+        CirclePost.objects.select_related("user").prefetch_related("media_files").get(id=post.id)
+    )
+
+    # Dispatch @mention notifications — scoped to circle members only.
+    try:
+        from core.notifications.services import notify_mentions
+
+        notify_mentions(
+            text=trimmed_text,
+            actor=full_post.user,
+            reference_id=post.id,
+            reference_type="circle_post",
+            circle_id=str(circle_id),
+        )
+    except Exception:  # noqa: BLE001
+        logger.warning("Failed to dispatch mention notifications for circle post %s", post.id)
+
+    return full_post
 
 
 @transaction.atomic

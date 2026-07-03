@@ -1,4 +1,5 @@
 import logging
+import re
 import uuid
 from datetime import timedelta
 from typing import Any
@@ -6,6 +7,7 @@ from typing import Any
 from django.contrib.auth import get_user_model
 from django.core.cache import cache
 from django.db import transaction
+from django.db.models.functions import Lower
 from django.utils import timezone
 
 from core.notifications.analytics import track_notification_opened, track_notification_sent
@@ -21,6 +23,15 @@ from core.notifications.models import (
 
 logger = logging.getLogger(__name__)
 User = get_user_model()
+MENTION_REGEX = re.compile(r"(?<![\w.])@([A-Za-z0-9_]{3,30})\b")
+
+MENTION_CONTEXT_LABELS = {
+    "post": "a post",
+    "comment": "a comment",
+    "circle_post": "a circle post",
+    "circle_post_comment": "a circle comment",
+    "anchor_response": "an anchor response",
+}
 
 
 def _is_notification_enabled(user_id: int, notification_type: str) -> bool:
@@ -111,6 +122,89 @@ def create_notification(
     )
 
     return notification
+
+
+def extract_mentioned_usernames(text: str) -> list[str]:
+    """Return unique @username tokens in first-seen order."""
+    seen: set[str] = set()
+    usernames: list[str] = []
+
+    for username in MENTION_REGEX.findall(text or ""):
+        normalized = username.lower()
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        usernames.append(username)
+
+    return usernames
+
+
+def _resolve_mentioned_users(text: str, circle_id: str | None = None):
+    """Resolve mention tokens to active users, optionally scoped to a circle."""
+    usernames = extract_mentioned_usernames(text)
+    if not usernames:
+        return []
+
+    normalized_usernames = [username.lower() for username in usernames]
+    queryset = (
+        User.objects.filter(deleted_at__isnull=True)
+        .annotate(username_lower=Lower("username"))
+        .filter(username_lower__in=normalized_usernames)
+    )
+    if circle_id:
+        queryset = queryset.filter(circle_memberships__circle_id=circle_id).distinct()
+
+    return list(queryset)
+
+
+def mentioned_user_ids(text: str, circle_id: str | None = None) -> list[str]:
+    """Resolve @mentions to active user IDs for persisted mention metadata."""
+    return [str(user.id) for user in _resolve_mentioned_users(text, circle_id=circle_id)]
+
+
+def notify_mentions(
+    *,
+    text: str,
+    actor,
+    reference_id: uuid.UUID,
+    reference_type: str,
+    circle_id: str | None = None,
+) -> list[Notification]:
+    """Create mention notifications for users referenced in text.
+
+    Circle-scoped content passes circle_id so only current members can be
+    notified, preventing private circle activity from leaking to non-members.
+    """
+    mentioned_users = _resolve_mentioned_users(text, circle_id=circle_id)
+    if not mentioned_users:
+        return []
+
+    actor_id = getattr(actor, "id", None)
+    actor_username = getattr(actor, "username", None) or getattr(actor, "name", None) or "Someone"
+    context_label = MENTION_CONTEXT_LABELS.get(reference_type, "content")
+    created_notifications: list[Notification] = []
+
+    for mentioned_user in mentioned_users:
+        if actor_id and mentioned_user.id == actor_id:
+            continue
+
+        notification = create_notification(
+            user_id=mentioned_user.id,
+            type_str=NotificationType.MENTION,
+            reference_id=reference_id,
+            reference_type=reference_type,
+            title="You were mentioned",
+            message=f"{actor_username} mentioned you in {context_label}",
+            sender_id=actor_id,
+            push_data={
+                "actor_id": str(actor_id or ""),
+                "circle_id": str(circle_id or ""),
+            },
+        )
+        if notification:
+            created_notifications.append(notification)
+
+    return created_notifications
 
 
 def send_push_notification(user_id: int, title: str, body: str, data: dict[str, Any]) -> None:

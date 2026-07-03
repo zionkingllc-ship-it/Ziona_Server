@@ -18,6 +18,29 @@ def test_list_users(authenticated_admin):
 
 
 @pytest.mark.django_db
+def test_list_users_includes_submitted_report_count(authenticated_admin):
+    from core.moderation.models import Report
+
+    reporter = User.objects.create_user(
+        email="reporter@example.com",
+        username="reporteruser",
+        password="Pass123!",
+    )
+    for i in range(2):
+        Report.objects.create(
+            target_type="Post",
+            target_id=f"1111111{i}-1111-1111-1111-111111111111",
+            reason="spam",
+            reporter=reporter,
+            status="pending",
+        )
+
+    result = UserManagementService.list_users(search="reporteruser")
+    users = {u["username"]: u for u in result["users"]}
+    assert users["reporteruser"]["submitted_reports"] == 2
+
+
+@pytest.mark.django_db
 def test_list_users_includes_all_admin_account_states(authenticated_admin):
     User.objects.create_user(
         email="warned@example.com",

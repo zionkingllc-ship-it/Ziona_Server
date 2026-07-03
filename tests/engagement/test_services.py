@@ -140,6 +140,43 @@ class TestDeleteComment:
         assert exc.value.code == "PERMISSION_DENIED"
 
 
+class TestLikeComment:
+    """Tests for liking comments returning fresh stats (Bugs 6 & 10)."""
+
+    def test_like_comment_returns_updated_stats(self, user_a, user_b, post):
+        comment = EngagementService.create_comment(
+            user_id=str(user_a.id),
+            post_id=str(post.id),
+            text="Parent comment",
+        )
+        # A reply so replies_count is non-zero in the returned stats.
+        EngagementService.create_comment(
+            user_id=str(user_b.id),
+            post_id=str(post.id),
+            text="A reply",
+            parent_comment_id=comment.id,
+        )
+
+        stats = EngagementService.like_comment(str(user_b.id), str(comment.id))
+        assert stats.likes_count == 1
+        assert stats.replies_count == 1
+
+    def test_like_comment_is_idempotent(self, user_b, post):
+        comment = EngagementService.create_comment(
+            user_id=str(user_b.id),
+            post_id=str(post.id),
+            text="A comment",
+        )
+        EngagementService.like_comment(str(user_b.id), str(comment.id))
+        stats = EngagementService.like_comment(str(user_b.id), str(comment.id))
+        assert stats.likes_count == 1
+
+    def test_like_nonexistent_comment(self, user_b):
+        with pytest.raises(EngagementError) as exc:
+            EngagementService.like_comment(str(user_b.id), "00000000-0000-0000-0000-000000000000")
+        assert exc.value.code == "COMMENT_NOT_FOUND"
+
+
 class TestSavePost:
     """Tests for save/unsave operations."""
 

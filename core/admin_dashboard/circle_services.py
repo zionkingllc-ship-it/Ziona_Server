@@ -15,8 +15,6 @@ from core.shared.exceptions import AdminError, ErrorCode
 
 logger = logging.getLogger("core.admin_dashboard")
 
-EDIT_COOLDOWN_DAYS = 60
-
 
 class CircleManagementService:
     """Service for admin circle listing, creation, editing, and lifecycle."""
@@ -95,13 +93,7 @@ class CircleManagementService:
                 code=ErrorCode.CIRCLE_NOT_FOUND,
             )
 
-        result = _circle_to_dict(circle)
-
-        # Add cooldown info
-        result["can_edit"] = _can_edit(circle)
-        result["cooldown_remaining_days"] = _cooldown_remaining(circle)
-
-        return result
+        return _circle_to_dict(circle)
 
     @staticmethod
     def get_circle_stats(circle_id: str) -> dict:
@@ -330,13 +322,13 @@ class CircleManagementService:
         ip_address: str = "",
         **updates,
     ) -> dict:
-        """Edit a circle with 60-day cooldown enforcement.
+        """Edit a circle.
 
         Uses select_for_update to prevent race conditions when two admins
         try to edit the same circle simultaneously.
 
         Raises:
-            AdminError: If cooldown not elapsed or circle not found.
+            AdminError: If the circle is not found.
         """
         from core.circles.models import Circle
 
@@ -350,15 +342,6 @@ class CircleManagementService:
             raise AdminError(
                 message="Circle not found.",
                 code=ErrorCode.CIRCLE_NOT_FOUND,
-            )
-
-        # Enforce 60-day cooldown
-        if not _can_edit(circle):
-            remaining = _cooldown_remaining(circle)
-            raise AdminError(
-                message=f"Circle cannot be edited for another {remaining} days "
-                f"(60-day cooldown from last edit).",
-                code=ErrorCode.CIRCLE_EDIT_COOLDOWN,
             )
 
         before_state = {
@@ -535,6 +518,7 @@ class CircleManagementService:
                 {
                     "id": str(m.user.id),
                     "username": m.user.username,
+                    "email": m.user.email,
                     "full_name": m.user.full_name,
                     "avatar_url": m.user.avatar_url or "",
                     "joined_at": m.joined_at.isoformat() if m.joined_at else "",
@@ -553,23 +537,6 @@ class CircleManagementService:
 # ─────────────────────────────────────────
 # Private helpers
 # ─────────────────────────────────────────
-
-
-def _can_edit(circle) -> bool:
-    """Check if the 60-day cooldown has elapsed since last edit."""
-    if not circle.last_edited_at:
-        return True
-    elapsed = datetime.now(timezone.utc) - circle.last_edited_at
-    return elapsed >= timedelta(days=EDIT_COOLDOWN_DAYS)
-
-
-def _cooldown_remaining(circle) -> int:
-    """Return remaining cooldown days (0 if editable)."""
-    if not circle.last_edited_at:
-        return 0
-    elapsed = datetime.now(timezone.utc) - circle.last_edited_at
-    remaining = timedelta(days=EDIT_COOLDOWN_DAYS) - elapsed
-    return max(0, remaining.days)
 
 
 def _circle_to_dict(circle) -> dict:

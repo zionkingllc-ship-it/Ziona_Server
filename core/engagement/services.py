@@ -256,7 +256,7 @@ class EngagementService:
 
     @staticmethod
     @rate_limit(max_requests=30, window_seconds=60)
-    def like_comment(user_id: str, comment_id: str) -> bool:
+    def like_comment(user_id: str, comment_id: str) -> CommentStatsDTO:
         """Like a comment.
 
         Args:
@@ -264,7 +264,8 @@ class EngagementService:
             comment_id: UUID of the comment.
 
         Returns:
-            True if successfully liked.
+            Updated stats (likes/replies counts) for the comment, so the client
+            can refresh the counter without issuing a follow-up query.
 
         Raises:
             EngagementError: If comment not found.
@@ -277,11 +278,14 @@ class EngagementService:
                 code=ErrorCode.COMMENT_NOT_FOUND,
             )
 
-        try:
-            CommentLike.objects.create(user_id=user_id, comment_id=comment_id)
-            return True
-        except IntegrityError:
-            return True
+        # get_or_create is idempotent and savepoint-safe: a duplicate like hits
+        # the (user, comment) unique constraint but is rolled back cleanly.
+        CommentLike.objects.get_or_create(user_id=user_id, comment_id=comment_id)
+
+        return CommentStatsDTO(
+            likes_count=comment.comment_likes.count(),
+            replies_count=comment.replies.filter(deleted_at__isnull=True).count(),
+        )
 
     @staticmethod
     def unlike_comment(user_id: str, comment_id: str) -> bool:

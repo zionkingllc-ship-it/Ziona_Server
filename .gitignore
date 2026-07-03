@@ -93,3 +93,7 @@ test_queries.http
 core/posts/management/commands/clean_posts.py
 docs/create_post_examples.md
 docs/admin-dashboard-frontend-contract.md
+
+# Local AI assistant context & scratch space (not for the repo)
+CLAUDE.md
+scratch/

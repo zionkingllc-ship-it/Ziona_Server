@@ -8,7 +8,8 @@ import logging
 from datetime import datetime, timezone
 
 from django.db import transaction
-from django.db.models import Count, Q
+from django.db.models import Count, OuterRef, Q, Subquery
+from django.db.models.functions import Coalesce
 
 from core.admin_dashboard.permissions import log_admin_action
 from core.shared.exceptions import AdminError, ErrorCode
@@ -40,13 +41,27 @@ class UserManagementService:
             Dict with users list, total_count, page, page_size, total_pages,
             and summary counts (total, active, warned, suspended, inactive, deleted).
         """
+        from core.moderation.models import Report
         from core.users.models import User, UserLifecycleState, UserStatus
 
         page_size = min(page_size, 50)
         offset = (page - 1) * page_size
 
+        # Count of reports this user has filed. Uses a correlated subquery
+        # (not a second JOIN + Count) so it does not multiply the posts_count
+        # aggregate below via a cartesian join. The alias avoids `submitted_reports`,
+        # which is already the reverse accessor for CircleReport.reporter.
+        submitted_reports_sq = (
+            Report.objects.filter(reporter_id=OuterRef("pk"))
+            .order_by()
+            .values("reporter_id")
+            .annotate(total=Count("id"))
+            .values("total")
+        )
+
         qs = User.all_objects.select_related("account_deletion_request").annotate(
             posts_count=Count("posts", filter=Q(posts__deleted_at__isnull=True)),
+            submitted_report_count=Coalesce(Subquery(submitted_reports_sq), 0),
         )
 
         if search:
@@ -564,6 +579,7 @@ def _redact_json_snapshot_rows(
 def _user_to_dict(user) -> dict:
     """Convert User model to admin-facing dict."""
     posts_count = getattr(user, "posts_count", 0)
+    submitted_reports = getattr(user, "submitted_report_count", 0)
 
     deletion_request = getattr(user, "account_deletion_request", None)
     return {
@@ -588,6 +604,7 @@ def _user_to_dict(user) -> dict:
             deletion_request.scheduled_for.isoformat() if deletion_request else None
         ),
         "posts_count": posts_count,
+        "submitted_reports": submitted_reports,
         "warned_at": user.warned_at.isoformat() if user.warned_at else None,
         "suspended_at": user.suspended_at.isoformat() if user.suspended_at else None,
         "suspension_reason": user.suspension_reason,

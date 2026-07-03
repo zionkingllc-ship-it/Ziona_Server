@@ -102,7 +102,7 @@ def create_response(
 
     media_url = validate_response_media(media_type, media_url)
 
-    return AnchorResponse.objects.create(
+    response = AnchorResponse.objects.create(
         user_id=user_id,
         anchor=anchor,
         response_type=response_type,
@@ -110,6 +110,26 @@ def create_response(
         media_url=media_url,
         media_type=media_type,
     )
+
+    # Dispatch @mention notifications — scoped to circle members only.
+    try:
+        from core.notifications.services import notify_mentions
+
+        notify_mentions(
+            text=content,
+            actor=response.user,
+            reference_id=response.id,
+            reference_type="anchor_response",
+            circle_id=str(anchor.circle_id),
+        )
+    except Exception:  # noqa: BLE001
+        import logging
+
+        logging.getLogger(__name__).warning(
+            "Failed to dispatch mention notifications for anchor response %s", response.id
+        )
+
+    return response
 
 
 @transaction.atomic
@@ -134,7 +154,7 @@ def create_reply(
 
     media_url = validate_response_media(media_type, media_url)
 
-    return AnchorResponse.objects.create(
+    reply = AnchorResponse.objects.create(
         user_id=user_id,
         anchor=parent.anchor,
         parent_response=parent,
@@ -143,6 +163,26 @@ def create_reply(
         media_url=media_url,
         media_type=media_type,
     )
+
+    # Dispatch @mention notifications — scoped to circle members only.
+    try:
+        from core.notifications.services import notify_mentions
+
+        notify_mentions(
+            text=content,
+            actor=reply.user,
+            reference_id=reply.id,
+            reference_type="anchor_response",
+            circle_id=str(parent.anchor.circle_id),
+        )
+    except Exception:  # noqa: BLE001
+        import logging
+
+        logging.getLogger(__name__).warning(
+            "Failed to dispatch mention notifications for anchor reply %s", reply.id
+        )
+
+    return reply
 
 
 # ──────────────────────────────────────────────

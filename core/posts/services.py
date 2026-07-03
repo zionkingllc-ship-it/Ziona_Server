@@ -300,6 +300,21 @@ class PostService:
         except (ConnectionError, TimeoutError, OSError):
             logger.warning("Failed to increment post counter cache")
 
+        # 9. Dispatch @mention notifications for users tagged in the caption.
+        # Runs outside the transaction so a notification failure never rolls
+        # back the post itself.
+        try:
+            from core.notifications.services import notify_mentions
+
+            notify_mentions(
+                text=caption or "",
+                actor=user,
+                reference_id=post.id,
+                reference_type="post",
+            )
+        except Exception:  # noqa: BLE001
+            logger.warning("Failed to dispatch mention notifications for post %s", post.id)
+
         return post_dto
 
     @staticmethod

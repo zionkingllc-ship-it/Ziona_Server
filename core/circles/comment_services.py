@@ -126,6 +126,21 @@ def create_circle_post_comment(
         "circle_post_comment_created",
         extra={"comment_id": str(comment.id), "post_id": post_id, "user_id": user_id},
     )
+
+    # Dispatch @mention notifications — scoped to circle members only.
+    try:
+        from core.notifications.services import notify_mentions
+
+        notify_mentions(
+            text=text,
+            actor=comment.user,
+            reference_id=comment.id,
+            reference_type="circle_post_comment",
+            circle_id=str(post.circle_id),
+        )
+    except Exception:  # noqa: BLE001
+        logger.warning("Failed to dispatch mention notifications for circle comment %s", comment.id)
+
     return comment
 
 

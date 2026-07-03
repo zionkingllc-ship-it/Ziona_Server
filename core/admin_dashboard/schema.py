@@ -158,6 +158,7 @@ class AdminUserType:
     is_active: bool = strawberry.field(name="isActive")
     deleted_at: str | None = strawberry.field(name="deletedAt", default=None)
     posts_count: int = strawberry.field(name="postsCount")
+    submitted_reports: int = strawberry.field(name="submittedReports", default=0)
     warned_at: str | None = strawberry.field(name="warnedAt", default=None)
     suspended_at: str | None = strawberry.field(name="suspendedAt", default=None)
     suspension_reason: str = strawberry.field(name="suspensionReason", default="")
@@ -259,6 +260,7 @@ class CircleMemberType:
 
     id: str
     username: str
+    email: str
     full_name: str = strawberry.field(name="fullName")
     avatar_url: str = strawberry.field(name="avatarUrl")
     joined_at: str = strawberry.field(name="joinedAt")
@@ -619,6 +621,7 @@ def _map_user(data: dict) -> AdminUserType:
         is_active=data.get("is_active", True),
         deleted_at=data.get("deleted_at"),
         posts_count=data["posts_count"],
+        submitted_reports=data.get("submitted_reports", 0),
         warned_at=data.get("warned_at"),
         suspended_at=data.get("suspended_at"),
         suspension_reason=data.get("suspension_reason", ""),
@@ -890,7 +893,7 @@ class AdminDashboardQueries:
             summary=CircleSummaryType(**result["summary"]),
         )
 
-    @strawberry.field(name="adminCircleDetail", description="Get circle detail with cooldown info.")
+    @strawberry.field(name="adminCircleDetail", description="Get circle detail.")
     @admin_required
     def admin_circle_detail(self, info: Info, circle_id: str) -> AdminCirclePayload:
         from core.admin_dashboard.circle_services import CircleManagementService
@@ -1377,7 +1380,7 @@ class AdminDashboardMutations:
 
     @strawberry.mutation(
         name="adminEditCircle",
-        description="Edit a circle (admin only, 60-day cooldown enforced).",
+        description="Edit a circle (admin only).",
     )
     @admin_required
     def admin_edit_circle(

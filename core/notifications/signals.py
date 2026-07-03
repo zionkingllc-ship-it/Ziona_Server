@@ -1,20 +1,19 @@
 import logging
-import re
 
-from django.contrib.auth import get_user_model
 from django.db.models.signals import post_delete, post_save
 from django.dispatch import receiver
 
 from core.circles.models import Anchor
 from core.engagement.models import Comment, Like
 from core.notifications.models import Notification, NotificationStatus, NotificationType
-from core.notifications.services import batch_like_notifications, create_notification
+from core.notifications.services import (
+    batch_like_notifications,
+    create_notification,
+    notify_mentions,
+)
 from core.posts.models import Post
 
 logger = logging.getLogger(__name__)
-User = get_user_model()
-
-MENTION_REGEX = re.compile(r"@(\w+)")
 
 
 @receiver(post_save, sender=Comment)
@@ -24,19 +23,14 @@ def handle_comment_notifications(sender, instance, created, **kwargs):
         return
 
     try:
-        # Extract and notify mentions
-        mentions = MENTION_REGEX.findall(instance.text or "")
-        if mentions:
-            mentioned_users = User.objects.filter(username__in=mentions)
-            for m_user in mentioned_users:
-                if m_user.id != instance.user_id:
-                    create_notification(
-                        user_id=m_user.id,
-                        type_str=NotificationType.MENTION,
-                        reference_id=instance.id,
-                        reference_type="comment",
-                        message=f"{instance.user.username} mentioned you in a comment",
-                    )
+        # Mentions — routed through the shared pipeline (deduplication,
+        # preference checks, and self-mention guards are all handled there).
+        notify_mentions(
+            text=instance.text or "",
+            actor=instance.user,
+            reference_id=instance.id,
+            reference_type="comment",
+        )
 
         # Notify post/comment author
         if instance.parent_comment_id:

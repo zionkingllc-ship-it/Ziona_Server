@@ -21,6 +21,7 @@ class LikePayload:
     success: bool
     liked: bool = False
     stats: PostStats | None = None
+    comment_stats: CommentStats | None = None
     error: ErrorType | None = None
     message: str | None = None
     error_code: str | None = None
@@ -459,8 +460,15 @@ class EngagementMutations:
             )
 
         try:
-            EngagementService.like_comment(user_id, comment_id)
-            return LikePayload(success=True, liked=True)
+            stats = EngagementService.like_comment(user_id, comment_id)
+            return LikePayload(
+                success=True,
+                liked=True,
+                comment_stats=CommentStats(
+                    likes_count=stats.likes_count,
+                    replies_count=stats.replies_count,
+                ),
+            )
         except EngagementError as e:
             return LikePayload(success=False, message=e.message, error_code=e.code)
 
