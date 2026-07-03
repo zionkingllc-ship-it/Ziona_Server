@@ -19,7 +19,7 @@ def _make_user(username: str) -> "User":
     return User.objects.create_user(
         email=f"{username}@example.com",
         username=username,
-        password="password123",
+        password="password123",  # pragma: allowlist secret
     )
 
 
