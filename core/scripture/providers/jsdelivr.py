@@ -429,7 +429,31 @@ class JSDelivrScriptureService:
                 response = requests.get(url, timeout=10)
                 response.raise_for_status()
                 data = response.json().get("data", [])
-                return [{"number": int(v["verse"]), "text": v["text"]} for v in data]
+
+                # The CDN chapter payload can carry more than one entry per
+                # verse number (the verse text plus footnote/cross-reference
+                # rows that reuse the same number). Keep the first entry per
+                # verse so a chapter never returns doubled verses, then sort
+                # for a stable, canonical order. This mirrors the DB import,
+                # where the (translation, book_id, chapter, verse) unique
+                # constraint already collapses these duplicates.
+                seen: set[int] = set()
+                verses: list[dict] = []
+                for v in data:
+                    try:
+                        number = int(v["verse"])
+                    except (KeyError, TypeError, ValueError):
+                        continue
+                    if number in seen:
+                        continue
+                    text = (v.get("text") or "").strip()
+                    if not text:
+                        continue
+                    seen.add(number)
+                    verses.append({"number": number, "text": text})
+
+                verses.sort(key=lambda item: item["number"])
+                return verses
             except (requests.Timeout, requests.ConnectionError) as e:
                 if attempt == 2:
                     logger.error(f"CDN fetch failed after 3 attempts: {e}")

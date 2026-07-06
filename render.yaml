@@ -23,7 +23,7 @@ services:
       - key: PYTHON_VERSION
         value: "3.12.0"
       - key: ALLOWED_HOSTS
-        value: ziona-api-staging.onrender.com
+        value: ziona-api-staging.onrender.com,api.staging.ziona.app
       - key: ENABLE_DJANGO_ADMIN
         value: "true"
       - key: ENABLE_PUBLIC_API_DOCS
@@ -82,10 +82,13 @@ services:
         value: "10000"
       - key: STRIPE_CURRENCY
         value: usd
+      # Staging API CORS: staging frontends + localhost ONLY. Prod origins are
+      # deliberately excluded so a prod build mistakenly pointed at staging
+      # fails loudly instead of silently writing prod data with staging URLs.
       - key: CORS_ALLOWED_ORIGINS
-        value: https://ziona-app-staging.netlify.app,https://ziona-admin-dashboard-git-staging-zionking-llc.vercel.app,https://ziona-admin-dashboard.vercel.app
+        value: https://ziona-app-staging.netlify.app,https://ziona-admin-dashboard-git-staging-zionking-llc.vercel.app,https://ziona-admin-dashboard.vercel.app,https://admin.staging.ziona.app,http://localhost:3000,http://localhost:8080
       - key: GCS_CORS_ALLOWED_ORIGINS
-        value: https://ziona-app-staging.netlify.app,https://ziona-admin-dashboard-git-staging-zionking-llc.vercel.app,https://ziona-admin-dashboard.vercel.app
+        value: https://ziona-app-staging.netlify.app,https://ziona-admin-dashboard-git-staging-zionking-llc.vercel.app,https://ziona-admin-dashboard.vercel.app,https://admin.staging.ziona.app,http://localhost:3000,http://localhost:8080
       - key: GCP_STORAGE_BUCKET
         value: ziona-media-dev
       - key: MEDIA_STALE_UPLOAD_MINUTES

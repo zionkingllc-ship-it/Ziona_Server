@@ -154,6 +154,37 @@ def test_fallback_uses_chapter_endpoint(mock_get):
     )
 
 
+@patch("core.scripture.providers.jsdelivr.requests.get")
+def test_fetch_chapter_simple_dedupes_duplicate_verse_numbers(mock_get):
+    """The CDN can return >1 entry per verse (verse text + footnote rows that
+    reuse the number). fetch_chapter_simple must collapse to one per verse,
+    keep the first (real verse text), drop empties, and sort by number.
+    """
+    from core.scripture.providers.jsdelivr import JSDelivrScriptureService
+
+    mock_response = MagicMock()
+    # Verses 1-3, then footnote rows reusing numbers 1-3, one empty row.
+    mock_response.json.return_value = {
+        "data": [
+            {"verse": "1", "text": "Verse one."},
+            {"verse": "2", "text": "Verse two."},
+            {"verse": "3", "text": "Verse three."},
+            {"verse": "1", "text": "1.1 or, alternate reading footnote"},
+            {"verse": "2", "text": "2.1 or, alternate reading footnote"},
+            {"verse": "3", "text": "3.1 or, alternate reading footnote"},
+            {"verse": "4", "text": "   "},
+        ]
+    }
+    mock_get.return_value = mock_response
+
+    res = JSDelivrScriptureService.fetch_chapter_simple("psalms", 121, "en-kjv")
+
+    assert [v["number"] for v in res] == [1, 2, 3]  # no doubles, empty dropped
+    assert res[0]["text"] == "Verse one."  # first (real) entry kept, not footnote
+    assert res[1]["text"] == "Verse two."
+    assert res[2]["text"] == "Verse three."
+
+
 # 33 test_hard_fail_guard
 @pytest.mark.django_db
 @patch("core.scripture.services.JSDelivrScriptureService.fetch_chapter_simple")
