@@ -1,10 +1,13 @@
+import uuid
 from datetime import timedelta
 
 import pytest
 from django.utils import timezone
 
 from core.admin_dashboard.circle_services import CircleManagementService
+from core.admin_dashboard.models import AdminAuditLog
 from core.circles.models import Anchor, Circle, CircleMembership, CirclePost
+from core.shared.exceptions import AdminError, ErrorCode
 
 
 @pytest.mark.django_db
@@ -312,3 +315,123 @@ def test_admin_circle_stats_query(api_client, authenticated_admin, create_user):
     assert result["stats"]["anchorCount"] == 1
     assert result["stats"]["engagement"]["value"] == 27
     assert result["stats"]["engagement"]["label"] == "Total Engagement"
+
+
+@pytest.mark.django_db
+def test_deactivate_then_activate_circle_service(authenticated_admin):
+    admin = authenticated_admin["user"]
+    circle = Circle.objects.create(
+        name="Toggle Me",
+        description="Deactivate then reactivate",
+        cover_image="https://example.com/cover.jpg",
+        created_by=admin,
+    )
+
+    deactivated = CircleManagementService.deactivate_circle(str(circle.id), admin_user=admin)
+    assert deactivated["status"] == "inactive"
+    assert deactivated["is_active"] is False
+
+    reactivated = CircleManagementService.activate_circle(str(circle.id), admin_user=admin)
+    assert reactivated["status"] == "active"
+    assert reactivated["is_active"] is True
+
+    circle.refresh_from_db()
+    assert circle.status == "active"
+    assert circle.is_active is True
+
+    assert AdminAuditLog.objects.filter(
+        action="CIRCLE_ACTIVATED", target_id=str(circle.id)
+    ).exists()
+
+
+@pytest.mark.django_db
+def test_admin_activate_circle_mutation(api_client, authenticated_admin):
+    admin = authenticated_admin["user"]
+    circle = Circle.objects.create(
+        name="Reactivate Via Mutation",
+        description="Reactivate via GraphQL",
+        cover_image="https://example.com/cover.jpg",
+        created_by=admin,
+    )
+    CircleManagementService.deactivate_circle(str(circle.id), admin_user=admin)
+
+    mutation = f"""
+    mutation {{
+        adminActivateCircle(circleId: "{circle.id}") {{
+            success
+            circle {{
+                id
+                status
+                isActive
+            }}
+            error {{
+                code
+                message
+            }}
+        }}
+    }}
+    """
+    headers = {"HTTP_AUTHORIZATION": f"Bearer {authenticated_admin['access_token']}"}
+    response = api_client.post(
+        "/graphql/", {"query": mutation}, content_type="application/json", **headers
+    )
+    data = response.json()
+
+    assert "errors" not in data, data.get("errors")
+    result = data["data"]["adminActivateCircle"]
+    assert result["success"] is True
+    assert result["circle"]["status"] == "active"
+    assert result["circle"]["isActive"] is True
+
+    circle.refresh_from_db()
+    assert circle.is_active is True
+
+
+@pytest.mark.django_db
+def test_admin_deactivate_circle_mutation(api_client, authenticated_admin):
+    circle = Circle.objects.create(
+        name="Deactivate Via Mutation",
+        description="Deactivate via GraphQL",
+        cover_image="https://example.com/cover.jpg",
+        created_by=authenticated_admin["user"],
+    )
+
+    mutation = f"""
+    mutation {{
+        adminDeactivateCircle(circleId: "{circle.id}") {{
+            success
+            circle {{
+                id
+                status
+                isActive
+            }}
+            error {{
+                code
+                message
+            }}
+        }}
+    }}
+    """
+    headers = {"HTTP_AUTHORIZATION": f"Bearer {authenticated_admin['access_token']}"}
+    response = api_client.post(
+        "/graphql/", {"query": mutation}, content_type="application/json", **headers
+    )
+    data = response.json()
+
+    assert "errors" not in data, data.get("errors")
+    result = data["data"]["adminDeactivateCircle"]
+    assert result["success"] is True
+    assert result["circle"]["status"] == "inactive"
+    assert result["circle"]["isActive"] is False
+
+    circle.refresh_from_db()
+    assert circle.is_active is False
+
+
+@pytest.mark.django_db
+def test_activate_circle_not_found(authenticated_admin):
+    with pytest.raises(AdminError) as exc:
+        CircleManagementService.activate_circle(
+            str(uuid.uuid4()), admin_user=authenticated_admin["user"]
+        )
+    assert exc.value.code == ErrorCode.CIRCLE_NOT_FOUND
