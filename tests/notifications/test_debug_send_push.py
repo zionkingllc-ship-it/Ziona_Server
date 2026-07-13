@@ -53,10 +53,11 @@ def _fake_fcm(tokens, title, body, data):
 
 
 def test_classify_token():
+    # Realistic APNs token = high-entropy hex; bind it on its own line so the
+    # detect-secrets allowlist pragma cannot be split from the literal by ruff.
+    apns_token = "aa72fc19c9a6e56cd104fb1c4f5230db"  # pragma: allowlist secret
     assert _classify_token("ExponentPushToken[joMZfcFiaY3ZwuuWToHj79]") == "expo"
-    assert (
-        _classify_token("aa72fc19c9a6e56cd104fb1c4f5230db") == "apns_raw"
-    )  # pragma: allowlist secret
+    assert _classify_token(apns_token) == "apns_raw"
     assert _classify_token("f" * 64) == "apns_raw"  # raw APNs token length
     assert _classify_token("dEXAMPLE_fcm-token:" + "A" * 150) == "fcm_like"
     assert _classify_token("") == "fcm_like"
