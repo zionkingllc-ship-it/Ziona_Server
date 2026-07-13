@@ -4,6 +4,7 @@ import strawberry
 from django.utils import timezone
 from strawberry.types import Info
 
+from core.admin_dashboard.permissions import admin_required
 from core.notifications.models import Notification, NotificationPreference, NotificationStatus
 from core.notifications.services import (
     create_admin_announcement,
@@ -11,8 +12,10 @@ from core.notifications.services import (
     get_unread_count,
     mark_as_read,
     register_device_token,
+    send_debug_push,
     update_preferences,
 )
+from core.shared.types import ErrorType
 from core.users.schema import _get_authenticated_user_id
 
 
@@ -216,6 +219,47 @@ class NotificationQueries:
 
 
 @strawberry.type
+class DebugPushTokenResult:
+    """Per-token FCM outcome for the debugSendPush diagnostic."""
+
+    token_preview: str = strawberry.field(name="tokenPreview")
+    platform: str
+    is_active: bool = strawberry.field(name="isActive")
+    # token_kind: 'fcm_like' | 'expo' | 'apns_raw' — why a token likely fails.
+    token_kind: str = strawberry.field(name="tokenKind")
+    success: bool
+    message_id: str | None = strawberry.field(name="messageId", default=None)
+    error_code: str | None = strawberry.field(name="errorCode", default=None)
+    error_message: str | None = strawberry.field(name="errorMessage", default=None)
+
+
+@strawberry.type
+class DebugSendPushPayload:
+    """Result of the temporary admin-only debugSendPush pipeline test."""
+
+    success: bool
+    project_id: str = strawberry.field(name="projectId", default="")
+    tokens_tried: int = strawberry.field(name="tokensTried", default=0)
+    success_count: int = strawberry.field(name="successCount", default=0)
+    failure_count: int = strawberry.field(name="failureCount", default=0)
+    results: list[DebugPushTokenResult] = strawberry.field(default_factory=list)
+    error: ErrorType | None = None
+
+
+def _map_debug_push_result(data: dict) -> DebugPushTokenResult:
+    return DebugPushTokenResult(
+        token_preview=data["token_preview"],
+        platform=data["platform"],
+        is_active=data["is_active"],
+        token_kind=data["token_kind"],
+        success=data["success"],
+        message_id=data.get("message_id"),
+        error_code=data.get("error_code"),
+        error_message=data.get("error_message"),
+    )
+
+
+@strawberry.type
 class NotificationMutations:
     @strawberry.mutation
     def mark_notification_as_read(
@@ -297,3 +341,34 @@ class NotificationMutations:
         targets = [str(tid) for tid in target_users] if target_users else None
         create_admin_announcement(admin_id=user.id, message=message, target_users=targets)
         return SuccessResponse(success=True)
+
+    @strawberry.mutation
+    @admin_required
+    def debug_send_push(
+        self,
+        info: Info,
+        target_user_id: strawberry.ID | None = None,
+        include_inactive: bool = False,
+    ) -> DebugSendPushPayload:
+        """TEMPORARY admin-only diagnostic: send a test push and return FCM's raw
+        accept/reject per device token. Defaults to the calling admin's own
+        tokens; pass targetUserId to test another user (e.g. the mobile dev).
+        Non-destructive — never deactivates tokens. Remove once push is verified.
+        """
+        admin_user = info.context.admin_user
+        uid = str(target_user_id) if target_user_id is not None else str(admin_user.id)
+        try:
+            result = send_debug_push(target_user_id=uid, include_inactive=include_inactive)
+            return DebugSendPushPayload(
+                success=True,
+                project_id=result["project_id"],
+                tokens_tried=result["tokens_tried"],
+                success_count=result["success_count"],
+                failure_count=result["failure_count"],
+                results=[_map_debug_push_result(r) for r in result["results"]],
+            )
+        except Exception as exc:  # diagnostic tool — surface the error, never 500
+            return DebugSendPushPayload(
+                success=False,
+                error=ErrorType(code="DEBUG_PUSH_FAILED", message=str(exc)),
+            )

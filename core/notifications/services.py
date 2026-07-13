@@ -12,7 +12,7 @@ from django.utils import timezone
 
 from core.notifications.analytics import track_notification_opened, track_notification_sent
 from core.notifications.constants import BATCHED_LIKE_TEMPLATES, NOTIFICATION_TEMPLATES, ErrorCodes
-from core.notifications.firebase import send_fcm_notification
+from core.notifications.firebase import get_fcm_project_id, send_fcm_debug, send_fcm_notification
 from core.notifications.models import (
     DeviceToken,
     Notification,
@@ -364,6 +364,83 @@ def _enforce_device_token_limit(user_id: int, keep_token: str, max_tokens: int =
     ]
     if removable_ids:
         DeviceToken.objects.filter(id__in=removable_ids).delete()
+
+
+def _classify_token(token: str) -> str:
+    """Best-effort guess at a token's type, for push debugging output.
+
+    - ``expo``     → Expo proxy token (ExponentPushToken[...]); FCM cannot deliver.
+    - ``apns_raw`` → raw APNs device token (hex); not an FCM registration token.
+    - ``fcm_like`` → long opaque string consistent with a real FCM token.
+    """
+    token = token or ""
+    if token.startswith("ExponentPushToken"):
+        return "expo"
+    if len(token) < 100 and token and all(c in "0123456789abcdefABCDEF" for c in token):
+        return "apns_raw"
+    return "fcm_like"
+
+
+def send_debug_push(
+    target_user_id: Any,
+    title: str = "Ziona test push 🔔",
+    body: str = "If you can read this, FCM delivery is working.",
+    include_inactive: bool = False,
+) -> dict[str, Any]:
+    """Send a test push to a user's device tokens and report the raw FCM outcome.
+
+    Diagnostic only and non-destructive (never deactivates tokens), so the same
+    token can be retried after a client fix. Returns the Firebase project id the
+    backend is wired to plus a per-token accept/reject breakdown.
+
+    TEMPORARY: added to validate the push pipeline end-to-end during mobile push
+    setup. Safe to delete once client push delivery is confirmed.
+    """
+    qs = DeviceToken.objects.filter(user_id=target_user_id).order_by("-created_at")
+    if not include_inactive:
+        qs = qs.filter(is_active=True)
+    rows = list(qs)
+
+    tokens = [row.token for row in rows]
+    data = {"type": "debug_push", "screen": "NotificationDetail"}
+    outcomes = send_fcm_debug(tokens, title, body, data)  # 1:1 with rows
+
+    results: list[dict[str, Any]] = []
+    success_count = 0
+    for row, outcome in zip(rows, outcomes, strict=True):
+        if outcome["success"]:
+            success_count += 1
+        tok = row.token or ""
+        preview = f"{tok[:12]}…{tok[-6:]}" if len(tok) > 20 else tok
+        results.append(
+            {
+                "token_preview": preview,
+                "platform": row.platform,
+                "is_active": row.is_active,
+                "token_kind": _classify_token(tok),
+                "success": outcome["success"],
+                "message_id": outcome["message_id"],
+                "error_code": outcome["error_code"],
+                "error_message": outcome["error_message"],
+            }
+        )
+
+    logger.info(
+        "debug_push_sent",
+        extra={
+            "target_user_id": str(target_user_id),
+            "tokens_tried": len(rows),
+            "success_count": success_count,
+        },
+    )
+
+    return {
+        "project_id": get_fcm_project_id(),
+        "tokens_tried": len(rows),
+        "success_count": success_count,
+        "failure_count": len(rows) - success_count,
+        "results": results,
+    }
 
 
 def batch_like_notifications(

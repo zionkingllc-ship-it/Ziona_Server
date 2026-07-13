@@ -132,3 +132,87 @@ def send_fcm_notification(
         )
 
     return summary
+
+
+def get_fcm_project_id() -> str:
+    """Return the Firebase project id the backend is actually wired to.
+
+    Lets the debug tooling confirm the app is being configured against the
+    same project (e.g. `ziona-app`). Reads it from the initialized app rather
+    than settings so it reflects the real loaded credentials.
+    """
+    if firebase_admin is None:
+        return ""
+    initialize_firebase()
+    try:
+        return firebase_admin.get_app().project_id or ""
+    except Exception:
+        return getattr(settings, "FIREBASE_PROJECT_ID", "") or ""
+
+
+def send_fcm_debug(
+    tokens: list[str], title: str, body: str, data: dict[str, Any]
+) -> list[dict[str, Any]]:
+    """Send a test push and return raw per-token FCM results, WITHOUT side effects.
+
+    Unlike send_fcm_notification(), this never deactivates tokens — it is a
+    diagnostic helper so the caller can read FCM's exact accept/reject reason
+    and retry the same token after fixing the client. Results are returned in
+    the same order as `tokens` (1:1). Every failure mode (SDK missing, init
+    failure, transport error) is reported as a per-token result, never raised.
+    """
+    if not tokens:
+        return []
+
+    def _all(error_code: str, error_message: str) -> list[dict[str, Any]]:
+        return [
+            {
+                "success": False,
+                "message_id": None,
+                "error_code": error_code,
+                "error_message": error_message,
+            }
+            for _ in tokens
+        ]
+
+    if firebase_admin is None:
+        return _all("SDK_NOT_INSTALLED", "firebase-admin package not installed")
+
+    initialize_firebase()
+    if not _firebase_initialized:
+        return _all("FIREBASE_NOT_INITIALIZED", "Firebase Admin SDK failed to initialize")
+
+    formatted_data = {str(k): str(v) for k, v in data.items() if v is not None}
+    message = messaging.MulticastMessage(
+        notification=messaging.Notification(title=title, body=body),
+        data=formatted_data,
+        tokens=tokens,
+    )
+
+    try:
+        response = messaging.send_each_for_multicast(message)
+    except Exception as exc:
+        return _all("SEND_FAILED", str(exc))
+
+    results: list[dict[str, Any]] = []
+    for result in response.responses:
+        if result.success:
+            results.append(
+                {
+                    "success": True,
+                    "message_id": result.message_id,
+                    "error_code": None,
+                    "error_message": None,
+                }
+            )
+        else:
+            exc = result.exception
+            results.append(
+                {
+                    "success": False,
+                    "message_id": None,
+                    "error_code": getattr(exc, "code", "UNKNOWN"),
+                    "error_message": str(exc) if exc else "unknown error",
+                }
+            )
+    return results
