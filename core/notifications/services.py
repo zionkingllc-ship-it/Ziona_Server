@@ -104,11 +104,14 @@ def create_notification(
         sender_id=sender_id,
     )
 
-    # Trigger push notification asynchronously (would be a Celery task in prod)
+    # Trigger push notification asynchronously (would be a Celery task in prod).
+    # Keys are camelCase to match the app-wide mobile contract (CLAUDE.md §5.1)
+    # and the GraphQL notification fields — the mobile tap-handler reads
+    # data.referenceType / data.referenceId.
     notification_data = {
         "type": type_str,
-        "reference_id": str(reference_id) if reference_id else "",
-        "reference_type": reference_type,
+        "referenceId": str(reference_id) if reference_id else "",
+        "referenceType": reference_type,
         "screen": "NotificationDetail",
     }
     if push_data:
@@ -197,8 +200,8 @@ def notify_mentions(
             message=f"{actor_username} mentioned you in {context_label}",
             sender_id=actor_id,
             push_data={
-                "actor_id": str(actor_id or ""),
-                "circle_id": str(circle_id or ""),
+                "actorId": str(actor_id or ""),
+                "circleId": str(circle_id or ""),
             },
         )
         if notification:

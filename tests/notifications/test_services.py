@@ -241,3 +241,34 @@ def test_send_push_notification_logs_provider_summary(db, user, monkeypatch):
     messages = [message for message, _ in log_calls]
     assert "push_notification_dispatch_started" in messages
     assert "push_notification_dispatch_finished" in messages
+
+
+@pytest.mark.django_db
+def test_create_notification_push_payload_uses_camelcase_keys(user, monkeypatch):
+    """The FCM push payload must use camelCase keys the mobile tap-handler reads."""
+    captured = {}
+
+    def fake_push(user_id, title, body, data):
+        captured["data"] = data
+
+    monkeypatch.setattr("core.notifications.services.send_push_notification", fake_push)
+
+    ref = uuid.uuid4()
+    create_notification(
+        user_id=user.id,
+        type_str=NotificationType.LIKE_POST,
+        reference_id=ref,
+        reference_type="post",
+        message="liked your post",
+        respect_preferences=False,
+        bypass_duplicate_check=True,
+    )
+
+    data = captured["data"]
+    assert data["referenceType"] == "post"
+    assert data["referenceId"] == str(ref)
+    assert data["type"] == NotificationType.LIKE_POST
+    assert data["screen"] == "NotificationDetail"
+    # Old snake_case keys must be gone (they broke mobile deep-linking).
+    assert "reference_type" not in data
+    assert "reference_id" not in data
