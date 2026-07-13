@@ -1,5 +1,5 @@
 # Django Core
-Django==5.2.15
+Django==5.2.16
 django-environ==0.11.2
 django-cors-headers==4.3.1
 django-health-check==3.18.1
@@ -30,7 +30,7 @@ google-cloud-storage==2.14.0
 
 # Media Processing (bundles a static FFmpeg binary via pip — no OS install needed)
 imageio-ffmpeg==0.5.1
-Pillow==12.2.0
+Pillow==12.3.0
 
 # ASGI Server
 uvicorn[standard]==0.27.0

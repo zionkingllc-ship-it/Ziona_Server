@@ -27,8 +27,8 @@ class _FakeStripeEvent:
 @pytest.mark.django_db
 def test_webhook_handles_stripeobject_without_get(settings):
     """A StripeObject has no .get(); the view must not 500 on api_version/livemode."""
-    settings.STRIPE_WEBHOOK_SECRET = "whsec_test"
-    settings.STRIPE_SECRET_KEY = "sk_test_x"
+    settings.STRIPE_WEBHOOK_SECRET = "whsec_test"  # pragma: allowlist secret
+    settings.STRIPE_SECRET_KEY = "sk_test_x"  # pragma: allowlist secret
 
     event = _FakeStripeEvent(
         {
