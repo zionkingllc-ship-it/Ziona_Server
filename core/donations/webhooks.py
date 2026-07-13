@@ -9,7 +9,7 @@ from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 
-from core.donations.hosted_services import HostedSupportService
+from core.donations.hosted_services import HostedSupportService, obj_get
 
 logger = logging.getLogger("core.donations.webhook")
 
@@ -38,8 +38,11 @@ def stripe_webhook(request: HttpRequest) -> JsonResponse:
 
     from core.donations.models import StripeWebhookEvent, StripeWebhookStatus
 
-    event_id = str(event["id"])
-    event_type = str(event["type"])
+    # construct_event returns a StripeObject (not a plain dict): it has no .get(),
+    # so event.get(...) raises AttributeError and 500s the webhook. obj_get reads
+    # both dict and StripeObject (dict.get / getattr), keeping this robust.
+    event_id = str(obj_get(event, "id", "") or "")
+    event_type = str(obj_get(event, "type", "") or "")
     try:
         event_payload = json.loads(payload.decode("utf-8"))
     except (UnicodeDecodeError, ValueError):
@@ -49,8 +52,8 @@ def stripe_webhook(request: HttpRequest) -> JsonResponse:
         stripe_event_id=event_id,
         defaults={
             "event_type": event_type,
-            "api_version": str(event.get("api_version") or ""),
-            "livemode": bool(event.get("livemode", False)),
+            "api_version": str(obj_get(event, "api_version", "") or ""),
+            "livemode": bool(obj_get(event, "livemode", False)),
             "payload": event_payload,
         },
     )

@@ -38,6 +38,7 @@ class ModerationActionChoice(models.TextChoices):
     WARN_USER = "warn_user", "Warn User"
     DELETE_CONTENT = "delete_content", "Delete Content"
     DELETE_AND_WARN = "delete_and_warn", "Delete and Warn"
+    RESTORE_CONTENT = "restore_content", "Restore Content"
 
 
 class Report(TimestampedModel):

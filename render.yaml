@@ -71,11 +71,13 @@ services:
       - key: STRIPE_MONTHLY_PRODUCT_ID
         sync: false
       - key: STRIPE_CHECKOUT_SUCCESS_URL
-        value: https://ziona-app-staging.netlify.app/support/success
+        # Frontend host (browser redirect target). checkout_success_url() appends
+        # ?checkoutSessionId={CHECKOUT_SESSION_ID} — keep the base URL only here.
+        value: https://staging.ziona.app/support/success
       - key: STRIPE_CHECKOUT_CANCEL_URL
-        value: https://ziona-app-staging.netlify.app/support
+        value: https://staging.ziona.app/support
       - key: STRIPE_PORTAL_RETURN_URL
-        value: https://ziona-app-staging.netlify.app/settings/support
+        value: https://staging.ziona.app/settings/support
       - key: STRIPE_PORTAL_LOGIN_URL
         sync: false
       - key: STRIPE_SUPPORT_MAX_AMOUNT_USD
@@ -86,9 +88,9 @@ services:
       # deliberately excluded so a prod build mistakenly pointed at staging
       # fails loudly instead of silently writing prod data with staging URLs.
       - key: CORS_ALLOWED_ORIGINS
-        value: https://ziona-app-staging.netlify.app,https://ziona-admin-dashboard-git-staging-zionking-llc.vercel.app,https://ziona-admin-dashboard.vercel.app,https://admin.staging.ziona.app,http://localhost:3000,http://localhost:8080
+        value: https://staging.ziona.app,https://ziona-admin-dashboard-git-staging-zionking-llc.vercel.app,https://ziona-admin-dashboard.vercel.app,https://admin.staging.ziona.app,http://localhost:3000,http://localhost:8080
       - key: GCS_CORS_ALLOWED_ORIGINS
-        value: https://ziona-app-staging.netlify.app,https://ziona-admin-dashboard-git-staging-zionking-llc.vercel.app,https://ziona-admin-dashboard.vercel.app,https://admin.staging.ziona.app,http://localhost:3000,http://localhost:8080
+        value: https://staging.ziona.app,https://ziona-admin-dashboard-git-staging-zionking-llc.vercel.app,https://ziona-admin-dashboard.vercel.app,https://admin.staging.ziona.app,http://localhost:3000,http://localhost:8080
       - key: GCP_STORAGE_BUCKET
         value: ziona-media-dev
       - key: MEDIA_STALE_UPLOAD_MINUTES
@@ -197,9 +199,11 @@ services:
       - key: STRIPE_MONTHLY_PRODUCT_ID
         sync: false
       - key: STRIPE_CHECKOUT_SUCCESS_URL
-        value: https://ziona.app/support/success
+        # Frontend host (browser redirect target). checkout_success_url() appends
+        # ?checkoutSessionId={CHECKOUT_SESSION_ID} — keep the base URL only here.
+        value: https://www.ziona.app/support/success
       - key: STRIPE_CHECKOUT_CANCEL_URL
-        value: https://ziona.app/support
+        value: https://www.ziona.app/support
       - key: STRIPE_PORTAL_RETURN_URL
         value: https://ziona.app/settings/support
       - key: STRIPE_PORTAL_LOGIN_URL

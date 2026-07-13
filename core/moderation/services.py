@@ -12,7 +12,7 @@ from django.db import IntegrityError
 from core.engagement.hidden_content import hide_comment_for_user, hide_post_for_user
 from core.moderation.models import ModerationActionChoice, Report, ReportReason, ReportStatus
 from core.shared.decorators import rate_limit
-from core.shared.exceptions import ErrorCode, ModerationError
+from core.shared.exceptions import EngagementError, ErrorCode, ModerationError
 
 logger = logging.getLogger("core.moderation")
 
@@ -353,11 +353,29 @@ def _apply_auto_hide(post_id: str | None, comment_id: str | None) -> None:
 def _hide_reported_content_for_reporter(
     *, reporter_id: str, post_id: str | None = None, comment_id: str | None = None
 ) -> None:
-    """Immediately suppress newly reported content for the reporting user only."""
-    if post_id:
-        hide_post_for_user(reporter_id, str(post_id))
-    elif comment_id:
-        hide_comment_for_user(reporter_id, str(comment_id))
+    """Best-effort per-viewer hide of freshly reported content.
+
+    The report itself is already recorded; hiding it for the reporter is a
+    convenience. If the target was concurrently soft-deleted (auto-hidden after
+    crossing the report threshold, or admin-hidden), the hide helper raises a
+    NOT_FOUND EngagementError — swallow it, since globally removed content is
+    already invisible to the reporter. This prevents a secondary hide failure
+    from turning a successful report into a request error.
+    """
+    try:
+        if post_id:
+            hide_post_for_user(reporter_id, str(post_id))
+        elif comment_id:
+            hide_comment_for_user(reporter_id, str(comment_id))
+    except EngagementError:
+        logger.info(
+            "reporter_hide_skipped_content_unavailable",
+            extra={
+                "reporter_id": reporter_id,
+                "post_id": post_id,
+                "comment_id": comment_id,
+            },
+        )
 
 
 def _execute_report_action(report: Report, action: str) -> None:

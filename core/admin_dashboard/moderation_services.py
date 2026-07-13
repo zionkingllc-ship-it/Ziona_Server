@@ -116,8 +116,12 @@ class AdminModerationService:
         """
         from core.moderation.models import ModerationActionChoice, Report, ReportStatus
 
-        # Validate action
-        valid_actions = [a.value for a in ModerationActionChoice]
+        # Validate action. RESTORE_CONTENT is intentionally excluded here: it is not
+        # a pending-report decision but a reversal of an already-actioned report,
+        # handled by the dedicated restore_content() method below.
+        valid_actions = [
+            a.value for a in ModerationActionChoice if a != ModerationActionChoice.RESTORE_CONTENT
+        ]
         if action not in valid_actions:
             raise AdminError(
                 message=f"Invalid action. Must be one of: {', '.join(valid_actions)}.",
@@ -187,6 +191,60 @@ class AdminModerationService:
 
         return {"success": True, "report": _report_to_dict(report)}
 
+    @staticmethod
+    @transaction.atomic
+    def restore_content(report_id: str, admin_user, ip_address: str = "") -> dict:
+        """Restore (un-hide) content that was previously hidden via moderation.
+
+        Reverses a ``hide_content`` action by clearing the target's ``deleted_at``.
+        Unlike review_report this accepts a report in any state, because a restore
+        follows an already-actioned report. Hard-deleted content cannot be
+        restored (its FK was nulled on delete), so there is nothing to bring back.
+
+        Raises:
+            AdminError: If the report is not found or has no hidden content to restore.
+        """
+        from core.moderation.models import ModerationActionChoice, Report, ReportStatus
+
+        report = Report.objects.select_for_update(of=("self",)).filter(id=report_id).first()
+
+        if not report:
+            raise AdminError(message="Report not found.", code=ErrorCode.REPORT_NOT_FOUND)
+
+        if not _restore_content(report):
+            raise AdminError(
+                message=(
+                    "No hidden content to restore for this report. It may have been "
+                    "permanently deleted or was never hidden."
+                ),
+                code=ErrorCode.VALIDATION_ERROR,
+            )
+
+        report.status = ReportStatus.DISMISSED
+        report.action = ModerationActionChoice.RESTORE_CONTENT
+        report.reviewed_by = admin_user
+        report.reviewed_at = datetime.now(timezone.utc)
+        report.save(update_fields=["status", "action", "reviewed_by", "reviewed_at", "updated_at"])
+
+        log_admin_action(
+            admin_user=admin_user,
+            action="CONTENT_RESTORED",
+            target_type="Report",
+            target_id=str(report.id),
+            details={
+                "target_type": report.target_type,
+                "target_id": str(report.target_id) if report.target_id else None,
+            },
+            ip_address=ip_address,
+        )
+
+        logger.info(
+            "content_restored",
+            extra={"report_id": report_id, "admin_id": str(admin_user.id)},
+        )
+
+        return {"success": True, "report": _report_to_dict(report)}
+
 
 # ─────────────────────────────────────────
 # Private helpers
@@ -231,6 +289,33 @@ def _moderate_content(report, hard_delete: bool = False):
             report.comment.deleted_at = now
             report.comment.save(update_fields=["deleted_at", "updated_at"])
         logger.info("moderated_comment", extra={"comment_id": str(report.comment_id)})
+
+
+def _restore_content(report) -> bool:
+    """Clear ``deleted_at`` on the report's soft-deleted post/comment.
+
+    Uses ``all_objects`` so the currently-hidden row is visible to the query.
+    Returns True if a hidden row was restored, False if there was nothing to
+    restore (not hidden, or hard-deleted so the FK id is null).
+    """
+    from core.engagement.models import Comment
+    from core.posts.models import Post
+
+    if report.post_id:
+        restored = Post.all_objects.filter(id=report.post_id, deleted_at__isnull=False).update(
+            deleted_at=None
+        )
+        if restored:
+            logger.info("restored_post", extra={"post_id": str(report.post_id)})
+            return True
+    elif report.comment_id:
+        restored = Comment.all_objects.filter(
+            id=report.comment_id, deleted_at__isnull=False
+        ).update(deleted_at=None)
+        if restored:
+            logger.info("restored_comment", extra={"comment_id": str(report.comment_id)})
+            return True
+    return False
 
 
 def _warn_content_owner(report, reason: str, admin_user, ip_address: str):

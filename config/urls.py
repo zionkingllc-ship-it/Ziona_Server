@@ -114,5 +114,29 @@ def custom_500_handler(request):
     )
 
 
+def custom_400_handler(request, exception=None):
+    """Return standardized JSON response for 400 bad requests.
+
+    Django raises SuspiciousOperation/DisallowedHost/BadRequest at its core
+    handler layer — before GlobalExceptionMiddleware runs — and would otherwise
+    render an HTML error page. API clients parse JSON, so an HTML body breaks
+    them (the "Unexpected character: <" failures). Returning JSON here keeps
+    every rejection parseable and debuggable. request.path is safe to read even
+    for DisallowedHost (it comes from PATH_INFO, not the Host header).
+    """
+    return JsonResponse(
+        {
+            "success": False,
+            "error": {
+                "code": "BAD_REQUEST",
+                "message": "Bad request",
+                "path": request.path,
+            },
+        },
+        status=400,
+    )
+
+
+handler400 = "config.urls.custom_400_handler"
 handler404 = "config.urls.custom_404_handler"
 handler500 = "config.urls.custom_500_handler"

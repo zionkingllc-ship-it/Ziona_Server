@@ -18,6 +18,11 @@ from core.shared.exceptions import AdminError, ErrorCode
 
 logger = logging.getLogger("core.donations")
 EARLY_SUPPORTER_LIMIT = 1000
+# Per-type minimum support amounts (USD). One-time support starts at $5, monthly
+# recurring support at $3, matching the product/UX contract.
+MIN_ONE_TIME_USD = Decimal("5.00")
+MIN_MONTHLY_USD = Decimal("3.00")
+# Absolute floor used as the default when no type-specific minimum is supplied.
 MIN_SUPPORT_AMOUNT_USD = Decimal("1.00")
 
 
@@ -62,15 +67,15 @@ def require_setting(name: str) -> str:
     return value
 
 
-def amount_to_cents(amount_usd: Any) -> int:
+def amount_to_cents(amount_usd: Any, *, minimum_usd: Decimal = MIN_SUPPORT_AMOUNT_USD) -> int:
     try:
         amount = Decimal(str(amount_usd)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
         maximum = Decimal(str(getattr(settings, "STRIPE_SUPPORT_MAX_AMOUNT_USD", "10000")))
     except (InvalidOperation, TypeError, ValueError) as exc:
         raise AdminError("Enter a valid support amount.", ErrorCode.VALIDATION_ERROR) from exc
-    if amount < MIN_SUPPORT_AMOUNT_USD or amount > maximum:
+    if amount < minimum_usd or amount > maximum:
         raise AdminError(
-            f"Support amount must be between USD {MIN_SUPPORT_AMOUNT_USD} and USD {maximum}.",
+            f"Support amount must be between USD {minimum_usd} and USD {maximum}.",
             ErrorCode.VALIDATION_ERROR,
         )
     return int(amount * 100)
@@ -83,7 +88,10 @@ def checkout_success_url() -> str:
     parts = urlsplit(url)
     query = parse_qsl(parts.query, keep_blank_values=True)
     query.append(("checkoutSessionId", "{CHECKOUT_SESSION_ID}"))
-    return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(query), parts.fragment))
+    # safe="{}" keeps the braces literal — Stripe only substitutes the token if
+    # it sees "{CHECKOUT_SESSION_ID}", not the percent-encoded "%7B...%7D".
+    encoded = urlencode(query, safe="{}")
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, encoded, parts.fragment))
 
 
 class HostedSupportService:
@@ -110,12 +118,12 @@ class HostedSupportService:
 
         if donation_type not in DonationType.values:
             raise AdminError("Unsupported support type.", ErrorCode.VALIDATION_ERROR)
+        is_monthly = donation_type == DonationType.MONTHLY
         product_setting = (
-            "STRIPE_MONTHLY_PRODUCT_ID"
-            if donation_type == DonationType.MONTHLY
-            else "STRIPE_ONE_TIME_PRODUCT_ID"
+            "STRIPE_MONTHLY_PRODUCT_ID" if is_monthly else "STRIPE_ONE_TIME_PRODUCT_ID"
         )
-        amount = amount_to_cents(amount_usd)
+        minimum_usd = MIN_MONTHLY_USD if is_monthly else MIN_ONE_TIME_USD
+        amount = amount_to_cents(amount_usd, minimum_usd=minimum_usd)
         resolved_email = (getattr(user, "email", "") or email).strip().lower()
         resolved_name = (
             name or getattr(user, "display_name", "") or getattr(user, "username", "")
@@ -552,6 +560,11 @@ class HostedSupportService:
         if not subscription_id:
             return None
         raw_status = str(obj_get(data, "status", SubscriptionStatus.INCOMPLETE))
+        # Stripe spells it "canceled" (one L); our enum uses "cancelled". Normalize
+        # so a cancellation isn't misfiled as INCOMPLETE (which would silently undo
+        # an admin cancel when customer.subscription.deleted arrives).
+        if raw_status == "canceled":
+            raw_status = SubscriptionStatus.CANCELLED
         status = (
             raw_status if raw_status in SubscriptionStatus.values else SubscriptionStatus.INCOMPLETE
         )

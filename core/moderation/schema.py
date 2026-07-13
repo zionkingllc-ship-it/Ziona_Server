@@ -120,7 +120,7 @@ class ModerationMutations:
         **Errors:** UNAUTHENTICATED, VALIDATION_ERROR native limits.
         """
         from core.moderation.services import ReportService
-        from core.shared.exceptions import ModerationError
+        from core.shared.exceptions import ZionaError
 
         user_id = _get_authenticated_user_id(info)
         if not user_id:
@@ -139,7 +139,13 @@ class ModerationMutations:
                 description=description,
             )
             return ReportPayload(success=True, report=_get_report_type(result["report_id"]))
-        except ModerationError as e:
+        except ZionaError as e:
+            # Catch the shared domain base (not just ModerationError): the service
+            # can also raise EngagementError — e.g. the rate-limit decorator, or a
+            # best-effort hide edge case — and an uncaught sibling would escape to a
+            # top-level GraphQL error, which the app renders as a generic
+            # "Something went wrong". Returning a structured payload keeps the
+            # client on the normal error path.
             return ReportPayload(
                 success=False,
                 message=e.message,
