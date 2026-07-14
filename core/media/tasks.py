@@ -9,6 +9,7 @@ from pathlib import Path
 
 from billiard.exceptions import SoftTimeLimitExceeded
 from celery import chain, shared_task
+from django.apps import apps
 from django.conf import settings
 from django.db import DatabaseError
 from django.utils import timezone
@@ -16,6 +17,7 @@ from google.api_core import exceptions as gcs_exceptions
 from PIL import UnidentifiedImageError
 
 from core.media.models import MediaFile, MediaStatus, MediaType
+from core.shared.utils import normalize_url
 
 logger = logging.getLogger("core.media")
 
@@ -194,6 +196,81 @@ def finalize_media_ready(self, media_id: str) -> str | None:
     return str(media_file.id)
 
 
+# Every model field that stores a GCS media URL as a bare string (NOT an FK to
+# MediaFile). The stale-media cleanup treats an object referenced by any of these
+# as in-use and must never delete it. Verified against the models — keep in sync:
+# add a new (app_label, model, [fields]) row whenever a model gains a media-URL
+# string field, or the cleanup could delete that feature's live images.
+_REFERENCING_FIELDS: list[tuple[str, str, list[str]]] = [
+    ("circles", "Circle", ["cover_image", "profile_image_url", "banner_image"]),
+    (
+        "circles",
+        "Anchor",
+        [
+            "media_url",
+            "anchor_image",
+            "anchor_video",
+            "anchor_thumbnail",
+            "background_image",
+            "preview_url",
+        ],
+    ),
+    ("circles", "AnchorPage", ["media_url"]),
+    ("circles", "AnchorResponse", ["media_url"]),
+    ("circles", "CirclePost", ["image_url", "media_url"]),
+    ("posts", "PostMedia", ["media_url", "thumbnail_url"]),
+    ("users", "User", ["avatar_url"]),
+    ("categories", "Category", ["icon"]),
+    ("engagement", "BookmarkFolder", ["thumbnail_url"]),
+]
+
+
+def _public_url(storage_path: str) -> str:
+    """Canonical GCS public URL for an object key.
+
+    Matches both what content stores (built in media/services.py) and what
+    MediaFile.url returns; normalize_url is a no-op for a clean single-prefix URL.
+    """
+    return normalize_url(
+        f"https://storage.googleapis.com/{settings.GCP_STORAGE_BUCKET}/{storage_path}"
+    )
+
+
+def _resolve_referenced_object_strings(candidates: list[MediaFile]) -> set[str]:
+    """Return the storage-path/URL strings (among ``candidates``) still referenced
+    by live content or by another MediaFile row (twin-blob), via a small fixed
+    number of bulk queries. A candidate is in use if its object key OR its public
+    URL appears in the returned set.
+    """
+    keys = {m.storage_path for m in candidates if m.storage_path}
+    if not keys:
+        return set()
+    urls = {_public_url(k) for k in keys}
+    candidate_ids = [m.id for m in candidates]
+    referenced: set[str] = set()
+
+    # Twin-blob: a *different* MediaFile row (e.g. a READY `media_urls` row whose
+    # storage_path is the full URL) points at the same physical object.
+    referenced.update(
+        MediaFile.objects.filter(storage_path__in=(keys | urls))
+        .exclude(id__in=candidate_ids)
+        .values_list("storage_path", flat=True)
+    )
+
+    # Content models that store a bare GCS media URL string.
+    for app_label, model_name, fields in _REFERENCING_FIELDS:
+        try:
+            model = apps.get_model(app_label, model_name)
+        except LookupError:  # model/app renamed — skip rather than crash the cron
+            logger.warning("stale_cleanup_unknown_model", extra={"model": model_name})
+            continue
+        for field in fields:
+            referenced.update(
+                model.objects.filter(**{f"{field}__in": urls}).values_list(field, flat=True)
+            )
+    return referenced
+
+
 @shared_task(
     bind=True,
     max_retries=1,
@@ -202,7 +279,13 @@ def finalize_media_ready(self, media_id: str) -> str | None:
     time_limit=180,
 )
 def cleanup_stale_media_uploads(self) -> int:
-    """Mark stale unprocessed media failed and remove abandoned GCS objects."""
+    """Remove abandoned GCS uploads — but never a blob still referenced by content.
+
+    Selects stale PENDING/PROCESSING media. For each, if its object is still
+    referenced by live content (or another MediaFile row), it is left in GCS and
+    the row is self-healed to READY (so it drops out of future batches). Only
+    genuinely unreferenced objects have their blob deleted and row marked FAILED.
+    """
     stale_minutes = _media_setting("MEDIA_STALE_UPLOAD_MINUTES", 15)
     cutoff = timezone.now() - timezone.timedelta(minutes=stale_minutes)
     stale_media = list(
@@ -211,13 +294,30 @@ def cleanup_stale_media_uploads(self) -> int:
             updated_at__lt=cutoff,
         )[:250]
     )
+    if not stale_media:
+        return 0
+
     deleted = 0
+    healed = 0
     try:
+        referenced = _resolve_referenced_object_strings(stale_media)
         bucket = _get_gcs_bucket()
         for media_file in stale_media:
-            if media_file.storage_path:
+            key = media_file.storage_path
+            in_use = bool(key) and (key in referenced or _public_url(key) in referenced)
+
+            if in_use:
+                # Referenced by live content — protect the object and self-heal the
+                # row so it is excluded from future cleanup batches.
+                if media_file.status != MediaStatus.READY:
+                    media_file.status = MediaStatus.READY
+                    media_file.save(update_fields=["status", "updated_at"])
+                healed += 1
+                continue
+
+            if key:
                 try:
-                    bucket.blob(media_file.storage_path).delete()
+                    bucket.blob(key).delete()
                     deleted += 1
                 except Exception as exc:  # noqa: BLE001
                     logger.warning(
@@ -234,7 +334,8 @@ def cleanup_stale_media_uploads(self) -> int:
         raise self.retry(exc=exc) from exc
 
     logger.info(
-        "stale_media_cleanup_complete", extra={"count": len(stale_media), "deleted": deleted}
+        "stale_media_cleanup_complete",
+        extra={"count": len(stale_media), "deleted": deleted, "healed": healed},
     )
     return len(stale_media)
 
