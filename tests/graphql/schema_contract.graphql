@@ -1,0 +1,2323 @@
+type AccountDetails {
+  accountStatus: String!
+  location: String!
+  memberSince: String!
+  memberSinceDate: String!
+}
+
+type AccountDetailsPayload {
+  accountDetails: AccountDetails
+  error: ErrorType
+  success: Boolean!
+}
+
+type ActivityType {
+  action: String!
+  adminName: String!
+  createdAt: String!
+  description: String!
+  id: String!
+  targetId: String!
+  targetType: String!
+}
+
+type AddPasswordPayload {
+  error: ErrorType
+
+  """Specific error code if operation failed (e.g. UNAUTHENTICATED)"""
+  errorCode: String
+
+  """Success or error message"""
+  message: String
+
+  """Whether the password was added successfully"""
+  success: Boolean!
+
+  """The updated user data"""
+  user: AuthenticatedUserType
+}
+
+type AdminAnalyticsType {
+  cacheTtlSeconds: Int!
+  contentHealth: ChartDataType!
+  engagementMetrics: ChartDataType!
+  lastUpdated: String!
+  userGrowth: ChartDataType!
+}
+
+type AdminAnchorPayload {
+  anchor: AdminAnchorType
+  error: ErrorType
+  success: Boolean!
+}
+
+type AdminAnchorType {
+  anchorImage: String!
+  anchorStatus: String!
+  anchorThumbnail: String!
+  anchorType: String!
+  anchorVideo: String!
+  authorName: String!
+  circleId: String!
+  content: String!
+  createdAt: String!
+  expiresAt: String
+  id: String!
+  mediaUrl: String!
+  postedAt: String
+  previewUrl: String
+  publishedAt: String
+  scheduledFor: String
+  scriptureBook: String!
+  scriptureChapter: Int
+  scriptureText: String!
+  scriptureTranslation: String!
+  scriptureVerseEnd: Int
+  scriptureVerseStart: Int
+  styleData: JSON!
+  title: String!
+}
+
+type AdminAnchorsPaginatedType {
+  anchors: [AdminAnchorType!]!
+  page: Int!
+  pageSize: Int!
+  totalCount: Int!
+  totalPages: Int!
+}
+
+type AdminCirclePayload {
+  circle: AdminCircleType
+  error: ErrorType
+  success: Boolean!
+}
+
+type AdminCircleStatsPayload {
+  error: ErrorType
+  stats: AdminCircleStatsType
+  success: Boolean!
+}
+
+type AdminCircleStatsType {
+  anchorCount: Int!
+  engagement: MetricCardType!
+  memberCount: Int!
+}
+
+type AdminCircleType {
+  bannerImage: String!
+  canEdit: Boolean!
+  cooldownRemainingDays: Int!
+  coverImage: String!
+  createdAt: String!
+  createdByName: String!
+  description: String!
+  id: String!
+  isActive: Boolean!
+  lastEditedAt: String
+  memberCount: Int!
+  name: String!
+  profileImageUrl: String!
+  status: String!
+}
+
+type AdminCirclesPaginatedType {
+  circles: [AdminCircleType!]!
+  page: Int!
+  pageSize: Int!
+  summary: CircleSummaryType!
+  totalCount: Int!
+  totalPages: Int!
+}
+
+type AdminContactPayload {
+  contact: AdminContactType
+  error: ErrorType
+  success: Boolean!
+}
+
+type AdminContactReplyPayload {
+  contact: AdminContactType
+  error: ErrorType
+  success: Boolean!
+}
+
+type AdminContactType {
+  brand: String!
+  createdAt: String!
+  email: String!
+  id: String!
+  lastMessageAt: String
+  message: String!
+  name: String!
+  repliedAt: String
+  replies: [ContactReplyType!]!
+  requesterUsername: String!
+  source: String!
+  status: String!
+  topic: String!
+  updatedAt: String!
+}
+
+type AdminContactsPaginatedType {
+  contacts: [AdminContactType!]!
+  page: Int!
+  pageSize: Int!
+  summary: ContactSummaryType!
+  totalCount: Int!
+  totalPages: Int!
+}
+
+type AdminDashboardType {
+  cacheTtlSeconds: Int!
+  contentHealth: [ContentHealthItemType!]!
+  engagement: MetricCardType!
+  lastUpdated: String!
+  pendingReports: MetricCardType!
+  postsToday: MetricCardType!
+  statistics: StatisticsType!
+  totalUsers: MetricCardType!
+}
+
+type AdminDonationType {
+  amount: String!
+  amountCents: Int!
+  completedAt: String
+  createdAt: String!
+  currency: String!
+  donationType: String!
+  donorEmail: String!
+  donorName: String!
+  id: String!
+  isEarlySupporter: Boolean!
+  status: String!
+}
+
+type AdminDonationsPaginatedType {
+  donations: [AdminDonationType!]!
+  page: Int!
+  pageSize: Int!
+  totalCount: Int!
+  totalPages: Int!
+}
+
+type AdminLoginPayload {
+  accessToken: String
+  error: ErrorType
+  message: String
+  refreshToken: String
+  success: Boolean!
+}
+
+type AdminReportMediaType {
+  mediaType: String!
+  order: Int!
+  thumbnailUrl: String!
+  url: String!
+}
+
+type AdminReportReviewPayload {
+  error: ErrorType
+  report: AdminReportType
+  success: Boolean!
+}
+
+type AdminReportType {
+  action: String!
+  commentId: String
+  contentMedia: [AdminReportMediaType!]!
+  contentMediaType: String!
+  contentMediaUrl: String!
+  contentOwner: String!
+  contentPreview: String!
+  contentThumbnailUrl: String!
+  createdAt: String!
+  description: String!
+  id: String!
+  internalNotes: String!
+  postId: String
+  reason: String!
+  reporter: ReporterType
+  reviewedAt: String
+  reviewedByName: String!
+  status: String!
+  targetId: String
+  targetType: String!
+}
+
+type AdminReportsPaginatedType {
+  page: Int!
+  pageSize: Int!
+  reports: [AdminReportType!]!
+  summary: ReportSummaryType!
+  totalCount: Int!
+  totalPages: Int!
+}
+
+type AdminSubscriptionPayload {
+  error: ErrorType
+  subscription: AdminSupportSubscriptionType
+  success: Boolean!
+}
+
+type AdminSubscriptionsPaginatedType {
+  page: Int!
+  pageSize: Int!
+  subscriptions: [AdminSupportSubscriptionType!]!
+  totalCount: Int!
+  totalPages: Int!
+}
+
+type AdminSupportOverviewType {
+  activeSubscriptions: Int!
+  failedPayments: Int!
+  mrr: String!
+  mrrCents: Int!
+  totalRaised: String!
+  totalRaisedCents: Int!
+  uniqueSupporters: Int!
+}
+
+type AdminSupportPaymentType {
+  amount: String!
+  amountCents: Int!
+  createdAt: String!
+  currency: String!
+  failureMessage: String!
+  id: String!
+  kind: String!
+  paidAt: String
+  status: String!
+  supporterEmail: String!
+  supporterName: String!
+}
+
+type AdminSupportPaymentsPaginatedType {
+  page: Int!
+  pageSize: Int!
+  payments: [AdminSupportPaymentType!]!
+  totalCount: Int!
+  totalPages: Int!
+}
+
+type AdminSupportSubscriptionType {
+  amount: String!
+  amountCents: Int!
+  cancelAtPeriodEnd: Boolean!
+  cancelledAt: String
+  createdAt: String!
+  currency: String!
+  currentPeriodEnd: String
+  id: String!
+  status: String!
+  stripeSubscriptionId: String!
+  supporterEmail: String!
+  supporterName: String!
+}
+
+type AdminUserType {
+  accountState: String!
+  availableActions: [String!]!
+  avatarUrl: String!
+  bio: String!
+  createdAt: String!
+  deletedAt: String
+  deletionRequestedAt: String
+  deletionScheduledFor: String
+  deletionStatus: String
+  email: String!
+  fullName: String!
+  id: String!
+  isActive: Boolean!
+  isEmailVerified: Boolean!
+  lastLogin: String
+  lifecycleState: String!
+  postsCount: Int!
+  role: String!
+  status: String!
+  submittedReports: Int!
+  suspendedAt: String
+  suspensionReason: String!
+  username: String!
+  warnedAt: String
+}
+
+type AdminUsersPaginatedType {
+  page: Int!
+  pageSize: Int!
+  summary: UserSummaryType!
+  totalCount: Int!
+  totalPages: Int!
+  users: [AdminUserType!]!
+}
+
+type AnchorEngagementPayload {
+  anchorLikedCount: Int
+  error: ErrorType
+  liked: Boolean
+  prayed: Boolean
+  prayedCount: Int
+  success: Boolean!
+}
+
+type AnchorPageType {
+  content: String!
+  mediaUrl: String!
+  pageNumber: Int!
+  title: String!
+}
+
+type AnchorResponsePayload {
+  error: ErrorType
+  response: AnchorResponseType
+  success: Boolean!
+}
+
+type AnchorResponseReactionType {
+  createdAt: DateTime!
+  id: String!
+  reactionType: String!
+  user: UserType!
+}
+
+type AnchorResponseType {
+  author: UserType!
+  content: String!
+  createdAt: DateTime!
+  id: String!
+  mediaType: String
+  mediaUrl: String
+  reactionCount: Int!
+  replyCount: Int!
+  responseType: String!
+  viewerReactionType: String
+}
+
+type AnchorType {
+  anchorDate: String!
+  anchorImage: String
+  anchorImageText: String
+  anchorLikedCount: Int!
+  anchorText: String
+  anchorThumbnail: String
+  anchorType: String!
+  anchorVerse: String
+  anchorVideo: String
+  author: UserType
+  backgroundColors: [String!]
+  backgroundImage: String
+  bibleReference: String
+  bibleText: String
+  content: String!
+  createdAt: DateTime!
+  date: String!
+  expiresAt: DateTime!
+  id: String!
+  isActive: Boolean!
+  isExpired: Boolean!
+  likedImage: Int
+  mediaUrl: String
+  pages: [AnchorPageType!]!
+  prayedCount: Int!
+  publishedAt: DateTime!
+  responseCount: Int!
+  scripture: String
+  scriptureReference: ScriptureReference
+  timeRemaining: String!
+  title: String!
+  type: String!
+  viewerState: AnchorViewerState
+}
+
+type AnchorViewerState {
+  liked: Boolean!
+  prayed: Boolean!
+}
+
+type AppLinksType {
+  androidUrl: String
+  iosUrl: String
+}
+
+type AuthPayload {
+  """JWT access token (valid for 24 hours)"""
+  accessToken: String
+  accessTokenExpiresAt: String
+  accessTokenExpiresIn: Int
+  deletionScheduledFor: String
+  error: ErrorType
+
+  """Specific error code if operation failed (e.g. INVALID_CREDENTIALS)"""
+  errorCode: String
+
+  """Success or error message"""
+  message: String
+  recoveryReason: String
+  recoveryToken: String
+
+  """JWT refresh token (valid for 30 days)"""
+  refreshToken: String
+  refreshTokenExpiresAt: String
+  refreshTokenExpiresIn: Int
+  requiresAccountRecovery: Boolean!
+
+  """
+  Whether the user must complete email verification before tokens are issued
+  """
+  requiresVerification: Boolean!
+
+  """Whether the authentication operation was successful"""
+  success: Boolean!
+
+  """The authenticated user data"""
+  user: AuthenticatedUserType
+}
+
+type AuthenticatedUserType {
+  avatarUrl: String!
+  bio: String!
+  bioLink: String
+  createdAt: String!
+  email: String!
+  fullName: String!
+  id: String!
+  isEarlySupporter: Boolean!
+  isEmailVerified: Boolean!
+  location: String!
+  needsUsernameSelection: Boolean!
+  role: String!
+  username: String
+}
+
+type BibleBook {
+  """Volume capacity Cap"""
+  chapters: Int!
+
+  """Full label ('Genesis')"""
+  name: String!
+
+  """URL safe ('genesis')"""
+  slug: String!
+}
+
+type BibleVersion {
+  """Display tag ('KJV')"""
+  abbreviation: String!
+
+  """Short code ('kjv')"""
+  code: String!
+
+  """Public domain flag"""
+  free: Boolean!
+
+  """ISO Code ('eng')"""
+  language: String!
+
+  """Full text name ('King James Version')"""
+  name: String!
+
+  """Coverage bounds ('complete', 'nt')"""
+  scope: String!
+}
+
+type BookmarkFolderPayload {
+  error: ErrorType
+  errorCode: String
+  folder: BookmarkFolderType
+  message: String
+  success: Boolean!
+}
+
+type BookmarkFolderType {
+  createdAt: String!
+  id: String!
+  name: String!
+  savedCount: Int!
+  thumbnailUrl: String
+}
+
+type BulkRemovePayload {
+  error: ErrorType
+  errorCode: String
+  message: String
+  removedCount: Int!
+  success: Boolean!
+}
+
+type CancelPayload {
+  error: ErrorType
+  success: Boolean!
+}
+
+type CategoryType {
+  bdColor: String!
+  bgColor: String!
+  icon: String!
+  id: String!
+  label: String!
+  order: Int
+  slug: String!
+  textPostBg: String
+}
+
+type ChangePasswordPayload {
+  error: ErrorType
+
+  """Specific error code if operation failed (e.g. INVALID_CREDENTIALS)"""
+  errorCode: String
+
+  """Success or error message"""
+  message: String
+
+  """Number of other device sessions terminated"""
+  signedOutDevices: Int!
+
+  """Whether the password change was successful"""
+  success: Boolean!
+}
+
+type ChartDataType {
+  datasets: [DatasetType!]!
+  labels: [String!]!
+  summary: JSON!
+}
+
+type CircleFeedDataType {
+  activeAnchor: AnchorType
+  anchorDates: [String!]!
+  bannerImage: String
+  coverImage: String
+  description: String!
+  isJoined: Boolean!
+  memberAvatars: [String!]!
+  memberCount: Int!
+  name: String!
+  pastAnchors: [AnchorType!]!
+  posts: [CirclePostType!]!
+  profileImage: String
+  rules: [CircleRule!]!
+  suggestionCardImage: String
+}
+
+type CircleFeedResponse {
+  pageInfo: PageInfo!
+  posts: [CirclePostType!]!
+}
+
+type CircleMemberType {
+  avatarUrl: String!
+  email: String!
+  fullName: String!
+  id: String!
+  isActive: Boolean!
+  joinedAt: String!
+  username: String!
+}
+
+type CircleMembersPaginatedType {
+  members: [CircleMemberType!]!
+  page: Int!
+  pageSize: Int!
+  totalCount: Int!
+  totalPages: Int!
+}
+
+type CirclePostAuthorType {
+  avatar: String
+  avatarUrl: String
+  id: String!
+  name: String
+  username: String
+}
+
+type CirclePostCommentLikePayload {
+  error: ErrorType
+  liked: Boolean
+  likesCount: Int
+  success: Boolean!
+}
+
+type CirclePostCommentPayload {
+  comment: CirclePostCommentType
+  error: ErrorType
+  success: Boolean!
+}
+
+type CirclePostCommentType {
+  author: CirclePostAuthorType!
+  createdAt: DateTime!
+  id: String!
+  likesCount: Int!
+  text: String!
+  updatedAt: DateTime!
+  viewerState: CirclePostCommentViewerState!
+}
+
+type CirclePostCommentViewerState {
+  liked: Boolean!
+}
+
+type CirclePostCommentsResponse {
+  comments: [CirclePostCommentType!]!
+  pageInfo: PageInfo!
+}
+
+type CirclePostEngagementPayload {
+  error: ErrorType
+  prayed: Boolean
+  prayedCount: Int
+  success: Boolean!
+}
+
+enum CirclePostFilterEnum {
+  NEW
+  TRENDING
+  VIEWER_POSTS
+}
+
+type CirclePostType {
+  anchorLikedCount: Int!
+  comments: Int!
+  commentsCount: Int!
+  createdAt: DateTime!
+  id: String!
+
+  """Image data array mapping"""
+  image: ImageData
+  likeCount: Int!
+  likedImage: Int
+  likes: Int!
+  likesCount: Int!
+  media: [MediaFileType!]!
+  mediaType: String
+  mediaUrl: String
+  prayedCount: Int!
+  savedCount: Int!
+  sharedCount: Int!
+  text: String
+  user: CirclePostAuthorType!
+
+  """Video metadata mapping"""
+  video: VideoData
+  viewerState: CirclePostViewerState
+}
+
+type CirclePostViewerState {
+  liked: Boolean!
+  prayed: Boolean!
+}
+
+type CircleReportPayload {
+  error: ErrorType
+  success: Boolean!
+}
+
+type CircleRule {
+  description: String!
+  id: Int!
+  ruleNumber: Int!
+  title: String!
+}
+
+type CircleSummaryType {
+  active: Int!
+  inactive: Int!
+  total: Int!
+}
+
+type CircleType {
+  activeAnchor: AnchorType
+  anchorDates: [String!]!
+  avatars: [String!]!
+  bannerImage: String
+  coverImage: String!
+  createdAt: DateTime!
+  description: String!
+  id: String!
+  image: String!
+  isJoined: Boolean!
+  isSubscribed: Boolean!
+  memberAvatars: [String!]!
+  memberCount: Int!
+  memberPreviews: [UserType!]!
+  members: Int!
+  name: String!
+  profileImage: String
+  rules: [CircleRule!]!
+  suggestionCardImage: String!
+  title: String!
+}
+
+type CommentAuthor {
+  avatarUrl: String
+  id: String!
+  username: String!
+}
+
+type CommentPayload {
+  comment: CommentType
+  error: ErrorType
+  errorCode: String
+  message: String
+  stats: PostStats
+  success: Boolean!
+}
+
+type CommentStats {
+  likesCount: Int!
+  repliesCount: Int!
+}
+
+type CommentType {
+  createdAt: String!
+  id: String!
+  parentCommentId: String
+  postId: String!
+  replies: [CommentType!]!
+  stats: CommentStats!
+  text: String!
+  user: CommentAuthor!
+  viewerState: CommentViewerState
+}
+
+type CommentViewerState {
+  isOwner: Boolean!
+  liked: Boolean!
+}
+
+type CommentsResponse {
+  comments: [CommentType!]!
+  hasMore: Boolean!
+  nextCursor: String
+  totalCount: Int!
+}
+
+type CompanyStatsType {
+  activeUsers: String!
+  downloads: String!
+  lastUpdated: String!
+}
+
+enum ContactBrand {
+  ZIONA
+  ZIONKING
+}
+
+type ContactPayload {
+  error: ErrorType
+  success: Boolean!
+  ticketId: String
+}
+
+type ContactReplyType {
+  id: String!
+  message: String!
+  senderType: String!
+  sentAt: String!
+  sentByName: String!
+}
+
+type ContactSummaryType {
+  inProgress: Int!
+  pending: Int!
+  resolved: Int!
+  total: Int!
+}
+
+type ContentHealthItemType {
+  color: String!
+  label: String!
+  percentage: Float!
+  value: Int!
+}
+
+type CreateAnchorPayload {
+  anchor: AnchorType
+  error: ErrorType
+  success: Boolean!
+}
+
+type CreateCirclePostPayload {
+  error: ErrorType
+  post: CirclePostType
+  success: Boolean!
+}
+
+type CreatePostPayload {
+  """Explicit error info"""
+  error: ErrorType
+
+  """The resulting post"""
+  post: Post
+
+  """Whether the mutation succeeded"""
+  success: Boolean!
+}
+
+type CurrentUserResponse {
+  accountDetails: AccountDetails!
+  createdAt: String!
+  displayName: String
+  email: String!
+  hasPassword: Boolean!
+  hideLikeCount: Boolean!
+  id: ID!
+  isEarlySupporter: Boolean!
+  isEmailVerified: Boolean!
+  lastNameChange: String
+  lastUsernameChange: String
+  profile: UserProfileType!
+  stats: ProfileStatsType!
+  username: String!
+}
+
+type DatasetType {
+  data: [Int!]!
+  label: String!
+}
+
+"""Date with time (isoformat)"""
+scalar DateTime
+
+type DebugPushTokenResult {
+  errorCode: String
+  errorMessage: String
+  isActive: Boolean!
+  messageId: String
+  platform: String!
+  success: Boolean!
+  tokenKind: String!
+  tokenPreview: String!
+}
+
+type DebugSendPushPayload {
+  error: ErrorType
+  failureCount: Int!
+  projectId: String!
+  results: [DebugPushTokenResult!]!
+  success: Boolean!
+  successCount: Int!
+  tokensTried: Int!
+}
+
+type DeleteFolderPayload {
+  error: ErrorType
+  errorCode: String
+  message: String
+  movedPostsCount: Int!
+  success: Boolean!
+}
+
+type DonationConfirmationType {
+  amount: String!
+  createdAt: String!
+  donorName: String!
+  type: String!
+}
+
+type DonationPayload {
+  clientSecret: String
+  error: ErrorType
+  success: Boolean!
+  transactionId: String
+}
+
+enum DonationTypeEnum {
+  MONTHLY
+  ONE_TIME
+}
+
+type EmptyState {
+  message: String!
+  suggestions: [UserSuggestion!]!
+}
+
+type ErrorType {
+  code: String!
+  details: JSON
+  field: String
+  message: String!
+}
+
+type FeedPost {
+  author: FeedPostAuthor!
+
+  """Caption/note attached to a BIBLE post. Null for TEXT and MEDIA posts."""
+  bibleMessage: String
+
+  """Caption for MEDIA posts. Null for TEXT and BIBLE posts."""
+  caption: String
+
+  """Full category object natively"""
+  category: CategoryType
+  createdAt: String!
+  id: String!
+
+  """Image data array mapping"""
+  image: ImageData
+
+  """Primary flat media type: image, video, or null."""
+  mediaType: String
+
+  """Primary flat media URL for image/video posts."""
+  mediaUrl: String
+  savedInFolders: [BookmarkFolderType!]
+  scripture: FeedPostScripture
+  shareUrl: String!
+  stats: FeedPostStats!
+
+  """Content body for TEXT posts only. Null for MEDIA and BIBLE posts."""
+  textMessage: String
+  type: PostType!
+
+  """Video metadata mapping"""
+  video: VideoData
+  viewerState: FeedViewerState
+}
+
+type FeedPostAuthor {
+  avatarUrl: String
+  id: String!
+  username: String!
+}
+
+type FeedPostScripture {
+  book: String!
+  chapter: Int!
+  reference: String!
+  text: String!
+  translation: String!
+  verseEnd: Int
+  verseStart: Int!
+  verses: [ScriptureVerse!]!
+}
+
+type FeedPostStats {
+  commentsCount: String!
+  likesCount: String!
+  savesCount: String!
+  sharesCount: String!
+}
+
+type FeedResponse {
+  emptyState: EmptyState
+  hasMore: Boolean!
+  nextCursor: String
+  posts: [FeedPost!]!
+}
+
+type FeedViewerState {
+  followedByAuthor: Boolean!
+  followingAuthor: Boolean!
+  isOwner: Boolean!
+  liked: Boolean!
+  saved: Boolean!
+}
+
+type FollowListResponse {
+  """Scrolling bounds limit tracking flag"""
+  hasMore: Boolean!
+
+  """Passed backwards safely"""
+  nextCursor: String
+
+  """Directly resolved mapping array of users"""
+  users: [FollowUserType!]!
+}
+
+type FollowPayload {
+  """Explicit error object"""
+  error: ErrorType
+
+  """Detailed failure string identifier"""
+  errorCode: String
+
+  """The new resultant state boolean flag natively"""
+  following: Boolean!
+
+  """Detailed logging message or success"""
+  message: String
+
+  """Updated profile stats"""
+  stats: ProfileStatsType
+
+  """Whether the state change persisted"""
+  success: Boolean!
+}
+
+type FollowUserType {
+  avatarUrl: String
+  id: String!
+  isFollowing: Boolean!
+  username: String!
+}
+
+type FriendType {
+  avatarUrl: String
+  fullName: String!
+  id: String!
+  username: String!
+}
+
+type GoogleOAuthPayload {
+  """JWT access token"""
+  accessToken: String
+  accessTokenExpiresAt: String
+  accessTokenExpiresIn: Int
+  deletionScheduledFor: String
+  error: ErrorType
+
+  """Specific error code"""
+  errorCode: String
+
+  """True if a new account was created"""
+  isNewUser: Boolean!
+
+  """Success or error message"""
+  message: String
+  recoveryReason: String
+  recoveryToken: String
+
+  """JWT refresh token"""
+  refreshToken: String
+  refreshTokenExpiresAt: String
+  refreshTokenExpiresIn: Int
+  requiresAccountRecovery: Boolean!
+
+  """Whether the authentication was successful"""
+  success: Boolean!
+
+  """The authenticated user data"""
+  user: AuthenticatedUserType
+}
+
+type HelpArticleType {
+  categorySlug: String!
+  categoryTitle: String!
+  content: String!
+  id: String!
+  slug: String!
+  summary: String!
+  title: String!
+}
+
+type HelpCategoryType {
+  articleCount: Int!
+  articles: [HelpArticleType!]!
+  description: String!
+  id: String!
+  slug: String!
+  title: String!
+}
+
+type HelpConversationMessageType {
+  id: String!
+  message: String!
+  senderName: String!
+  senderType: String!
+  sentAt: String!
+}
+
+type HelpConversationMessagesPageType {
+  hasMore: Boolean!
+  messages: [HelpConversationMessageType!]!
+  nextCursor: String
+}
+
+type HelpConversationPayload {
+  contact: HelpConversationType
+  error: ErrorType
+  success: Boolean!
+}
+
+type HelpConversationType {
+  createdAt: String!
+  id: String!
+  lastMessageAt: String
+  latestMessage: HelpConversationMessageType
+  messages: [HelpConversationMessageType!]!
+  repliedAt: String
+  status: String!
+  topic: String!
+  updatedAt: String!
+}
+
+type HiddenPostsResponse {
+  hasMore: Boolean!
+  nextCursor: String
+  posts: [FeedPost!]!
+}
+
+type HidePostPayload {
+  error: ErrorType
+  errorCode: String
+  message: String
+  success: Boolean!
+}
+
+type ImageData {
+  items: [MediaFileType!]!
+}
+
+"""
+The `JSON` scalar type represents JSON values as specified by [ECMA-404](https://ecma-international.org/wp-content/uploads/ECMA-404_2nd_edition_december_2017.pdf).
+"""
+scalar JSON @specifiedBy(url: "https://ecma-international.org/wp-content/uploads/ECMA-404_2nd_edition_december_2017.pdf")
+
+type JoinCirclePayload {
+  circle: CircleType
+  error: ErrorType
+  success: Boolean!
+}
+
+type LegalDocumentPayload {
+  document: LegalDocumentType
+  error: ErrorType
+  success: Boolean!
+}
+
+type LegalDocumentType {
+  content: String!
+  documentType: String!
+  documentUrl: String!
+  lastUpdated: String!
+  version: String!
+}
+
+enum LegalDocumentTypeEnum {
+  COMMUNITY_GUIDELINES
+  PRIVACY_POLICY
+  TERMS_OF_SERVICE
+}
+
+type LikeCirclePostPayload {
+  error: ErrorType
+  liked: Boolean
+  likesCount: Int
+  success: Boolean!
+}
+
+type LikePayload {
+  commentStats: CommentStats
+  error: ErrorType
+  errorCode: String
+  liked: Boolean!
+  message: String
+  stats: PostStats
+  success: Boolean!
+}
+
+type MediaFileType {
+  duration: Int
+  height: Int
+  id: String!
+  thumbnailUrl: String
+  type: MediaType!
+  url: String!
+  width: Int
+}
+
+type MediaStatusPayload {
+  error: ErrorType
+  mediaId: String
+  mediaUrl: String
+  status: String
+  success: Boolean!
+  thumbnailUrl: String
+}
+
+enum MediaType {
+  IMAGE
+  VIDEO
+}
+
+type MediaUploadPayload {
+  error: ErrorType
+  expiresIn: Int
+  mediaId: String
+  mediaUrl: String
+  status: String
+  success: Boolean!
+  uploadUrl: String
+}
+
+type MetricCardType {
+  change: Float!
+  label: String!
+  value: Int!
+}
+
+type ModerationActionPayload {
+  error: ErrorType
+  success: Boolean!
+  user: AdminUserType
+}
+
+type Mutation {
+  """
+  Add password to OAuth-only account. Allows Google sign-in users to also login with password. Only works if user doesn't already have password.
+  """
+  addPassword(password: String!): AddPasswordPayload!
+
+  """Activate a circle."""
+  adminActivateCircle(circleId: String!): AdminCirclePayload!
+
+  """Cancel a scheduled anchor."""
+  adminCancelScheduledAnchor(anchorId: String!): AdminAnchorPayload!
+
+  """Cancel a supporter's subscription (immediate) and record it."""
+  adminCancelSubscription(subscriptionId: String!): AdminSubscriptionPayload!
+  adminCancelSupportSubscription(subscriptionId: String!): CancelPayload!
+
+  """Create a draft anchor."""
+  adminCreateAnchor(anchorImage: String! = "", anchorThumbnail: String! = "", anchorType: String!, anchorVideo: String! = "", circleId: String!, content: String! = "", mediaUrl: String! = "", scriptureBook: String! = "", scriptureChapter: Int = null, scriptureText: String! = "", scriptureTranslation: String! = "KJV", scriptureVerseEnd: Int = null, scriptureVerseStart: Int = null, styleData: JSON = null, title: String!): AdminAnchorPayload!
+
+  """Create a new circle (admin only)."""
+  adminCreateCircle(bannerImage: String! = "", coverImage: String!, description: String!, name: String!, profileImageUrl: String! = ""): AdminCirclePayload!
+
+  """Deactivate a circle."""
+  adminDeactivateCircle(circleId: String!): AdminCirclePayload!
+
+  """Soft-delete a circle."""
+  adminDeleteCircle(circleId: String!): AdminCirclePayload!
+
+  """Edit a circle (admin only)."""
+  adminEditCircle(bannerImage: String = null, circleId: String!, coverImage: String = null, description: String = null, name: String = null, profileImageUrl: String = null): AdminCirclePayload!
+
+  """Edit a scheduled anchor's content."""
+  adminEditScheduledAnchor(anchorId: String!, anchorImage: String = null, anchorThumbnail: String = null, anchorVideo: String = null, content: String = null, mediaUrl: String = null, scriptureBook: String = null, scriptureChapter: Int = null, scriptureText: String = null, scriptureTranslation: String = null, scriptureVerseEnd: Int = null, scriptureVerseStart: Int = null, title: String = null): AdminAnchorPayload!
+
+  """Admin login — validates admin role."""
+  adminLogin(email: String!, password: String!): AdminLoginPayload!
+
+  """Reply to a contact message."""
+  adminReplyToContact(contactId: String!, message: String!): AdminContactReplyPayload!
+
+  """Restore (un-hide) content previously hidden via moderation."""
+  adminRestoreContent(reportId: String!): AdminReportReviewPayload!
+
+  """Review a report and take action."""
+  adminReviewReport(action: String!, internalNotes: String! = "", reason: String! = "", reportId: String!): AdminReportReviewPayload!
+
+  """Schedule an anchor for posting."""
+  adminScheduleAnchor(anchorId: String!, scheduledFor: String!): AdminAnchorPayload!
+
+  """Post an anchor immediately."""
+  adminSendAnchorNow(anchorId: String!): AdminAnchorPayload!
+
+  """Update contact message status."""
+  adminUpdateContactStatus(contactId: String!, status: String!): AdminContactPayload!
+
+  """
+  Authenticate user via Sign in with Apple. Requires a verified identityToken and nonce.
+  """
+  appleOauth(identityToken: String!, nonce: String = null, rawNonce: String = null, user: JSON = null): GoogleOAuthPayload!
+
+  """Remove multiple bookmarks at once"""
+  bulkRemoveBookmarks(postIds: [String!]!): BulkRemovePayload!
+
+  """Cancel an active Stripe subscription."""
+  cancelSubscription(subscriptionId: String = null): CancelPayload!
+
+  """
+  Change password for authenticated user. Requires current password. Can optionally sign out all other devices.
+  """
+  changePassword(currentPassword: String!, newPassword: String!, signOutOtherDevices: Boolean! = false): ChangePasswordPayload!
+
+  """Check if a username is available"""
+  checkUsernameAvailability(username: String!): UsernameCheckResult!
+
+  """Add an inline comment to a CirclePost."""
+  commentOnCirclePost(postId: String!, text: String!): CirclePostCommentPayload!
+
+  """Confirm direct-to-GCS media upload and start processing"""
+  confirmMediaUpload(mediaId: String!): MediaUploadPayload!
+
+  """
+  Complete password reset using the resetToken returned by verifyOtp(password_reset). Returns the authenticated user and a fresh token pair.
+  """
+  confirmPasswordReset(newPassword: String!, resetToken: String!, signOutAllDevices: Boolean! = false): AuthPayload!
+  createAnchor(anchorImage: String! = "", anchorImageText: String! = "", anchorText: String! = "", anchorThumbnail: String! = "", anchorType: String!, anchorVerse: String! = "", anchorVideo: String! = "", backgroundColors: [String!] = null, backgroundImage: String! = "", circleId: String!, content: String! = "", mediaUrl: String! = "", publishedAt: String = null, scriptureBook: String! = "", scriptureChapter: Int = null, scriptureText: String! = "", scriptureTranslation: String! = "KJV", scriptureVerseEnd: Int = null, scriptureVerseStart: Int = null, title: String!): CreateAnchorPayload!
+
+  """Create a bookmark folder"""
+  createBookmarkFolder(name: String!): BookmarkFolderPayload!
+  createCirclePost(circleId: String!, duration: Int = null, height: Int = null, mediaIds: [String!] = null, mediaType: MediaType = null, mediaUrls: [String!] = null, text: String = null, thumbnailUrl: String = null, width: Int = null): CreateCirclePostPayload!
+
+  """Create a nested or top-level text comment on a Post payload."""
+  createComment(parentCommentId: String = null, postId: String!, text: String!): CommentPayload!
+
+  """Create a one-time or monthly donation via Stripe."""
+  createDonation(amount: Int!, email: String!, name: String!, paymentMethodId: String!, planId: String = null, type: DonationTypeEnum! = ONE_TIME): DonationPayload!
+
+  """
+  Create a new multimedia app post. Supports Text, Media, and Bible variants.
+  """
+  createPost(
+    """
+    Optional personal note on a BIBLE post. Ignored for TEXT and MEDIA posts.
+    """
+    bibleMessage: String = null
+
+    """
+    Optional description for MEDIA posts. Ignored for TEXT and BIBLE posts.
+    """
+    caption: String = null
+    category: String = null
+    duration: Int = null
+    height: Int = null
+    mediaIds: [String!] = null
+    mediaType: MediaType = null
+    mediaUrls: [String!] = null
+    postType: PostType!
+    scriptureBook: String = null
+    scriptureChapter: Int = null
+    scriptureTranslation: String = "KJV"
+    scriptureVerseEnd: Int = null
+    scriptureVerseStart: Int = null
+
+    """Content body for TEXT posts. Required when postType is TEXT."""
+    textMessage: String = null
+    thumbnailUrl: String = null
+    width: Int = null
+  ): CreatePostPayload!
+  debugSendPush(includeInactive: Boolean! = false, targetUserId: ID = null): DebugSendPushPayload!
+
+  """Delete a bookmark folder"""
+  deleteBookmarkFolder(folderId: String!): DeleteFolderPayload!
+
+  """Soft-delete your own comment on a CirclePost."""
+  deleteCirclePostComment(commentId: String!): CirclePostCommentPayload!
+
+  """Delete a comment"""
+  deleteComment(commentId: String!): CommentPayload!
+  deleteNotification(notificationId: ID!): SuccessResponse!
+
+  """Soft delete an existing post."""
+  deletePost(postId: String!): PostPayload!
+
+  """Soft-delete a user (admin only)."""
+  deleteUser(userId: String!): ModerationActionPayload!
+
+  """Directly upload media file (image or video) seamlessly"""
+  directUploadMedia(file: Upload!, mediaType: MediaType!): MediaUploadPayload!
+
+  """Idempotently like a CirclePost. Repeated calls keep it liked."""
+  ensureCirclePostLiked(postId: String!): LikeCirclePostPayload!
+
+  """Idempotently like a post. Repeated calls keep it liked."""
+  ensurePostLiked(postId: String!): LikePayload!
+
+  """
+  Set permanent username after Google OAuth signup. Replaces temporary username (user_XXXXXXXX) with chosen username. Validates availability.
+  """
+  finalizeUsername(username: String!): AuthPayload!
+
+  """
+  Optimistically toggle a direct Edge relationship connecting to a User account globally.
+  """
+  followUser(userId: String!): FollowPayload!
+
+  """
+  Authenticate user via Google OAuth. Creates account if new user, or logs in existing user. Sets needsUsernameSelection=true for new OAuth users.
+  """
+  googleOauth(idToken: String!): GoogleOAuthPayload!
+
+  """Hide a post from the current user's feed"""
+  hidePost(postId: String!): HidePostPayload!
+  joinCircle(circleId: String!): JoinCirclePayload!
+
+  """Add an email to the ZIONA or ZIONKING waitlist."""
+  joinWaitlist(brand: WaitlistBrand!, email: String!): WaitlistPayload!
+  leaveCircle(circleId: String!): JoinCirclePayload!
+  likeAnchor(anchorId: String!): AnchorEngagementPayload!
+
+  """Toggle a like on a CirclePost. Returns the new like state and count."""
+  likeCirclePost(postId: String!): LikeCirclePostPayload!
+
+  """
+  Toggle a like on a CirclePost comment. Returns new like state and count.
+  """
+  likeCirclePostComment(commentId: String!): CirclePostCommentLikePayload!
+
+  """Like a comment"""
+  likeComment(commentId: String!): LikePayload!
+
+  """Optimistically toggle a 'like' on a specific post."""
+  likePost(postId: String!): LikePayload!
+
+  """
+  Authenticate existing user with email/password. Verified users receive tokens; unverified users receive requiresVerification and a fresh OTP.
+  """
+  login(email: String!, password: String!): AuthPayload!
+  markAllNotificationsAsRead: SuccessResponse!
+  markNotificationAsRead(notificationId: ID!): SuccessResponse!
+
+  """Permanently anonymize and remove a user's visible data (admin only)."""
+  permanentlyDeleteUser(acknowledgePermanentDeletion: Boolean!, confirmationText: String!, reason: String!, userId: String!): ModerationActionPayload!
+  prayForAnchor(anchorId: String!): AnchorEngagementPayload!
+  prayForCirclePost(postId: String!): CirclePostEngagementPayload!
+  reactToResponse(reactionType: String!, responseId: String!): ReactionPayload!
+
+  """Reactivate a user (admin only)."""
+  reactivateUser(userId: String!): ModerationActionPayload!
+
+  """Rotate refresh token for new token pair."""
+  refreshToken(refreshToken: String!): AuthPayload!
+
+  """
+  Create a new unverified user account with email, password, username, and date of birth. Queues an OTP and returns requiresVerification instead of tokens.
+  """
+  register(dateOfBirth: String!, email: String!, password: String!, username: String!): RegisterPayload!
+  registerDeviceToken(platform: String!, token: String!): SuccessResponse!
+  replyToResponse(content: String!, mediaType: String! = "", mediaUrl: String! = "", parentResponseId: String!): AnchorResponsePayload!
+  reportCircleContent(circleId: String!, reason: String!, targetId: String!, targetType: String!): CircleReportPayload!
+
+  """File a Community Guidelines violation against an active node."""
+  reportContent(commentId: String = null, description: String = null, postId: String = null, reason: String!): ReportPayload!
+
+  """
+  Resend the verification OTP for an unverified password account. Returns timing metadata for resend countdown UI.
+  """
+  resendVerificationOtp(email: String!): OTPPayload!
+
+  """
+  Request a password reset code for the email/password flow. Returns a generic success message to avoid exposing account existence.
+  """
+  resetPassword(email: String!): PasswordResetRequestPayload!
+
+  """Mark a support conversation as resolved for the authenticated user."""
+  resolveHelpConversation(contactId: String!): HelpConversationPayload!
+  respondToAnchor(anchorId: String!, content: String!, mediaType: String! = "", mediaUrl: String! = "", responseType: String!): AnchorResponsePayload!
+
+  """Update specific report processing state dynamically (Admin only)."""
+  reviewReport(action: String = null, internalNotes: String = null, reportId: String!, status: String!): ReportPayload!
+
+  """Add bookmark saving a post strictly."""
+  savePost(folderId: String = null, folderName: String = null, postId: String!): SavePayload!
+  sendAdminAnnouncement(message: String!, targetUsers: [ID!] = null): SuccessResponse!
+
+  """Append an idempotent message to an existing in-app support thread."""
+  sendHelpMessage(clientMessageId: String!, contactId: String!, message: String!): HelpConversationPayload!
+
+  """
+  Send a purpose-scoped OTP via the unified OTP service. Use this for generic OTP flows; use register/login/verifyEmail/resendVerificationOtp for the password signup verification path.
+  """
+  sendOtp(email: String!, purpose: String!): OTPPayload!
+
+  """Set user interests for feed personalization"""
+  setInterests(interests: [String!]!): SetInterestsPayload!
+
+  """Share a post to another user"""
+  sharePostDirect(postId: String!, recipientId: String!): SharePayload!
+
+  """Share a post externally (generate link)"""
+  sharePostExternal(postId: String!): SharePayload!
+
+  """Submit a contact form message for ZIONA or ZIONKING."""
+  submitContact(brand: ContactBrand!, email: String!, honeypot: String! = "", message: String!, name: String!): ContactPayload!
+
+  """Public: submit a contact/support message (no auth required)."""
+  submitContactMessage(categorySlug: String = null, email: String = null, message: String!, name: String = null): SubmitContactPayload!
+
+  """Authenticated in-app help/support submission."""
+  submitHelpMessage(categorySlug: String = null, email: String = null, message: String!, name: String = null): HelpConversationPayload!
+
+  """Get username suggestions based on a name"""
+  suggestUsernames(baseName: String!): [String!]!
+
+  """Suspend a user (admin only)."""
+  suspendUser(reason: String!, userId: String!): ModerationActionPayload!
+
+  """Delete an existing following Edge relation targeting a User account."""
+  unfollowUser(userId: String!): FollowPayload!
+
+  """Unhide a previously hidden post"""
+  unhidePost(postId: String!): HidePostPayload!
+
+  """Unlike a post"""
+  unlikePost(postId: String!): LikePayload!
+
+  """Unsave/remove a bookmark"""
+  unsavePost(postId: String!): SavePayload!
+
+  """Update settings account details for the authenticated user."""
+  updateAccountDetails(location: String!): AccountDetailsPayload!
+
+  """Publish a new version of a legal document. Admin only."""
+  updateLegalDocument(content: String! = "", documentType: String! = "application/pdf", documentUrl: String! = "", type: LegalDocumentTypeEnum!, version: String!): LegalDocumentPayload!
+  updateNotificationPreferences(preferences: PreferencesInput!): NotificationPreferencesType!
+
+  """Edit the caption of an existing post. Only accessible by post owner."""
+  updatePost(caption: String = null, postId: String!): PostPayload!
+
+  """Update the authenticated user's public profile information."""
+  updateProfile(avatarUrl: String = null, bio: String = null, bioLink: String = null, fullName: String = null, hideLikeCount: Boolean = null, location: String = null): ProfilePayload!
+
+  """
+  Update the authenticated user's username (rate-limited to once every 30 days).
+  """
+  updateUsername(username: String!): UpdateUsernamePayload!
+
+  """
+  Request a signed URL for media upload correctly matching uploadMedia mapping
+  """
+  uploadMedia(fileName: String!, fileSize: Int!, fileType: String!): MediaUploadPayload!
+
+  """
+  Verify the email OTP issued by password registration or unverified login. Returns the authenticated user and JWT tokens on success.
+  """
+  verifyEmail(code: String!, email: String!): AuthPayload!
+
+  """
+  Verify a purpose-scoped OTP through the unified OTP service. For OTPs issued by password register/login, use verifyEmail instead.
+  """
+  verifyOtp(code: String!, email: String!, purpose: String!): VerifyOTPPayload!
+
+  """Warn a user (admin only)."""
+  warnUser(reason: String!, userId: String!): ModerationActionPayload!
+}
+
+type NotificationConnection {
+  hasMore: Boolean!
+  items: [NotificationItem!]!
+  nextCursor: String
+}
+
+type NotificationItem {
+  createdAt: String!
+  id: ID!
+  isRead: Boolean!
+  message: String!
+  referenceId: ID
+  referenceType: String!
+  title: String!
+  type: String!
+  user: UserMiniType
+}
+
+type NotificationPreferencesType {
+  circleAnchorPost: Boolean!
+  circleComment: Boolean!
+  circleFriendInteraction: Boolean!
+  circleLikes: Boolean!
+  inAppComment: Boolean!
+  inAppLikes: Boolean!
+  inAppMentionAndTags: Boolean!
+  inAppNewFollowers: Boolean!
+  interactionComment: Boolean!
+  interactionLikes: Boolean!
+  interactionNewFollower: Boolean!
+  interactionPostInteraction: Boolean!
+}
+
+type OTPPayload {
+  error: ErrorType
+
+  """Specific error code if operation failed"""
+  errorCode: String
+
+  """Seconds until the code expires"""
+  expiresIn: Int
+
+  """Success or error message"""
+  message: String
+
+  """The purpose string echoed back"""
+  purpose: String
+
+  """Seconds to wait before resend is allowed"""
+  resendAfter: Int
+
+  """Whether the OTP was sent successfully"""
+  success: Boolean!
+}
+
+type PageInfo {
+  currentPage: Int!
+  hasNextPage: Boolean!
+  totalCount: Int!
+}
+
+type PasswordResetRequestPayload {
+  error: ErrorType
+
+  """Specific error code if the request failed"""
+  errorCode: String
+
+  """Success or error message"""
+  message: String
+
+  """Whether the request was accepted"""
+  success: Boolean!
+}
+
+type Post {
+  """Post author info"""
+  author: PostAuthor
+
+  """Caption/note attached to a BIBLE post. Null for TEXT and MEDIA posts."""
+  bibleMessage: String
+
+  """Caption for MEDIA posts. Null for TEXT and BIBLE posts."""
+  caption: String
+
+  """Full category object"""
+  category: CategoryType
+  createdAt: String!
+  id: String!
+
+  """Media files array"""
+  media: [MediaFileType!]!
+
+  """Primary flat media type: image, video, or null."""
+  mediaType: String
+
+  """Primary flat media URL for image/video posts."""
+  mediaUrl: String
+  savedInFolders: [BookmarkFolderType!]
+
+  """Attached scripture reference"""
+  scripture: PostScripture
+  shareUrl: String!
+
+  """Engagement statistics"""
+  stats: PostStats!
+
+  """Content body for TEXT posts only. Null for MEDIA and BIBLE posts."""
+  textMessage: String
+  type: PostType!
+
+  """Viewer's relationship to this post"""
+  viewerState: PostViewerState
+}
+
+type PostAuthor {
+  avatarUrl: String
+  id: String!
+  username: String!
+}
+
+type PostPayload {
+  error: ErrorType
+  errorCode: String
+  message: String
+  postId: String
+  success: Boolean!
+}
+
+type PostScripture {
+  book: String!
+  chapter: Int!
+  reference: String!
+  text: String!
+  translation: String!
+  verseEnd: Int
+  verseStart: Int!
+  verses: [ScriptureVerse!]!
+}
+
+type PostStats {
+  commentsCount: Int!
+  likesCount: Int!
+  savesCount: Int!
+  sharesCount: Int!
+}
+
+enum PostType {
+  BIBLE
+  MEDIA
+  TEXT
+}
+
+type PostViewerState {
+  followingAuthor: Boolean!
+  isOwner: Boolean!
+  liked: Boolean!
+  saved: Boolean!
+}
+
+input PreferencesInput {
+  circleAnchorPost: Boolean = null
+  circleComment: Boolean = null
+  circleFriendInteraction: Boolean = null
+  circleLikes: Boolean = null
+  inAppComment: Boolean = null
+  inAppLikes: Boolean = null
+  inAppMentionAndTags: Boolean = null
+  inAppNewFollowers: Boolean = null
+  interactionComment: Boolean = null
+  interactionLikes: Boolean = null
+  interactionNewFollower: Boolean = null
+  interactionPostInteraction: Boolean = null
+}
+
+type ProfilePayload {
+  """Explicit error info"""
+  error: ErrorType
+
+  """Code dictating failure reason safely"""
+  errorCode: String
+
+  """Success or error message"""
+  message: String
+
+  """The updated profile data"""
+  profile: UserProfileType
+
+  """Whether the profile updated successfully"""
+  success: Boolean!
+}
+
+type ProfilePostResponseListDTO {
+  hasMore: Boolean!
+  nextCursor: String
+  posts: [FeedPost!]!
+}
+
+type ProfileStatsType {
+  followersCount: String!
+  followingCount: String!
+  postsCount: String!
+}
+
+type ProfileViewerState {
+  isFollowedBy: Boolean!
+  isFollowing: Boolean!
+  isOwner: Boolean!
+}
+
+type Query {
+  """Get settings account details for the authenticated user"""
+  accountDetails: AccountDetails!
+  activeAnchor(circleId: String!): AnchorType
+
+  """Get analytics charts for a time range."""
+  adminAnalytics(timeRange: String! = "last_month"): AdminAnalyticsType!
+
+  """List anchors for a circle."""
+  adminAnchors(circleId: String!, page: Int! = 1, pageSize: Int! = 20, status: String! = ""): AdminAnchorsPaginatedType!
+
+  """Get circle detail."""
+  adminCircleDetail(circleId: String!): AdminCirclePayload!
+
+  """List circle members."""
+  adminCircleMembers(circleId: String!, page: Int! = 1, pageSize: Int! = 20): CircleMembersPaginatedType!
+
+  """Get circle-scoped stats for the admin circle detail page."""
+  adminCircleStats(circleId: String!): AdminCircleStatsPayload!
+
+  """List circles with search and filter."""
+  adminCircles(page: Int! = 1, pageSize: Int! = 20, search: String! = "", status: String! = ""): AdminCirclesPaginatedType!
+
+  """List contact messages."""
+  adminContacts(page: Int! = 1, pageSize: Int! = 20, search: String! = "", status: String! = ""): AdminContactsPaginatedType!
+
+  """Get dashboard overview metrics."""
+  adminDashboard: AdminDashboardType!
+
+  """Paginated donation history."""
+  adminDonations(donationType: String! = "", page: Int! = 1, pageSize: Int! = 20, status: String! = ""): AdminDonationsPaginatedType!
+  adminFailedSupportPayments(limit: Int! = 50): JSON!
+
+  """Get recent admin activities timeline."""
+  adminRecentActivities(limit: Int! = 15): [ActivityType!]!
+
+  """List reports with search and filter."""
+  adminReports(page: Int! = 1, pageSize: Int! = 20, search: String! = "", status: String! = ""): AdminReportsPaginatedType!
+  adminSupportDonations(limit: Int! = 50): JSON!
+
+  """
+  All-time support metrics: raised, supporters, MRR, active subs, failed.
+  """
+  adminSupportOverview: AdminSupportOverviewType!
+
+  """Paginated support payments. Pass status='failed' for failed payments."""
+  adminSupportPayments(page: Int! = 1, pageSize: Int! = 20, status: String! = ""): AdminSupportPaymentsPaginatedType!
+  adminSupportStats: JSON!
+
+  """Paginated support subscriptions with supporter details."""
+  adminSupportSubscriptions(page: Int! = 1, pageSize: Int! = 20, status: String! = ""): AdminSubscriptionsPaginatedType!
+
+  """List users with search and filter."""
+  adminUsers(page: Int! = 1, pageSize: Int! = 20, search: String! = "", status: String! = ""): AdminUsersPaginatedType!
+  allCircles(cursor: String = null, limit: Int! = 20): [CircleType!]!
+
+  """
+  Fetch a single Anchor by ID. Use this for deep-link/push-notification screens.
+  """
+  anchor(id: String!): AnchorType
+  anchorByDate(circleId: String!, date: String!): AnchorType
+  anchorHistory(circleId: String!, cursor: String = null, includeActive: Boolean! = true, limit: Int! = 20): [AnchorType!]!
+  anchorResponses(anchorId: String!, cursor: String = null, limit: Int! = 50, myPostsOnly: Boolean! = false, sort: String! = "TRENDING"): [AnchorResponseType!]!
+
+  """Returns active iOS and Android app store URLs."""
+  appDownloadLinks: AppLinksType!
+
+  """Filter hierarchical mapping structure list of volumes cleanly."""
+  bibleBooks(testament: String! = "all"): [BibleBook!]!
+
+  """
+  Extract canonical list representing available supported free translations.
+  """
+  bibleVersions(language: String = null): [BibleVersion!]!
+
+  """Get bookmark folders"""
+  bookmarkFolders: [BookmarkFolderType!]!
+  circle(id: String!): CircleType
+  circleFeed(authorId: String = null, circleFilter: CirclePostFilterEnum = null, circleId: String!, page: Int! = 1, pageSize: Int! = 20, sortBy: String! = "NEW"): CircleFeedResponse!
+  circleFeedData(authorId: String = null, circleFilter: CirclePostFilterEnum = null, circleId: String!, historyLimit: Int! = 5, page: Int! = 1, pageSize: Int! = 20, sortBy: String! = "NEW"): CircleFeedDataType
+
+  """Fetch a single CirclePost by ID. Use this for post detail screens."""
+  circlePost(id: String!): CirclePostType
+
+  """Paginated inline comments for a CirclePost, with viewer like state."""
+  circlePostComments(page: Int! = 1, pageSize: Int! = 30, postId: String!): CirclePostCommentsResponse!
+  circlePosts(authorId: String = null, circleFilter: CirclePostFilterEnum = null, circleId: String!, page: Int! = 1, pageSize: Int! = 20, sortBy: String! = "NEW"): CircleFeedResponse!
+
+  """
+  Get paginated replies for a specific comment (beyond the inline 3-reply preview).
+  """
+  commentReplies(commentId: String!, cursor: String = null, limit: Int! = 20): CommentsResponse!
+
+  """Returns the currently active Community Guidelines."""
+  communityGuidelines: LegalDocumentType!
+
+  """Returns public platform statistics (updated hourly)."""
+  companyStats: CompanyStatsType!
+
+  """
+  Get all discovery categories securely formatted for algorithmic content filtering.
+  """
+  discoverCategories: [CategoryType!]!
+
+  """Get the Discover feed by category"""
+  discoverFeed(category: String = null, cursor: String = null, limit: Int! = 20, mediaType: String = null): FeedResponse!
+
+  """Retrieve donation confirmation by transaction ID."""
+  donationConfirmation(transactionId: String!): DonationConfirmationType
+
+  """
+  Get the public or personalized feed. Works with or without authentication.
+  """
+  feed(cursor: String = null, limit: Int! = 20): FeedResponse!
+
+  """
+  Get hierarchical chronologically descending array of all User Nodes following a Profile.
+  """
+  followers(cursor: String = null, limit: Int! = 20, userId: String!): FollowListResponse!
+
+  """
+  Get hierarchical descending list of all User Nodes a particular Profile is following.
+  """
+  following(cursor: String = null, limit: Int! = 20, userId: String!): FollowListResponse!
+
+  """Retrieve the strict chronological Following feed."""
+  followingFeed(cursor: String = null, limit: Int! = 20): FeedResponse!
+
+  """Get the personalized For You content feed reliably."""
+  forYouFeed(cursor: String = null, limit: Int! = 20): FeedResponse!
+
+  """Get friends list for sharing"""
+  friendsList(limit: Int! = 20, search: String = null): [FriendType!]!
+
+  """Simple health check for the GraphQL endpoint."""
+  health: String!
+
+  """List public help-center articles."""
+  helpArticles(categorySlug: String = null, search: String! = ""): [HelpArticleType!]!
+
+  """List public help-center categories."""
+  helpCategories(search: String! = ""): [HelpCategoryType!]!
+
+  """Return one support conversation owned by the authenticated user."""
+  helpConversation(contactId: String!): HelpConversationType
+
+  """Poll new support messages after the last received message cursor."""
+  helpConversationMessages(after: String! = "", contactId: String!, first: Int! = 50): HelpConversationMessagesPageType!
+
+  """Get paginated list of hidden posts"""
+  hiddenPosts(cursor: String = null, limit: Int! = 20): HiddenPostsResponse!
+
+  """Get paginated list of posts the targeted user has liked."""
+  likedPosts(cursor: String = null, limit: Int! = 20, userId: String!): ProfilePostResponseListDTO!
+
+  """Extract paginated array list of raw Admin reports queued."""
+  listReports(cursor: String = null, limit: Int! = 20, status: String = null): ReportListResponse!
+
+  """Get the currently authenticated user's complete data"""
+  me: CurrentUserResponse!
+
+  """Return media processing status by media ID"""
+  mediaStatus(mediaId: String!): MediaStatusPayload!
+  myCircles(limit: Int! = 20): [CircleType!]!
+
+  """List support conversations for the authenticated user."""
+  myHelpConversations(status: String! = ""): [HelpConversationType!]!
+  notificationPreferences: NotificationPreferencesType!
+  notifications(cursor: String = null, limit: Int! = 20): NotificationConnection!
+
+  """
+  Retrieve a single post by its UUID with full engagement metrics and viewer context.
+  """
+  post(id: ID!): Post
+
+  """Get hierarchical chronological array of comments bounded to an entity."""
+  postComments(cursor: String = null, limit: Int! = 20, postId: String!): CommentsResponse!
+
+  """Returns the currently active Privacy Policy."""
+  privacyPolicy: LegalDocumentType!
+  responseReplies(limit: Int! = 50, responseId: String!): [AnchorResponseType!]!
+
+  """Get saved/bookmarked posts"""
+  savedPosts(cursor: String = null, folderId: String = null, limit: Int! = 20, mediaType: String! = "all"): SavedPostsResponse!
+
+  """
+  Fetch all verses in a chapter. Returns a ScriptureResponse with book, chapter, version, and every verse in the chapter.
+  """
+  scripture(book: String!, chapter: Int!, translation: String! = "KJV"): ScriptureResponse!
+
+  """
+  Fetch verses in a range and return combined text as a single string. No verse numbers included — just the concatenated text.
+  """
+  scriptureRange(book: String!, chapter: Int!, translation: String! = "KJV", verseEnd: Int = null, verseStart: Int! = 1): String!
+
+  """
+  Generate 4 available username suggestions based on email and optional date of birth. Returns unique, available usernames.
+  """
+  suggestUsernames(dateOfBirth: String = null, dob: String = null, email: String!): [String!]!
+  suggestedCircles(limit: Int! = 10): [CircleType!]!
+
+  """
+  Get highly validated creators algorithmically dynamically curated for the authenticating user.
+  """
+  suggestedCreators(limit: Int! = 10): [SuggestedCreatorType!]!
+
+  """Returns the currently active Terms of Service."""
+  termsOfService: LegalDocumentType!
+  unreadNotificationCount: Int!
+
+  """Get paginated list of posts authored by the targeted user."""
+  userPosts(cursor: String = null, limit: Int! = 20, userId: String!): ProfilePostResponseListDTO!
+
+  """Retrieve a targeted user's public profile and follower statistics."""
+  userProfile(userId: String!): UserProfileType
+}
+
+type ReactionPayload {
+  error: ErrorType
+  reaction: AnchorResponseReactionType
+  success: Boolean!
+}
+
+type RegisterPayload {
+  error: ErrorType
+
+  """Specific error code if the operation failed (e.g. USERNAME_TAKEN)"""
+  errorCode: String
+
+  """Success or error message"""
+  message: String
+
+  """
+  Whether the client must verify the user's email before login tokens are issued
+  """
+  requiresVerification: Boolean!
+
+  """Whether the registration operation succeeded"""
+  success: Boolean!
+
+  """The registered user data in its current unverified state"""
+  user: AuthenticatedUserType
+}
+
+type ReportContentPreviewType {
+  available: Boolean!
+  media: [ReportMediaPreviewType!]!
+  ownerId: String
+  ownerName: String
+  ownerUsername: String
+  targetId: String!
+  targetType: String!
+  text: String
+  unavailableReason: String
+}
+
+type ReportListResponse {
+  """Volume bounds checker boolean"""
+  hasMore: Boolean!
+
+  """Hash mapped string continuation flag"""
+  nextCursor: String
+
+  """Directly mapped queue items natively"""
+  reports: [ReportType!]!
+}
+
+type ReportMediaPreviewType {
+  duration: Float
+  height: Int
+  mediaType: String!
+  order: Int!
+  thumbnailUrl: String
+  url: String!
+  width: Int
+}
+
+type ReportPayload {
+  """Explicit error info"""
+  error: ErrorType
+
+  """Detailed failure string identifier"""
+  errorCode: String
+
+  """String output detail natively"""
+  message: String
+
+  """Mapped explicit target UUID"""
+  report: ReportType
+
+  """Confirmed processing natively flag"""
+  success: Boolean!
+}
+
+type ReportSummaryType {
+  actioned: Int!
+  dismissed: Int!
+  pending: Int!
+  reviewed: Int!
+  total: Int!
+}
+
+type ReportType {
+  commentId: String
+  contentPreview: ReportContentPreviewType
+  createdAt: String!
+  description: String
+  id: String!
+  postId: String
+  reason: String!
+  reporterId: String!
+  reviewedAt: String
+  reviewedBy: String
+  status: String!
+}
+
+type ReporterType {
+  avatarUrl: String!
+  id: String!
+  username: String!
+}
+
+type SavePayload {
+  error: ErrorType
+  errorCode: String
+  folder: BookmarkFolderType
+  message: String
+  post: FeedPost
+  saved: Boolean!
+  stats: PostStats
+  success: Boolean!
+}
+
+type SavedPostsResponse {
+  hasMore: Boolean!
+  nextCursor: String
+  posts: [FeedPost!]!
+}
+
+type ScriptureReference {
+  book: String!
+  chapter: Int
+  text: String!
+  translation: String!
+  verseEnd: Int
+  verseStart: Int
+}
+
+type ScriptureResponse {
+  """Book name ('John')"""
+  book: String!
+
+  """Chapter number"""
+  chapter: Int!
+
+  """Translation version ('kjv')"""
+  translation: String!
+
+  """Ending verse boundary"""
+  verseEnd: Int
+
+  """Starting verse boundary"""
+  verseStart: Int
+
+  """All verses in the chapter"""
+  verses: [ScriptureVerse!]!
+}
+
+type ScriptureVerse {
+  number: Int!
+  text: String!
+}
+
+type SetInterestsPayload {
+  error: ErrorType
+  errorCode: String
+  interests: [String!]!
+  message: String
+  success: Boolean!
+}
+
+type SharePayload {
+  error: ErrorType
+  errorCode: String
+  message: String
+  shareId: String
+  shareUrl: String
+  stats: PostStats
+  success: Boolean!
+}
+
+type StatisticsType {
+  avgResolutionMinutes: Float!
+  dau: Int!
+  mau: Int!
+  wau: Int!
+}
+
+type SubmitContactPayload {
+  contact: HelpConversationType
+  contactId: String
+  error: ErrorType
+  message: String
+  success: Boolean!
+}
+
+type SuccessResponse {
+  error: String
+  success: Boolean!
+}
+
+type SuggestedCreatorType {
+  avatarUrl: String
+  bio: String
+  id: String!
+  stats: ProfileStatsType
+  username: String!
+}
+
+type UpdateUsernamePayload {
+  error: ErrorType
+  errorCode: String
+  message: String
+  success: Boolean!
+  username: String
+}
+
+"""Represents a file upload."""
+scalar Upload
+
+type UserMiniType {
+  avatarUrl: String!
+  id: String!
+  username: String!
+}
+
+type UserProfileType {
+  avatarUrl: String
+  bio: String!
+  bioLink: String
+  createdAt: String!
+  fullName: String!
+  hideLikeCount: Boolean!
+  id: String!
+  location: String!
+  recentPosts: [FeedPost!]!
+  stats: ProfileStatsType!
+  username: String!
+  viewerState: ProfileViewerState
+}
+
+type UserSuggestion {
+  avatarUrl: String
+  bio: String
+  followersCount: Int!
+  id: String!
+  username: String!
+}
+
+type UserSummaryType {
+  active: Int!
+  deactivated: Int!
+  deleted: Int!
+  inactive: Int!
+  pendingDeletion: Int!
+  suspended: Int!
+  total: Int!
+  warned: Int!
+}
+
+type UserType {
+  avatarUrl: String!
+  bio: String!
+  bioLink: String
+  createdAt: String!
+  fullName: String!
+  id: String!
+  isEarlySupporter: Boolean!
+  location: String!
+  needsUsernameSelection: Boolean!
+  username: String
+}
+
+type UsernameCheckResult {
+  available: Boolean!
+  reason: String
+  suggestions: [String!]
+}
+
+type VerifyOTPPayload {
+  """JWT access token (if applicable)"""
+  accessToken: String
+  accessTokenExpiresAt: String
+  accessTokenExpiresIn: Int
+  error: ErrorType
+
+  """Specific error code if operation failed"""
+  errorCode: String
+
+  """Success or error message"""
+  message: String
+
+  """JWT refresh token (if applicable)"""
+  refreshToken: String
+  refreshTokenExpiresAt: String
+  refreshTokenExpiresIn: Int
+
+  """Token to use for confirming password reset"""
+  resetToken: String
+
+  """Whether the verification was successful"""
+  success: Boolean!
+
+  """User data (if applicable)"""
+  user: AuthenticatedUserType
+}
+
+type VideoData {
+  duration: Int
+  height: Int
+  thumbnailUrl: String
+  url: String!
+  width: Int
+}
+
+enum WaitlistBrand {
+  ZIONA
+  ZIONKING
+}
+
+type WaitlistPayload {
+  alreadyRegistered: Boolean!
+  error: ErrorType
+  success: Boolean!
+}
