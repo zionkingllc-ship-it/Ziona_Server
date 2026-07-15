@@ -296,7 +296,7 @@ class TestSchemaAlignment:
         """Verify createPost accepts mediaUrls seamlessly"""
         settings.MEDIA_URL_ALLOWLIST = ["storage.googleapis.com"]
         monkeypatch.setattr(
-            "core.media.services._head_external_media_url",
+            "core.media.validators._head_external_media_url",
             lambda url: type(
                 "Response",
                 (),

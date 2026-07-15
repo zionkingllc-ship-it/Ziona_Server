@@ -92,7 +92,7 @@ def test_create_response_accepts_trusted_external_image_url(
             "close": lambda self: None,
         },
     )()
-    monkeypatch.setattr("core.media.services._head_external_media_url", lambda url: response)
+    monkeypatch.setattr("core.media.validators._head_external_media_url", lambda url: response)
 
     created = create_response(
         user_id=member.id,

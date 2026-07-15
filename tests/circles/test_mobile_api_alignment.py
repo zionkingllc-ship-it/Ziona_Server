@@ -669,7 +669,7 @@ class TestMobileGraphQLAlignment(TestCase):
                 "close": lambda self: None,
             },
         )()
-        with patch("core.media.services._head_external_media_url", return_value=response):
+        with patch("core.media.validators._head_external_media_url", return_value=response):
             data = _graphql(
                 """
                 mutation CreateCirclePost($circleId: String!, $mediaUrls: [String!], $width: Int, $height: Int) {

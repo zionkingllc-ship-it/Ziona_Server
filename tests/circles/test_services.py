@@ -377,7 +377,7 @@ class TestCirclePostMediaCreation(TestCase):
                 "close": lambda self: None,
             },
         )()
-        with patch("core.media.services._head_external_media_url", return_value=response):
+        with patch("core.media.validators._head_external_media_url", return_value=response):
             post = create_circle_post(
                 user_id=str(self.author.id),
                 circle_id=str(self.circle.id),

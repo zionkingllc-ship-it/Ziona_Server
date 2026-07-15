@@ -373,7 +373,7 @@ def test_confirm_upload_rejects_magic_byte_mismatch(settings, authenticated_user
 def test_validate_trusted_external_image_url_accepts_allowlisted_https_image(settings, monkeypatch):
     settings.MEDIA_URL_ALLOWLIST = ["cdn.example.com"]
     monkeypatch.setattr(
-        "core.media.services._head_external_media_url",
+        "core.media.validators._head_external_media_url",
         lambda url: _FakeHeadResponse(content_type="image/png"),
     )
 
@@ -394,7 +394,7 @@ def test_validate_trusted_external_image_url_rejects_non_allowlisted_host(settin
 def test_validate_trusted_external_image_url_rejects_external_video(settings, monkeypatch):
     settings.MEDIA_URL_ALLOWLIST = ["cdn.example.com"]
     monkeypatch.setattr(
-        "core.media.services._head_external_media_url",
+        "core.media.validators._head_external_media_url",
         lambda url: _FakeHeadResponse(content_type="video/mp4"),
     )
 
