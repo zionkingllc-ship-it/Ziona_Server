@@ -2,9 +2,10 @@ import pytest
 from django.utils import timezone
 
 from core.admin_dashboard.moderation_services import AdminModerationService
+from core.media.models import MediaFile
 from core.moderation.models import Report
 from core.moderation.schema import _report_to_type
-from core.posts.models import Post, PostMedia
+from core.posts.models import Post
 
 
 @pytest.mark.django_db
@@ -49,12 +50,14 @@ def test_review_report_hide(authenticated_admin, create_user):
 
 
 @pytest.mark.django_db
-def test_list_reports_returns_reported_post_media_preview(authenticated_admin):
+def test_list_reports_returns_reported_post_media_preview(authenticated_admin, settings):
     owner = authenticated_admin["user"].__class__.objects.create_user(
         email="reported-owner@example.com",
         username="reportedowner",
         password="Pass123!",
     )
+    settings.LOCAL_MEDIA_FALLBACK = False
+    settings.GCP_STORAGE_BUCKET = "test-bucket"
     reporter = authenticated_admin["user"]
     post = Post.objects.create(
         user=owner,
@@ -62,13 +65,20 @@ def test_list_reports_returns_reported_post_media_preview(authenticated_admin):
         caption="Reported video",
         media_count=1,
     )
-    PostMedia.objects.create(
-        post=post,
-        media_url="https://cdn.example.com/video.mp4",
+    # Attach media the way create_post actually does: a MediaFile on the M2M.
+    # A full-URL storage_path collapses to itself via normalize_url (the
+    # media_urls flow), so .url returns the external URL verbatim.
+    media_file = MediaFile.objects.create(
+        user=owner,
+        file_name="video.mp4",
+        file_type="video/mp4",
+        file_size=2048,
         media_type="video",
-        thumbnail_url="https://cdn.example.com/thumb.jpg",
-        order=0,
+        storage_path="https://cdn.example.com/video.mp4",
+        thumbnail_path="https://cdn.example.com/thumb.jpg",
+        status="ready",
     )
+    post.media_files.add(media_file)
     report = Report.objects.create(
         reporter=reporter,
         target_type="post",
@@ -95,25 +105,31 @@ def test_list_reports_returns_reported_post_media_preview(authenticated_admin):
 
 
 @pytest.mark.django_db
-def test_report_graphql_type_includes_post_preview_payload(authenticated_admin):
+def test_report_graphql_type_includes_post_preview_payload(authenticated_admin, settings):
     owner = authenticated_admin["user"].__class__.objects.create_user(
         email="preview-owner@example.com",
         username="previewowner",
         password="Pass123!",
     )
+    settings.LOCAL_MEDIA_FALLBACK = False
+    settings.GCP_STORAGE_BUCKET = "test-bucket"
     post = Post.objects.create(
         user=owner,
         post_type="image",
         caption="Reported image caption",
         media_count=1,
     )
-    PostMedia.objects.create(
-        post=post,
-        media_url="https://cdn.example.com/reported.jpg",
+    media_file = MediaFile.objects.create(
+        user=owner,
+        file_name="reported.jpg",
+        file_type="image/jpeg",
+        file_size=1024,
         media_type="image",
-        thumbnail_url="https://cdn.example.com/reported-thumb.jpg",
-        order=0,
+        storage_path="https://cdn.example.com/reported.jpg",
+        thumbnail_path="https://cdn.example.com/reported-thumb.jpg",
+        status="ready",
     )
+    post.media_files.add(media_file)
     report = Report.objects.create(
         reporter=authenticated_admin["user"],
         target_type="post",

@@ -50,7 +50,7 @@ class AdminModerationService:
                 "comment__post__user",
                 "reviewed_by",
             )
-            .prefetch_related("post__post_media", "comment__post__post_media")
+            .prefetch_related("post__media_files", "comment__post__media_files")
             .order_by("-created_at")
         )
 
@@ -402,16 +402,19 @@ def _report_media_preview(post) -> list[dict]:
         return []
 
     media_items = []
-    for media in post.post_media.all():
+    # media_files' default ordering is newest-first; present in upload order.
+    # sorted() works on the prefetched cache without extra queries.
+    ordered = sorted(post.media_files.all(), key=lambda m: m.created_at)
+    for i, media in enumerate(ordered):
         thumbnail_url = media.thumbnail_url or ""
         if media.media_type == "image" and not thumbnail_url:
-            thumbnail_url = media.media_url
+            thumbnail_url = media.url
         media_items.append(
             {
-                "url": media.media_url,
+                "url": media.url,
                 "media_type": media.media_type or post.post_type,
                 "thumbnail_url": thumbnail_url,
-                "order": media.order,
+                "order": i,
             }
         )
 
