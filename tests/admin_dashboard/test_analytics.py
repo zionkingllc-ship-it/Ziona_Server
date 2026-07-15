@@ -138,7 +138,7 @@ def test_last_quarter_user_growth_does_not_recompute_every_day():
     )
 
     with patch(
-        "core.admin_dashboard.services._daily_analytics_snapshot",
+        "core.admin_dashboard.analytics_services._daily_analytics_snapshot",
         return_value={"total_users": 30, "new_users": 1},
     ) as snapshot:
         growth = AnalyticsService.get_user_growth("last_quarter")
