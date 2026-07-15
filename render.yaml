@@ -105,6 +105,8 @@ services:
         value: "30"
       - key: ACCOUNT_DELETION_PURGE_MAX_RETRIES
         value: "5"
+      - key: RATE_LIMIT_REGISTER
+        value: "30/60m"
 
   - type: worker
     name: ziona-worker-staging
@@ -158,6 +160,8 @@ services:
         value: "30"
       - key: ACCOUNT_DELETION_PURGE_MAX_RETRIES
         value: "5"
+      - key: RATE_LIMIT_REGISTER
+        value: "20/60m"
       - key: DATABASE_URL
         sync: false
       - key: REDIS_URL

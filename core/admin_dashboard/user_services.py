@@ -814,6 +814,7 @@ def _remove_or_hide_user_data(user, now) -> None:
         CircleReport,
         HiddenCircleContent,
     )
+    from core.donations.models import Donation, SupporterIdentity
     from core.engagement.models import (
         BookmarkFolder,
         Comment,
@@ -900,3 +901,19 @@ def _remove_or_hide_user_data(user, now) -> None:
     Notification.objects.filter(Q(user=user) | Q(sender=user)).delete()
     NotificationPreference.objects.filter(user=user).delete()
     MediaFile.objects.filter(user=user).delete()
+
+    # Donations: scrub identifying PII (email/name) but KEEP the financial record
+    # (amount, currency, Stripe IDs, timestamps) for accounting/tax retention.
+    # The user row is anonymized in place, so the SET_NULL FKs never fire.
+    identity = SupporterIdentity.objects.filter(user=user).first()
+    donation_filter = Q(user=user)
+    if identity is not None:
+        donation_filter |= Q(supporter_identity=identity)
+    Donation.objects.filter(donation_filter).update(donor_name="", donor_email="")
+    if identity is not None:
+        identity.normalized_email = f"deleted-{identity.id.hex}@deleted.ziona.local"
+        identity.contact_email = ""
+        identity.display_name = ""
+        identity.save(
+            update_fields=["normalized_email", "contact_email", "display_name", "updated_at"]
+        )

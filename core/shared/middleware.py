@@ -182,18 +182,18 @@ class RateLimitMiddleware:
         return self.get_response(request)
 
     def _rate_limit_response(self, retry_after: int) -> JsonResponse:
-        """Return a 429 Too Many Requests response."""
-        user_message = f"Too many requests. Please try again in {retry_after} seconds."
+        """Return a 429 Too Many Requests response with a human-readable wait time."""
+        user_message = f"Too many requests. Please try again in {_format_retry_after(retry_after)}."
         response = JsonResponse(
             {
                 "success": False,
-                "retryAfter": retry_after,
+                "retryAfter": retry_after,  # raw seconds for the client countdown timer
                 "userMessage": user_message,
                 "error": {
                     "code": "RATE_LIMIT_EXCEEDED",
                     "message": user_message,
                     "details": {
-                        "retryAfter": retry_after,
+                        "retryAfter": retry_after,  # raw seconds for programmatic use
                     },
                 },
             },
@@ -235,6 +235,22 @@ def _graphql_operation_kind(request: HttpRequest) -> str:
 def _get_client_ip(request: HttpRequest) -> str:
     """Delegate client IP extraction to the shared trusted-proxy helper."""
     return get_client_ip(request)
+
+
+def _format_retry_after(seconds: int) -> str:
+    """Human-readable wait duration for rate-limit messages.
+
+    The raw integer `retryAfter` and the `Retry-After` header still carry the
+    exact seconds; this is only for the user-facing message text.
+    """
+    if seconds < 60:
+        return "a few seconds"
+    if seconds < 120:
+        return "about a minute"
+    if seconds < 3600:
+        return f"about {round(seconds / 60)} minutes"
+    hours = round(seconds / 3600)
+    return f"about {hours} hour{'s' if hours != 1 else ''}"
 
 
 def _parse_rate_limit(limit_str: str) -> tuple[int, int]:

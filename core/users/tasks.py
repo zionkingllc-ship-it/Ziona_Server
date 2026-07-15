@@ -52,19 +52,36 @@ def _claim_due_requests(batch_size: int) -> list[str]:
                 | Q(
                     status=AccountDeletionStatus.PURGING,
                     updated_at__lte=stale_purge_before,
+                    retry_count__lt=retry_limit,
                 )
             )
             .order_by("scheduled_for")[:batch_size]
         )
         for deletion_request in requests:
+            update_fields = ["status", "failure_code", "updated_at"]
+            # A row already in PURGING is a stale/crashed re-claim: the worker died
+            # mid-purge before _record_purge_failure could run. Count it toward the
+            # retry cap so a purge that keeps crashing the worker cannot loop forever
+            # (the retry_count__lt filter above then excludes it once exhausted).
+            if deletion_request.status == AccountDeletionStatus.PURGING:
+                if deletion_request.retry_count + 1 >= retry_limit:
+                    logger.error(
+                        "account_deletion_purge_exhausted",
+                        extra={
+                            "deletion_request_id": str(deletion_request.id),
+                            "retry_count": deletion_request.retry_count + 1,
+                            "reason": "stale_purging",
+                        },
+                    )
+                deletion_request.retry_count = F("retry_count") + 1
+                update_fields.append("retry_count")
             deletion_request.status = AccountDeletionStatus.PURGING
             deletion_request.failure_code = ""
-            deletion_request.save(update_fields=["status", "failure_code", "updated_at"])
+            deletion_request.save(update_fields=update_fields)
         return [str(deletion_request.id) for deletion_request in requests]
 
 
 def _purge_account_deletion(request_id: str) -> None:
-    from core.admin_dashboard.models import ModerationAction
     from core.users.account_lifecycle import (
         anonymize_user_for_permanent_delete,
         delete_user_gcs_objects,
@@ -90,7 +107,8 @@ def _purge_account_deletion(request_id: str) -> None:
             return
         user = User.all_objects.select_for_update().get(id=deletion_request.user_id)
         remove_or_hide_user_data(user, now)
-        ModerationAction.objects.filter(user=user).delete()
+        # Moderation history (warnings/suspensions) is intentionally retained for
+        # trust & safety audit — the row already points at the anonymized user.
         anonymize_user_for_permanent_delete(user, now)
 
         deletion_request.status = AccountDeletionStatus.COMPLETED
@@ -126,6 +144,11 @@ def _record_purge_failure(request_id: str, exc: Exception) -> None:
         failure_code=failure_code,
         updated_at=timezone.now(),
     )
+    retry_count = (
+        AccountDeletionRequest.objects.filter(id=request_id)
+        .values_list("retry_count", flat=True)
+        .first()
+    )
     log_security_event(
         "auth.account_deletion_purge_failed",
         user_id=str(user_id) if user_id else None,
@@ -139,3 +162,24 @@ def _record_purge_failure(request_id: str, exc: Exception) -> None:
         extra={"deletion_request_id": request_id, "failure_code": failure_code},
         exc_info=True,
     )
+    # Dead-letter alert: a request that has exhausted its retries is never
+    # reclaimed again, so surface it loudly (Sentry) — the user's PII would
+    # otherwise sit un-purged indefinitely with no signal.
+    if retry_count is not None and retry_count >= settings.ACCOUNT_DELETION_PURGE_MAX_RETRIES:
+        log_security_event(
+            "auth.account_deletion_purge_exhausted",
+            user_id=str(user_id) if user_id else None,
+            metadata={
+                "deletion_request_id": request_id,
+                "retry_count": retry_count,
+                "failure_code": failure_code,
+            },
+        )
+        logger.error(
+            "account_deletion_purge_exhausted",
+            extra={
+                "deletion_request_id": request_id,
+                "retry_count": retry_count,
+                "failure_code": failure_code,
+            },
+        )

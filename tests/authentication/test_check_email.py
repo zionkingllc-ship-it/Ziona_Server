@@ -137,7 +137,7 @@ def test_check_email_rate_limit(client: Client) -> None:
         data = response.json()
         assert data["success"] is False
         assert data["retryAfter"] == 60
-        assert data["userMessage"] == "Too many requests. Please try again in 60 seconds."
+        assert data["userMessage"] == "Too many requests. Please try again in about a minute."
         assert data["error"]["code"] == "RATE_LIMIT_EXCEEDED"
         assert data["error"]["details"]["retryAfter"] == 60
         assert response.headers["Retry-After"] == "60"
