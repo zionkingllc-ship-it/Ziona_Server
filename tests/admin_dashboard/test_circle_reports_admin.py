@@ -210,3 +210,124 @@ def test_admin_circle_reports_requires_admin(api_client):
     # Paginated type has no error envelope — @admin_required surfaces a GraphQL error.
     assert data.get("data") is None or data["data"].get("adminCircleReports") is None
     assert "errors" in data
+
+
+@pytest.mark.django_db
+def test_review_keep_restores_auto_hidden_and_resolves_siblings(
+    authenticated_admin, create_user, circle
+):
+    from core.admin_dashboard.circle_report_services import review_circle_report
+
+    admin = authenticated_admin["user"]
+    anchor = _anchor(circle, admin, title="Wrongly Hidden")
+    reports = []
+    for i in range(3):
+        reporter = create_user(email=f"keep{i}@example.com", username=f"keeprep{i}")
+        reports.append(
+            CircleReport.objects.create(
+                reporter=reporter,
+                circle=circle,
+                target_type="anchor",
+                target_id=anchor.id,
+                reason="spam",
+            )
+        )
+    anchor.deleted_at = timezone.now()  # auto-hidden at threshold
+    anchor.save(update_fields=["deleted_at"])
+
+    result = review_circle_report(str(reports[0].id), "keep", admin)
+
+    assert result["status"] == "resolved_kept"
+    assert result["resolved_by_username"] == admin.username
+    anchor.refresh_from_db()
+    assert anchor.deleted_at is None  # content restored
+    # one decision resolves every pending sibling on the target
+    assert not CircleReport.objects.filter(target_id=anchor.id, status="pending").exists()
+    assert CircleReport.objects.filter(target_id=anchor.id, status="resolved_kept").count() == 3
+
+
+@pytest.mark.django_db
+def test_review_remove_takes_down_content(authenticated_admin, create_user, circle):
+    from core.admin_dashboard.circle_report_services import review_circle_report
+
+    admin = authenticated_admin["user"]
+    reporter = create_user(email="remove-rep@example.com", username="removerep")
+    anchor = _anchor(circle, admin, title="Bad Anchor")
+    report = CircleReport.objects.create(
+        reporter=reporter,
+        circle=circle,
+        target_type="anchor",
+        target_id=anchor.id,
+        reason="hate speech",
+    )
+
+    result = review_circle_report(str(report.id), "remove", admin)
+
+    assert result["status"] == "resolved_removed"
+    anchor.refresh_from_db()
+    assert anchor.deleted_at is not None  # content taken down
+    assert result["content_preview"]["unavailable_reason"] == "hidden"
+
+
+@pytest.mark.django_db
+def test_review_rejects_invalid_action_and_double_review(authenticated_admin, create_user, circle):
+    from core.admin_dashboard.circle_report_services import review_circle_report
+    from core.shared.exceptions import AdminError
+
+    admin = authenticated_admin["user"]
+    reporter = create_user(email="dbl-rep@example.com", username="dblrep")
+    anchor = _anchor(circle, admin)
+    report = CircleReport.objects.create(
+        reporter=reporter,
+        circle=circle,
+        target_type="anchor",
+        target_id=anchor.id,
+        reason="spam",
+    )
+
+    with pytest.raises(AdminError):
+        review_circle_report(str(report.id), "obliterate", admin)
+
+    review_circle_report(str(report.id), "keep", admin)
+    with pytest.raises(AdminError):
+        review_circle_report(str(report.id), "remove", admin)  # already reviewed
+
+
+@pytest.mark.django_db
+def test_admin_review_circle_report_graphql_mutation(
+    api_client, authenticated_admin, create_user, circle
+):
+    admin = authenticated_admin["user"]
+    reporter = create_user(email="gqlrev-rep@example.com", username="gqlrevrep")
+    anchor = _anchor(circle, admin)
+    report = CircleReport.objects.create(
+        reporter=reporter,
+        circle=circle,
+        target_type="anchor",
+        target_id=anchor.id,
+        reason="GraphQL review test",
+    )
+
+    mutation = f"""
+    mutation {{
+        adminReviewCircleReport(reportId: "{report.id}", action: "remove") {{
+            success
+            report {{ id status autoHidden contentPreview {{ available unavailableReason }} }}
+            error {{ code message }}
+        }}
+    }}
+    """
+    headers = {"HTTP_AUTHORIZATION": f"Bearer {authenticated_admin['access_token']}"}
+    response = api_client.post(
+        "/graphql/", {"query": mutation}, content_type="application/json", **headers
+    )
+    data = response.json()
+
+    assert "errors" not in data, data.get("errors")
+    payload = data["data"]["adminReviewCircleReport"]
+    assert payload["success"] is True
+    assert payload["report"]["status"] == "resolved_removed"
+    assert payload["report"]["autoHidden"] is True
+    assert payload["report"]["contentPreview"]["available"] is False
+    anchor.refresh_from_db()
+    assert anchor.deleted_at is not None

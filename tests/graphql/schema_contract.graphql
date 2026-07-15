@@ -92,6 +92,12 @@ type AdminCirclePayload {
   success: Boolean!
 }
 
+type AdminCircleReportPayload {
+  error: ErrorType
+  report: AdminCircleReportType
+  success: Boolean!
+}
+
 type AdminCircleReportPreviewType {
   available: Boolean!
   mediaType: String!
@@ -1337,6 +1343,11 @@ type Mutation {
 
   """Restore (un-hide) content previously hidden via moderation."""
   adminRestoreContent(reportId: String!): AdminReportReviewPayload!
+
+  """
+  Resolve a circle-content report: keep (restore if auto-hidden) or remove.
+  """
+  adminReviewCircleReport(action: String!, reportId: String!): AdminCircleReportPayload!
 
   """Review a report and take action."""
   adminReviewReport(action: String!, internalNotes: String! = "", reason: String! = "", reportId: String!): AdminReportReviewPayload!

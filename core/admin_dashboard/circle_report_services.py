@@ -4,6 +4,8 @@ Circle reports are separate from the global Report table; until now they
 were only acted on by the 3-report auto-hide and invisible to admins.
 """
 
+import contextlib
+
 from django.db.models import Count, Q
 
 # ──────────────────────────────────────────────
@@ -185,3 +187,142 @@ def _circle_report_to_dict(report, preview: dict, distinct_reporters: int) -> di
         "resolved_at": report.resolved_at.isoformat() if report.resolved_at else None,
         "resolved_by_username": getattr(report.resolved_by, "username", "") or "",
     }
+
+
+VALID_CIRCLE_REPORT_ACTIONS = ("keep", "remove")
+
+
+def review_circle_report(
+    report_id: str,
+    action: str,
+    admin_user,
+    ip_address: str = "",
+) -> dict:
+    """Resolve a circle-content report.
+
+    - ``keep``   → resolved_kept; auto-hidden anchor/response content is restored.
+    - ``remove`` → resolved_removed; the target content is taken down (circles are
+      soft-deleted via the standard admin delete flow).
+
+    All *pending* reports on the same target are resolved together with the same
+    outcome — circle reports arrive in threes (the auto-hide threshold), and one
+    admin decision applies to the target, not a single row.
+    """
+    from django.db import transaction
+    from django.utils import timezone as dj_timezone
+
+    from core.admin_dashboard.permissions import log_admin_action
+    from core.circles.models import CircleReport
+    from core.shared.exceptions import AdminError, ErrorCode
+
+    if action not in VALID_CIRCLE_REPORT_ACTIONS:
+        raise AdminError(
+            message=f"Invalid action. Must be one of: {', '.join(VALID_CIRCLE_REPORT_ACTIONS)}.",
+            code=ErrorCode.VALIDATION_ERROR,
+        )
+
+    with transaction.atomic():
+        report = (
+            CircleReport.objects.select_for_update(of=("self",))
+            .select_related("reporter", "circle", "resolved_by")
+            .filter(id=report_id)
+            .first()
+        )
+        if not report:
+            raise AdminError(message="Report not found.", code=ErrorCode.REPORT_NOT_FOUND)
+        if report.status != "pending":
+            raise AdminError(
+                message="Report has already been reviewed.",
+                code=ErrorCode.REPORT_ALREADY_REVIEWED,
+            )
+
+        now = dj_timezone.now()
+        if action == "remove":
+            _remove_circle_target(report, admin_user, ip_address)
+            new_status = "resolved_removed"
+        else:
+            _restore_circle_target(report)
+            new_status = "resolved_kept"
+
+        # One decision per target: resolve every pending sibling report too.
+        CircleReport.objects.filter(
+            target_type=report.target_type, target_id=report.target_id, status="pending"
+        ).update(status=new_status, resolved_at=now, resolved_by=admin_user)
+
+        log_admin_action(
+            admin_user=admin_user,
+            action="CIRCLE_REPORT_REVIEWED",
+            target_type="CircleReport",
+            target_id=str(report.id),
+            details={
+                "action": action,
+                "circle_id": str(report.circle_id),
+                "report_target_type": report.target_type,
+                "report_target_id": str(report.target_id),
+            },
+            ip_address=ip_address,
+        )
+
+        report.refresh_from_db()
+
+    previews = _circle_report_target_previews([report])
+    counts = _circle_report_distinct_counts([report])
+    key = (report.target_type, str(report.target_id))
+    return _circle_report_to_dict(
+        report, previews.get(key, _missing_target_preview()), counts.get(key, 1)
+    )
+
+
+def _remove_circle_target(report, admin_user, ip_address: str) -> None:
+    """Take down the reported content (mirrors the auto-hide mechanics)."""
+    from django.utils import timezone as dj_timezone
+
+    from core.circles.models import Anchor, AnchorResponse
+    from core.shared.exceptions import AdminError
+
+    now = dj_timezone.now()
+    if report.target_type == "anchor":
+        anchor = Anchor.all_objects.filter(id=report.target_id).first()
+        if anchor and anchor.deleted_at is None:
+            anchor.deleted_at = now
+            anchor.save(update_fields=["deleted_at"])
+            from core.circles.anchor_services import invalidate_active_anchor_cache
+
+            invalidate_active_anchor_cache(str(anchor.circle_id))
+    elif report.target_type == "response":
+        response = AnchorResponse.all_objects.filter(id=report.target_id).first()
+        if response and response.deleted_at is None:
+            response.deleted_at = now
+            response.save(update_fields=["deleted_at"])
+    elif report.target_type == "circle":
+        from core.admin_dashboard.circle_services import CircleManagementService
+
+        # Already-deleted circles raise CIRCLE_NOT_FOUND — nothing left to take
+        # down, but the report should still resolve.
+        with contextlib.suppress(AdminError):
+            CircleManagementService.delete_circle(
+                str(report.target_id), admin_user=admin_user, ip_address=ip_address
+            )
+
+
+def _restore_circle_target(report) -> None:
+    """Un-hide auto-hidden content the admin decided to keep.
+
+    Circles are never auto-hidden by the report threshold, so a ``keep`` on a
+    circle target changes no content — it only resolves the reports.
+    """
+    from core.circles.models import Anchor, AnchorResponse
+
+    if report.target_type == "anchor":
+        anchor = Anchor.all_objects.filter(id=report.target_id).first()
+        if anchor and anchor.deleted_at is not None:
+            anchor.deleted_at = None
+            anchor.save(update_fields=["deleted_at"])
+            from core.circles.anchor_services import invalidate_active_anchor_cache
+
+            invalidate_active_anchor_cache(str(anchor.circle_id))
+    elif report.target_type == "response":
+        response = AnchorResponse.all_objects.filter(id=report.target_id).first()
+        if response and response.deleted_at is not None:
+            response.deleted_at = None
+            response.save(update_fields=["deleted_at"])

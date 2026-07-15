@@ -291,7 +291,47 @@ class ModerationAdminQueries:
 
 
 @strawberry.type
+class AdminCircleReportPayload:
+    """Response for the circle-report review mutation."""
+
+    success: bool
+    report: AdminCircleReportType | None = None
+    error: ErrorType | None = None
+
+
+@strawberry.type
 class ModerationAdminMutations:
+    @strawberry.mutation(
+        name="adminReviewCircleReport",
+        description="Resolve a circle-content report: keep (restore if auto-hidden) or remove.",
+    )
+    @admin_required
+    def admin_review_circle_report(
+        self,
+        info: Info,
+        report_id: str,
+        action: str,
+    ) -> AdminCircleReportPayload:
+        from core.admin_dashboard.circle_report_services import review_circle_report
+        from core.shared.exceptions import AdminError
+
+        admin_user = info.context.admin_user
+        ip = getattr(info.context, "admin_ip", "")
+
+        try:
+            result = review_circle_report(
+                report_id=report_id,
+                action=action,
+                admin_user=admin_user,
+                ip_address=ip,
+            )
+            return AdminCircleReportPayload(success=True, report=_map_circle_report(result))
+        except AdminError as e:
+            return AdminCircleReportPayload(
+                success=False,
+                error=ErrorType(code=e.code, message=e.message),
+            )
+
     @strawberry.mutation(
         name="adminReviewReport",
         description="Review a report and take action.",
