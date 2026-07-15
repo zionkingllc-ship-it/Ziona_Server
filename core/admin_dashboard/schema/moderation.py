@@ -144,7 +144,123 @@ def _map_report(data: dict) -> AdminReportType:
 
 
 @strawberry.type
+class AdminCircleReportPreviewType:
+    """Resolved preview of the reported circle content (anchor/response/circle)."""
+
+    available: bool
+    unavailable_reason: str = strawberry.field(name="unavailableReason")
+    text: str
+    media_url: str = strawberry.field(name="mediaUrl")
+    media_type: str = strawberry.field(name="mediaType")
+    thumbnail_url: str = strawberry.field(name="thumbnailUrl")
+
+
+@strawberry.type
+class AdminCircleReportType:
+    """Admin-facing circle-content report (from circles.CircleReport)."""
+
+    id: str
+    reporter_username: str = strawberry.field(name="reporterUsername")
+    circle_id: str = strawberry.field(name="circleId")
+    circle_name: str = strawberry.field(name="circleName")
+    target_type: str = strawberry.field(name="targetType")
+    target_id: str = strawberry.field(name="targetId")
+    reason: str
+    status: str
+    report_count: int = strawberry.field(name="reportCount")
+    auto_hidden: bool = strawberry.field(name="autoHidden")
+    content_preview: AdminCircleReportPreviewType = strawberry.field(name="contentPreview")
+    created_at: str = strawberry.field(name="createdAt")
+    resolved_at: str | None = strawberry.field(name="resolvedAt", default=None)
+    resolved_by_username: str = strawberry.field(name="resolvedByUsername", default="")
+
+
+@strawberry.type
+class CircleReportSummaryType:
+    """Summary counts for circle reports."""
+
+    total: int
+    pending: int
+    resolved_kept: int = strawberry.field(name="resolvedKept")
+    resolved_removed: int = strawberry.field(name="resolvedRemoved")
+
+
+@strawberry.type
+class AdminCircleReportsPaginatedType:
+    """Paginated circle-reports response."""
+
+    reports: list[AdminCircleReportType]
+    total_count: int = strawberry.field(name="totalCount")
+    page: int
+    page_size: int = strawberry.field(name="pageSize")
+    total_pages: int = strawberry.field(name="totalPages")
+    summary: CircleReportSummaryType
+
+
+def _map_circle_report(data: dict) -> AdminCircleReportType:
+    preview = data["content_preview"]
+    return AdminCircleReportType(
+        id=data["id"],
+        reporter_username=data["reporter_username"],
+        circle_id=data["circle_id"],
+        circle_name=data["circle_name"],
+        target_type=data["target_type"],
+        target_id=data["target_id"],
+        reason=data["reason"],
+        status=data["status"],
+        report_count=data["report_count"],
+        auto_hidden=data["auto_hidden"],
+        content_preview=AdminCircleReportPreviewType(
+            available=preview["available"],
+            unavailable_reason=preview["unavailable_reason"],
+            text=preview["text"],
+            media_url=preview["media_url"],
+            media_type=preview["media_type"],
+            thumbnail_url=preview["thumbnail_url"],
+        ),
+        created_at=data["created_at"],
+        resolved_at=data["resolved_at"],
+        resolved_by_username=data["resolved_by_username"],
+    )
+
+
+@strawberry.type
 class ModerationAdminQueries:
+    @strawberry.field(
+        name="adminCircleReports",
+        description="List reports on circle content (anchors, responses, circles).",
+    )
+    @admin_required
+    def admin_circle_reports(
+        self,
+        info: Info,
+        status: str = "",
+        target_type: str = "",
+        circle_id: str = "",
+        search: str = "",
+        page: int = 1,
+        page_size: int = 20,
+    ) -> AdminCircleReportsPaginatedType:
+        from core.admin_dashboard.circle_report_services import list_circle_reports
+
+        result = list_circle_reports(
+            status_filter=status,
+            target_type_filter=target_type,
+            circle_id=circle_id,
+            search=search,
+            page=page,
+            page_size=page_size,
+        )
+
+        return AdminCircleReportsPaginatedType(
+            reports=[_map_circle_report(r) for r in result["reports"]],
+            total_count=result["total_count"],
+            page=result["page"],
+            page_size=result["page_size"],
+            total_pages=result["total_pages"],
+            summary=CircleReportSummaryType(**result["summary"]),
+        )
+
     @strawberry.field(name="adminReports", description="List reports with search and filter.")
     @admin_required
     def admin_reports(

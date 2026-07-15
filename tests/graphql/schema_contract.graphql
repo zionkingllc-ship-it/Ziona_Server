@@ -92,6 +92,41 @@ type AdminCirclePayload {
   success: Boolean!
 }
 
+type AdminCircleReportPreviewType {
+  available: Boolean!
+  mediaType: String!
+  mediaUrl: String!
+  text: String!
+  thumbnailUrl: String!
+  unavailableReason: String!
+}
+
+type AdminCircleReportType {
+  autoHidden: Boolean!
+  circleId: String!
+  circleName: String!
+  contentPreview: AdminCircleReportPreviewType!
+  createdAt: String!
+  id: String!
+  reason: String!
+  reportCount: Int!
+  reporterUsername: String!
+  resolvedAt: String
+  resolvedByUsername: String!
+  status: String!
+  targetId: String!
+  targetType: String!
+}
+
+type AdminCircleReportsPaginatedType {
+  page: Int!
+  pageSize: Int!
+  reports: [AdminCircleReportType!]!
+  summary: CircleReportSummaryType!
+  totalCount: Int!
+  totalPages: Int!
+}
+
 type AdminCircleStatsPayload {
   error: ErrorType
   stats: AdminCircleStatsType
@@ -710,6 +745,13 @@ type CirclePostViewerState {
 type CircleReportPayload {
   error: ErrorType
   success: Boolean!
+}
+
+type CircleReportSummaryType {
+  pending: Int!
+  resolvedKept: Int!
+  resolvedRemoved: Int!
+  total: Int!
 }
 
 type CircleRule {
@@ -1802,6 +1844,9 @@ type Query {
 
   """List circle members."""
   adminCircleMembers(circleId: String!, page: Int! = 1, pageSize: Int! = 20): CircleMembersPaginatedType!
+
+  """List reports on circle content (anchors, responses, circles)."""
+  adminCircleReports(circleId: String! = "", page: Int! = 1, pageSize: Int! = 20, search: String! = "", status: String! = "", targetType: String! = ""): AdminCircleReportsPaginatedType!
 
   """Get circle-scoped stats for the admin circle detail page."""
   adminCircleStats(circleId: String!): AdminCircleStatsPayload!
