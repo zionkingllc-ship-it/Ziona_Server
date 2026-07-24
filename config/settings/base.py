@@ -397,8 +397,13 @@ MEDIA_URL_ALLOWLIST = env.list("MEDIA_URL_ALLOWLIST", default=["storage.googleap
 MEDIA_IMAGE_MAX_DIMENSION = env.int("MEDIA_IMAGE_MAX_DIMENSION", default=1600)
 MEDIA_IMAGE_JPEG_QUALITY = env.int("MEDIA_IMAGE_JPEG_QUALITY", default=82)
 MEDIA_VIDEO_MAX_DIMENSION = env.int("MEDIA_VIDEO_MAX_DIMENSION", default=1280)
-MEDIA_VIDEO_CRF = env.int("MEDIA_VIDEO_CRF", default=28)
-MEDIA_VIDEO_PRESET = env("MEDIA_VIDEO_PRESET", default="veryfast")
+# CRF 23 (was 28): visibly better quality; the phone already compressed once, so
+# re-encoding at 28 compounded the loss. ~2x larger files, bounded by the 90s/100MB cap.
+MEDIA_VIDEO_CRF = env.int("MEDIA_VIDEO_CRF", default=23)
+# ultrafast (was veryfast): ~2x faster transcode on the 0.5-CPU worker — the main
+# driver of the "3-minute upload". Net faster than veryfast+CRF28 even at CRF 23.
+# (Dashboard env vars still override these defaults if set.)
+MEDIA_VIDEO_PRESET = env("MEDIA_VIDEO_PRESET", default="ultrafast")
 MEDIA_STALE_UPLOAD_MINUTES = env.int("MEDIA_STALE_UPLOAD_MINUTES", default=15)
 MEDIA_STALE_UPLOAD_HOURS = env.int("MEDIA_STALE_UPLOAD_HOURS", default=24)
 MEDIA_PROCESS_TASK_SOFT_TIME_LIMIT_SECONDS = env.int(
