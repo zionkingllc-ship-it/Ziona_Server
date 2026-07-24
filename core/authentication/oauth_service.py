@@ -119,13 +119,21 @@ class OAuthService:
                     code="EMAIL_REGISTERED_WITH_DIFFERENT_PROVIDER",
                 )
 
+            # Existing password account, same email. Auto-link Google ONLY when
+            # Google has verified the email — that proves the same ownership a
+            # password-reset OTP would, so it grants no access the user couldn't
+            # already recover. An unverified Google email must never take over a
+            # password account. Linking keeps the password intact (see
+            # _link_google_account): the account becomes dual-login.
             if (
                 existing_user.social_auth_provider is None
                 and not existing_user.google_id
                 and existing_user.is_email_verified
+                and not is_verified
             ):
                 raise AuthenticationError(
-                    "This email is already registered with a password. Please sign in with your password instead, or use 'Forgot Password' to reset it.",
+                    "This email is already registered with a password. Please sign in "
+                    "with your password instead, or use 'Forgot Password' to reset it.",
                     code="EMAIL_REGISTERED_WITH_PASSWORD",
                 )
 

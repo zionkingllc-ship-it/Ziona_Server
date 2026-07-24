@@ -148,9 +148,10 @@ class TestGoogleOAuth:
         assert data["data"]["isNewUser"] is False
         assert data["data"]["user"]["needsUsernameSelection"] is False
 
-    def test_email_password_account_tries_google_oauth(self, api_client, mock_google_verify):
-        """Scenario 3: Email/Password Account Tries Google OAuth."""
-        # Create an existing email/password user
+    def test_password_account_google_oauth_auto_links_when_email_verified(
+        self, api_client, mock_google_verify
+    ):
+        """Verified Google email on an existing password account auto-links (dual login)."""
         User.objects.create_user(
             email="conflict@gmail.com",
             username="conflict_user",
@@ -162,7 +163,7 @@ class TestGoogleOAuth:
         mock_google_verify.return_value = {
             "aud": settings.GOOGLE_CLIENT_ID,
             "email": "conflict@gmail.com",
-            "sub": "different_google_id",
+            "sub": "linked_google_id",
             "email_verified": True,
         }
 
@@ -172,11 +173,46 @@ class TestGoogleOAuth:
             content_type="application/json",
         )
 
+        assert response.status_code == 200
+        data = response.json()
+        assert data["success"] is True
+        assert data["data"]["isNewUser"] is False
+
+        user = User.objects.get(email="conflict@gmail.com")
+        assert user.google_id == "linked_google_id"
+        # Password preserved — the account now supports both password and Google.
+        assert user.has_usable_password() is True
+
+    def test_password_account_google_oauth_blocked_when_email_unverified(
+        self, api_client, mock_google_verify
+    ):
+        """An UNVERIFIED Google email must not take over an existing password account."""
+        User.objects.create_user(
+            email="secure@gmail.com",
+            username="secure_user",
+            password="StrongPassword123!",  # pragma: allowlist secret
+            social_auth_provider=None,
+            is_email_verified=True,
+        )
+
+        mock_google_verify.return_value = {
+            "aud": settings.GOOGLE_CLIENT_ID,
+            "email": "secure@gmail.com",
+            "sub": "attacker_google_id",
+            "email_verified": False,
+        }
+
+        response = api_client.post(
+            self.url,
+            data=json.dumps({"id_token": "unverified_mock_token"}),
+            content_type="application/json",
+        )
+
         assert response.status_code == 400
         data = response.json()
         assert data["success"] is False
         assert data["error"]["code"] == "EMAIL_REGISTERED_WITH_PASSWORD"
-        assert "sign in with your password instead" in data["error"]["message"]
+        assert User.objects.get(email="secure@gmail.com").google_id is None
 
     def test_unverified_password_signup_can_continue_with_google_oauth(
         self, api_client, mock_google_verify
