@@ -270,13 +270,20 @@ class OAuthService:
                         code="EMAIL_REGISTERED_WITH_DIFFERENT_PROVIDER",
                     )
 
+                # Existing password account, same real email (relay emails never
+                # collide). Auto-link Apple ONLY when Apple has verified the email —
+                # same ownership proof as a password-reset OTP, so no extra access.
+                # An unverified email must never take over a password account.
+                # Linking keeps the password (see _link_apple_account): dual-login.
                 if (
                     existing_user.social_auth_provider is None
                     and not existing_user.apple_sub
                     and existing_user.is_email_verified
+                    and not email_verified
                 ):
                     raise AuthenticationError(
-                        "This email is already registered with a password. Please sign in with your password instead, or use 'Forgot Password' to reset it.",
+                        "This email is already registered with a password. Please sign in "
+                        "with your password instead, or use 'Forgot Password' to reset it.",
                         code="EMAIL_REGISTERED_WITH_PASSWORD",
                     )
 

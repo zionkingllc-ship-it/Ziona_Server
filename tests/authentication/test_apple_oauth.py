@@ -189,20 +189,59 @@ class TestAppleOAuth:
         assert data["success"] is False
         assert data["error"]["code"] == "APPLE_EMAIL_REQUIRED"
 
-    def test_password_account_conflict_returns_json_409(self, api_client, apple_private_key):
+    def test_password_account_apple_auto_links_when_email_verified(
+        self, api_client, apple_private_key
+    ):
+        """Verified Apple email on an existing password account auto-links (dual login)."""
         User.objects.create_user(
             email="password.apple@example.com",
             username="passwordapple",
             password="SecurePass1!",  # pragma: allowlist secret
             is_email_verified=True,
         )
-        raw_nonce = "password-conflict-nonce"
+        raw_nonce = "password-link-nonce"
         _cache_nonce(raw_nonce)
         token = _apple_token(
             apple_private_key,
-            sub="apple-password-conflict-sub",
+            sub="apple-linked-sub",
             raw_nonce=raw_nonce,
             email="password.apple@example.com",
+            email_verified="true",
+        )
+
+        response = api_client.post(
+            self.url,
+            data=json.dumps({"identityToken": token, "rawNonce": raw_nonce}),
+            content_type="application/json",
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["success"] is True
+        assert data["data"]["isNewUser"] is False
+
+        user = User.objects.get(email="password.apple@example.com")
+        assert user.apple_sub == "apple-linked-sub"
+        assert user.has_usable_password() is True  # password kept — dual login
+
+    def test_password_account_apple_blocked_when_email_unverified(
+        self, api_client, apple_private_key
+    ):
+        """An UNVERIFIED Apple email must not take over an existing password account."""
+        User.objects.create_user(
+            email="secure.apple@example.com",
+            username="secureapple",
+            password="SecurePass1!",  # pragma: allowlist secret
+            is_email_verified=True,
+        )
+        raw_nonce = "password-block-nonce"
+        _cache_nonce(raw_nonce)
+        token = _apple_token(
+            apple_private_key,
+            sub="apple-attacker-sub",
+            raw_nonce=raw_nonce,
+            email="secure.apple@example.com",
+            email_verified="false",
         )
 
         response = api_client.post(
@@ -215,10 +254,7 @@ class TestAppleOAuth:
         data = response.json()
         assert data["success"] is False
         assert data["error"]["code"] == "EMAIL_REGISTERED_WITH_PASSWORD"
-        assert (
-            data["error"]["message"]
-            == "This email is already registered with a password. Please sign in with your password instead, or use 'Forgot Password' to reset it."
-        )
+        assert User.objects.get(email="secure.apple@example.com").apple_sub is None
 
     def test_unverified_password_signup_can_continue_with_apple_oauth(
         self, api_client, apple_private_key
