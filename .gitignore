@@ -98,3 +98,4 @@ docs/admin-dashboard-frontend-contract.md
 # Local AI assistant context & scratch space (not for the repo)
 CLAUDE.md
 scratch/
+.claude/
