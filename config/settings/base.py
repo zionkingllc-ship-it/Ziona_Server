@@ -488,9 +488,7 @@ STRIPE_SUPPORT_MAX_AMOUNT_USD = env(
 STRIPE_CURRENCY = env("STRIPE_CURRENCY", default="usd")
 
 # App Store Links (used by seed_app_links + the share-preview store fallback)
-# NOTE: IOS_APP_STORE_URL still needs the real App Store numeric id once the app
-# is live (the default below is a placeholder path).
-IOS_APP_STORE_URL = env("IOS_APP_STORE_URL", default="https://apps.apple.com/app/ziona")
+IOS_APP_STORE_URL = env("IOS_APP_STORE_URL", default="https://apps.apple.com/app/id6768301878")
 ANDROID_PLAY_STORE_URL = env(
     "ANDROID_PLAY_STORE_URL",
     default="https://play.google.com/store/apps/details?id=com.zionking.ziona",
@@ -509,10 +507,9 @@ ANDROID_SHA256_CERT_FINGERPRINTS = env.list(
         "B6:A8:22:F3:C7:E0:71:56:6B:24:93:C4:57:6A:85:D9:81:01:65:3D:BD:CB:70:D2:0E:34:23:4B:5D:45:6B:52"
     ],
 )
-# Apple Team ID for the Universal Links appID (f"{TEAM_ID}.{bundle_id}"). Left
-# empty until the iOS team provides it; the view falls back to a visible
-# "TEAMID" placeholder so an unset value is obvious, not silently broken.
-APPLE_TEAM_ID = env("APPLE_TEAM_ID", default="")
+# Apple Team ID for the Universal Links appID (f"{TEAM_ID}.{bundle_id}"). Public
+# by design — it ships in the world-readable apple-app-site-association file.
+APPLE_TEAM_ID = env("APPLE_TEAM_ID", default="RLL2NX9J5Z")
 
 
 FIREBASE_CREDENTIALS_FILE = env("FIREBASE_CREDENTIALS_FILE", default="")
