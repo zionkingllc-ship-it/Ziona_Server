@@ -84,7 +84,10 @@ def _queue_moderation_email(user, action_type: str, reason: str) -> None:
         return
 
     email = user.email
-    subject, message = _moderation_email_copy(action_type, reason)
+    from core.emails.templates import render_moderation_notice
+
+    user_name = getattr(user, "full_name", "") or getattr(user, "username", "")
+    subject, message, html_message = render_moderation_notice(user_name, action_type, reason)
 
     def _send():
         try:
@@ -98,6 +101,7 @@ def _queue_moderation_email(user, action_type: str, reason: str) -> None:
                 from_email=settings.DEFAULT_FROM_EMAIL,
                 recipient_list=[email],
                 email_kind=f"moderation_{action_type}",
+                html_message=html_message,
             )
         except Exception:
             logger.warning(

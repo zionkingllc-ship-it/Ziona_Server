@@ -321,6 +321,102 @@ def render_admin_announcement(
     return subject, plain, html
 
 
+def _reason_box(reason: str) -> str:
+    """A highlighted reason callout for moderation emails."""
+    return f"""<div style="background:rgba(245,158,11,0.1);border:1px solid rgba(245,158,11,0.3);
+                      border-radius:12px;padding:16px 20px;margin:20px 0;">
+  <p style="margin:0;color:rgba(255,255,255,0.6);font-size:12px;
+            text-transform:uppercase;letter-spacing:1px;">Reason</p>
+  <p style="margin:6px 0 0;color:#F59E0B;font-size:15px;">{reason}</p>
+</div>"""
+
+
+def render_moderation_notice(
+    user_name: str | None,
+    action_type: str,
+    reason: str = "",
+    brand: str = "ZIONA",
+) -> tuple[str, str, str]:
+    """Render a branded warn / suspend / reactivate moderation email.
+
+    Returns (subject, plain, html). Falls back to a generic account update for
+    unknown action types.
+    """
+    name = _display_name(user_name)
+    b = _brand(brand)
+    support = "support@ziona.app"
+
+    if action_type == "warned":
+        subject = "Community Warning"
+        inner = (
+            _h2("Community Warning")
+            + _p(
+                "We noticed activity on your account that may violate our community "
+                "guidelines. This warning does not restrict your account access at this time."
+            )
+            + (_reason_box(reason) if reason else "")
+            + _p(
+                "Please review our community guidelines and avoid repeated violations to "
+                "keep Ziona a safe and faith-aligned space for everyone."
+            )
+        )
+        plain = (
+            f"Hello {name},\n\n"
+            "We noticed activity on your account that may violate our community "
+            "guidelines.\n\n"
+            + (f'Reason for warning:\n"{reason}"\n\n' if reason else "")
+            + "This warning does not restrict your account access at this time. Please "
+            "review our community guidelines and avoid repeated violations.\n\n"
+            f"If you believe this was sent in error, contact {support}.\n\n"
+            f"- The {b['name']} Team"
+        )
+    elif action_type == "suspended":
+        subject = "Your Ziona Account Has Been Suspended"
+        inner = (
+            _h2("Account Suspended")
+            + _p(
+                "Your Ziona account has been suspended due to a violation of our community "
+                "guidelines. While suspended, you cannot post, comment, or access your account."
+            )
+            + (_reason_box(reason) if reason else "")
+            + _p(f"If you believe this was a mistake or want to appeal, contact {support}.")
+        )
+        plain = (
+            f"Hello {name},\n\n"
+            "Your Ziona account has been suspended due to a violation of our community "
+            "guidelines.\n\n"
+            + (f'Reason for suspension:\n"{reason}"\n\n' if reason else "")
+            + "While suspended, you will not be able to post, comment, or access your "
+            "account.\n\n"
+            f"If you believe this was taken in error or would like to appeal, contact "
+            f"{support}.\n\n"
+            f"- The {b['name']} Team"
+        )
+    elif action_type == "reactivated":
+        subject = "Your Ziona Account Has Been Reactivated"
+        inner = (
+            _h2("Account Reactivated")
+            + _p("Your Ziona account has been reactivated and you can log in again.")
+            + _p(
+                "Please continue to follow our community guidelines to help keep Ziona a "
+                "safe and respectful space for everyone."
+            )
+        )
+        plain = (
+            f"Hello {name},\n\n"
+            "Your Ziona account has been reactivated and you can now log in again.\n\n"
+            "Please continue to follow our community guidelines.\n\n"
+            f"- The {b['name']} Team"
+        )
+    else:
+        subject = "Ziona Account Update"
+        inner = _h2("Account Update") + _p(reason or "There is an update on your account.")
+        plain = f"Hello {name},\n\n{reason}\n\n- The {b['name']} Team"
+
+    html = _wrap_layout(brand, inner)
+    return subject, plain, html
+
+
 def render_support_donation(
     user_name: str | None,
     support_amount: str | Decimal,

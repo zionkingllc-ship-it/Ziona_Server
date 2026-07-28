@@ -1,5 +1,6 @@
 from core.emails.templates import (
     render_admin_announcement,
+    render_moderation_notice,
     render_notification_digest,
     render_reset_password,
     render_support_donation,
@@ -108,3 +109,32 @@ def test_support_donation_template_renders(settings):
     assert "Thank you for your support!" in html
     assert "success-illustration.png" not in html
     _assert_shipped_email_html(html)
+
+
+def test_moderation_notice_warn_renders_branded_html_with_reason(settings):
+    settings.EMAIL_ASSET_BASE_URL = "https://cdn.example.com/email"
+
+    subject, plain, html = render_moderation_notice(
+        user_name="Grace",
+        action_type="warned",
+        reason="Repeated off-topic posts",
+    )
+
+    assert subject == "Community Warning"
+    assert "Repeated off-topic posts" in plain
+    assert "Repeated off-topic posts" in html
+    assert "ZIONA" in html  # branded layout header
+    assert "<!DOCTYPE html>" in html
+    _assert_shipped_email_html(html)
+
+
+def test_moderation_notice_covers_suspend_and_reactivate(settings):
+    settings.EMAIL_ASSET_BASE_URL = "https://cdn.example.com/email"
+
+    for action in ("suspended", "reactivated"):
+        subject, plain, html = render_moderation_notice(
+            user_name="Grace", action_type=action, reason="policy"
+        )
+        assert subject
+        assert "<!DOCTYPE html>" in html
+        assert plain.strip()
