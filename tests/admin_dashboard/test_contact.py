@@ -20,7 +20,9 @@ def test_contact_serves_live_requester_avatar(authenticated_admin):
     from core.users.models import User
 
     user = User.objects.create_user(
-        email="requester@example.com", username="requester", password="Pass123!"
+        email="requester@example.com",
+        username="requester",
+        password="Pass123!",  # pragma: allowlist secret
     )
     ContactMessage.objects.create(
         name="Stale Name",

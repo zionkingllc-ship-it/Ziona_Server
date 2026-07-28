@@ -55,7 +55,9 @@ def test_share_preview_includes_store_fallback_and_deep_link(client, settings):
     settings.APP_SHARE_BASE_URL = "https://ziona.app"
 
     user = User.objects.create_user(
-        email="sharer@example.com", username="sharer", password="Pass123!"
+        email="sharer@example.com",
+        username="sharer",
+        password="Pass123!",  # pragma: allowlist secret
     )
     post = Post.objects.create(user=user, post_type="text", caption="hi there")
 
