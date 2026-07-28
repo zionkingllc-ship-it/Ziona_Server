@@ -94,6 +94,13 @@ class ContactService:
 
         # Honeypot: if populated, save as spam and return fake success
         is_spam = bool(honeypot and honeypot.strip())
+        if is_spam:
+            # Log the silent drop so a mis-triggered honeypot (a legitimate
+            # submission never reaching the inbox) is observable, not invisible.
+            logger.warning(
+                "contact_submission_dropped_as_spam",
+                extra={"brand": brand, "ip_address": ip_address},
+            )
 
         name = name.strip()
         email = email.strip().lower()
