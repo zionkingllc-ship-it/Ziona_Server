@@ -44,6 +44,19 @@
             font-weight: 600;
         }
         .cta:hover { background: #5a52d9; }
+        .stores { margin-top: 24px; }
+        .store-link {
+            display: inline-block;
+            margin: 8px;
+            padding: 10px 24px;
+            border: 1px solid #ccc;
+            border-radius: 8px;
+            color: #333;
+            text-decoration: none;
+            font-size: 0.95em;
+        }
+        .store-link:hover { border-color: #6c63ff; color: #6c63ff; }
+        .hint { color: #999; font-size: 0.85em; margin-top: 28px; }
     </style>
 </head>
 <body>
@@ -54,6 +67,27 @@
     <img src="{{ preview_image }}" alt="Post preview" style="max-width: 100%; border-radius: 12px;">
     {% endif %}
     <br>
-    <a href="https://ziona.app" class="cta">Open in Ziona</a>
+    <a href="{{ post_url }}" class="cta" id="open-app">Open in {{ app_name }}</a>
+
+    <div class="stores">
+        <a href="{{ ios_app_store_url }}" class="store-link" id="ios-store">Download on the App Store</a>
+        <a href="{{ android_play_store_url }}" class="store-link" id="android-store">Get it on Google Play</a>
+    </div>
+    <p class="hint">Don’t have the app? Install it, then reopen this link.</p>
+
+    <script>
+        // If the app is installed, the OS intercepts the https link and this page
+        // never renders. When it DOES render (app missing / desktop), show only the
+        // relevant store on mobile; keep both for desktop and link-preview bots.
+        (function () {
+            var ua = navigator.userAgent || "";
+            var isIOS = /iPad|iPhone|iPod/.test(ua);
+            var isAndroid = /Android/.test(ua);
+            var ios = document.getElementById("ios-store");
+            var android = document.getElementById("android-store");
+            if (isIOS && android) { android.style.display = "none"; }
+            if (isAndroid && ios) { ios.style.display = "none"; }
+        })();
+    </script>
 </body>
 </html>

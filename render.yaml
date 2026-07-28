@@ -50,6 +50,10 @@ services:
         value: com.zionking.ziona
       - key: APPLE_CLIENT_IDS
         sync: false
+      # Apple Team ID for iOS Universal Links (well-known/apple-app-site-association).
+      # Set to the real Team ID once the iOS team provides it; empty until then.
+      - key: APPLE_TEAM_ID
+        sync: false
       - key: ENSEND_API_KEY
         sync: false
       - key: ENSEND_API_URL
@@ -181,6 +185,10 @@ services:
       - key: APPLE_BUNDLE_ID
         value: com.zionking.ziona
       - key: APPLE_CLIENT_IDS
+        sync: false
+      # Apple Team ID for iOS Universal Links (well-known/apple-app-site-association).
+      # Set to the real Team ID once the iOS team provides it; empty until then.
+      - key: APPLE_TEAM_ID
         sync: false
       - key: ENSEND_API_KEY
         sync: false

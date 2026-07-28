@@ -13,18 +13,33 @@ from django.shortcuts import render
 from django.views.decorators.cache import cache_control
 
 from core.posts.models import Post
-from core.shared.utils import build_post_share_url
+from core.shared.utils import build_post_share_url, parse_uuid
+
+
+def _ios_app_id() -> str:
+    """Build the Universal Links appID as ``<TeamID>.<bundle id>``.
+
+    Falls back to a visible ``TEAMID`` placeholder until APPLE_TEAM_ID is set so
+    a missing Team ID is obvious rather than silently invalid.
+    """
+    team_id = settings.APPLE_TEAM_ID or "TEAMID"
+    bundle_ids = getattr(settings, "APPLE_DEFAULT_CLIENT_IDS", []) or ["com.zionking.ziona"]
+    return f"{team_id}.{bundle_ids[0]}"
 
 
 @cache_control(max_age=86400)
 def apple_app_site_association(request: HttpRequest) -> JsonResponse:
-    """Serve the Apple App Site Association file for iOS Universal Links."""
+    """Serve the Apple App Site Association file for iOS Universal Links.
+
+    Must be reachable at https://<share domain>/.well-known/apple-app-site-association
+    with no file extension and Content-Type application/json (both satisfied here).
+    """
     data = {
         "applinks": {
             "apps": [],
             "details": [
                 {
-                    "appID": "TEAMID.com.ziona.app",
+                    "appID": _ios_app_id(),
                     "paths": ["/post/*"],
                 }
             ],
@@ -35,14 +50,22 @@ def apple_app_site_association(request: HttpRequest) -> JsonResponse:
 
 @cache_control(max_age=86400)
 def android_asset_links(request: HttpRequest) -> JsonResponse:
-    """Serve the Android Asset Links file for App Links."""
+    """Serve the Android Asset Links file for App Links.
+
+    Must be reachable at https://<share domain>/.well-known/assetlinks.json.
+    Values come from settings so the package/fingerprints can differ per env and
+    support both the Play App Signing key and the upload key.
+    """
     data = [
         {
-            "relation": ["delegate_permission/common.handle_all_urls"],
+            "relation": [
+                "delegate_permission/common.handle_all_urls",
+                "delegate_permission/common.get_login_creds",
+            ],
             "target": {
                 "namespace": "android_app",
-                "package_name": "com.ziona.app",
-                "sha256_cert_fingerprints": [],
+                "package_name": settings.ANDROID_APP_PACKAGE_NAME,
+                "sha256_cert_fingerprints": list(settings.ANDROID_SHA256_CERT_FINGERPRINTS),
             },
         }
     ]
@@ -55,6 +78,9 @@ def share_preview(request: HttpRequest, post_id: str) -> HttpResponse:
     This page is what crawlers (Facebook, Twitter, iMessage, etc.)
     will see when a user shares a Ziona post link.
     """
+    if parse_uuid(post_id) is None:
+        return HttpResponse("Post not found", status=404)
+
     post = (
         Post.objects.select_related("user")
         .prefetch_related("media_files", "post_media")
@@ -82,6 +108,9 @@ def share_preview(request: HttpRequest, post_id: str) -> HttpResponse:
         "caption": post.caption or "Check out this post on Ziona!",
         "post_url": build_post_share_url(settings.APP_SHARE_BASE_URL, post_id),
         "app_name": "Ziona",
+        # Store fallbacks for the app-not-installed case.
+        "ios_app_store_url": settings.IOS_APP_STORE_URL,
+        "android_play_store_url": settings.ANDROID_PLAY_STORE_URL,
     }
 
     return render(request, "share_preview.html", context)
