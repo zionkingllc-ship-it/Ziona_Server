@@ -25,32 +25,37 @@ def handle_comment_notifications(sender, instance, created, **kwargs):
     try:
         # Mentions — routed through the shared pipeline (deduplication,
         # preference checks, and self-mention guards are all handled there).
-        notify_mentions(
+        mention_notifications = notify_mentions(
             text=instance.text or "",
             actor=instance.user,
             reference_id=instance.id,
             reference_type="comment",
         )
+        mentioned_user_ids = {str(n.user_id) for n in mention_notifications}
 
-        # Notify post/comment author
+        # Notify the post/comment author with a dedicated "New Reply" title.
+        # Skip if they were already @-mentioned in the same comment — the mention
+        # notification is more specific, so we don't double-notify.
         if instance.parent_comment_id:
             parent = Comment.objects.get(id=instance.parent_comment_id)
-            if parent.user_id != instance.user_id:
+            if parent.user_id != instance.user_id and str(parent.user_id) not in mentioned_user_ids:
                 create_notification(
                     user_id=parent.user_id,
                     type_str=NotificationType.REPLY_COMMENT,
                     reference_id=instance.id,
                     reference_type="comment",
+                    title="New Reply",
                     message=f"{instance.user.username} replied to your comment",
                 )
         else:
             post = instance.post
-            if post.user_id != instance.user_id:
+            if post.user_id != instance.user_id and str(post.user_id) not in mentioned_user_ids:
                 create_notification(
                     user_id=post.user_id,
                     type_str=NotificationType.REPLY_POST,
                     reference_id=instance.id,
                     reference_type="comment",
+                    title="New Reply",
                     message=f"{instance.user.username} replied to your post",
                 )
     except Exception as e:
