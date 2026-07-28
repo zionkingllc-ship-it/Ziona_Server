@@ -458,6 +458,54 @@ class AnchorManagementService:
 
         return _anchor_to_dict(anchor)
 
+    @staticmethod
+    @transaction.atomic
+    def delete_anchor(
+        anchor_id: str,
+        admin_user=None,
+        ip_address: str = "",
+    ) -> dict:
+        """Soft-delete ANY anchor (including a live/posted one) for moderation.
+
+        Unlike editing (scheduled-only), delete works on any anchor. Revokes a
+        pending Celery task if one is scheduled and clears the active-anchor cache.
+        """
+        from core.circles.anchor_services import invalidate_active_anchor_cache
+        from core.circles.models import Anchor
+        from core.shared.utils import parse_uuid
+
+        if parse_uuid(anchor_id) is None:
+            raise AdminError(message="Anchor not found.", code=ErrorCode.ANCHOR_NOT_FOUND)
+
+        anchor = (
+            Anchor.objects.select_for_update(of=("self",))
+            .filter(id=anchor_id, deleted_at__isnull=True)
+            .first()
+        )
+
+        if not anchor:
+            raise AdminError(message="Anchor not found.", code=ErrorCode.ANCHOR_NOT_FOUND)
+
+        if anchor.celery_task_id:
+            _revoke_celery_task(anchor.celery_task_id)
+
+        anchor.deleted_at = datetime.now(timezone.utc)
+        anchor.celery_task_id = ""
+        anchor.save(update_fields=["deleted_at", "celery_task_id", "updated_at"])
+        invalidate_active_anchor_cache(str(anchor.circle_id))
+
+        log_admin_action(
+            admin_user=admin_user,
+            action="ANCHOR_DELETED",
+            target_type="Anchor",
+            target_id=str(anchor.id),
+            ip_address=ip_address,
+        )
+
+        logger.info("anchor_deleted", extra={"anchor_id": anchor_id})
+
+        return _anchor_to_dict(anchor)
+
 
 # ─────────────────────────────────────────
 # Private helpers

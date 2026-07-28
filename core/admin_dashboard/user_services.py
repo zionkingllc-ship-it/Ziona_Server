@@ -8,7 +8,7 @@ import logging
 from datetime import datetime, timezone
 
 from django.db import transaction
-from django.db.models import Count, OuterRef, Q, Subquery
+from django.db.models import Count, OuterRef, Q, Subquery, Value
 from django.db.models.functions import Coalesce
 
 from core.admin_dashboard.permissions import log_admin_action
@@ -82,9 +82,25 @@ class UserManagementService:
             .values("total")
         )
 
+        # Count of reports filed AGAINST this user — i.e. reports targeting a post
+        # they authored, a comment they authored, or their profile directly.
+        # Grouped by a constant so the correlated subquery yields a single total.
+        received_reports_sq = (
+            Report.objects.filter(
+                Q(post__user_id=OuterRef("pk"))
+                | Q(comment__user_id=OuterRef("pk"))
+                | Q(target_type="profile", target_id=OuterRef("pk"))
+            )
+            .order_by()
+            .values(_grp=Value(1))
+            .annotate(total=Count("id"))
+            .values("total")
+        )
+
         qs = User.all_objects.select_related("account_deletion_request").annotate(
             posts_count=Count("posts", filter=Q(posts__deleted_at__isnull=True)),
             submitted_report_count=Coalesce(Subquery(submitted_reports_sq), 0),
+            received_report_count=Coalesce(Subquery(received_reports_sq), 0),
         )
 
         if search:

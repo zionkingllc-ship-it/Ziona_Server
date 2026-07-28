@@ -34,6 +34,7 @@ class AdminUserType:
     deleted_at: str | None = strawberry.field(name="deletedAt", default=None)
     posts_count: int = strawberry.field(name="postsCount")
     submitted_reports: int = strawberry.field(name="submittedReports", default=0)
+    received_reports: int = strawberry.field(name="receivedReports", default=0)
     warned_at: str | None = strawberry.field(name="warnedAt", default=None)
     suspended_at: str | None = strawberry.field(name="suspendedAt", default=None)
     suspension_reason: str = strawberry.field(name="suspensionReason", default="")
@@ -97,6 +98,7 @@ def _map_user(data: dict) -> AdminUserType:
         deleted_at=data.get("deleted_at"),
         posts_count=data["posts_count"],
         submitted_reports=data.get("submitted_reports", 0),
+        received_reports=data.get("received_reports", 0),
         warned_at=data.get("warned_at"),
         suspended_at=data.get("suspended_at"),
         suspension_reason=data.get("suspension_reason", ""),

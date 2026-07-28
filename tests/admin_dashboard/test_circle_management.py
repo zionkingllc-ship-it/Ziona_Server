@@ -26,6 +26,19 @@ def test_create_circle(authenticated_admin):
 
 
 @pytest.mark.django_db
+def test_circle_dict_includes_creator_email(authenticated_admin):
+    circle = CircleManagementService.create_circle(
+        name="Email Circle",
+        description="d",
+        cover_image="",
+        profile_image_url="",
+        banner_image="",
+        admin_user=authenticated_admin["user"],
+    )
+    assert circle["created_by_email"] == authenticated_admin["user"].email
+
+
+@pytest.mark.django_db
 def test_edit_circle_has_no_cooldown(authenticated_admin):
     # Circles were previously locked for 60 days after an edit. That cooldown
     # has been removed — admins can edit at any time, even right after a prior edit.

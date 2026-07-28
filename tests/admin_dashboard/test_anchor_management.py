@@ -187,3 +187,37 @@ def test_public_create_anchor_schedules_future_anchor_without_replacing_active(a
     assert scheduled_anchor.celery_task_id == "scheduled-anchor-task"
     assert get_active_anchor(str(circle.id), viewer_id=str(admin.id)).id == active_anchor.id
     apply_async.assert_called_once()
+
+
+@pytest.mark.django_db
+def test_delete_anchor_soft_deletes_live_anchor(authenticated_admin):
+    admin = authenticated_admin["user"]
+    circle = Circle.objects.create(name="Delete Circle", created_by=admin)
+    anchor = Anchor.objects.create(
+        circle=circle,
+        anchor_type="TEXT",
+        content="Live anchor",
+        anchor_status="posted",
+        published_at=timezone.now(),
+        expires_at=timezone.now() + timedelta(days=1),
+    )
+
+    result = AnchorManagementService.delete_anchor(str(anchor.id), admin_user=admin)
+
+    anchor.refresh_from_db()
+    assert anchor.deleted_at is not None  # any anchor, including a live one
+    assert result["id"] == str(anchor.id)
+
+
+@pytest.mark.django_db
+def test_delete_anchor_rejects_missing_anchor(authenticated_admin):
+    import uuid
+
+    from core.shared.exceptions import AdminError
+
+    with pytest.raises(AdminError) as excinfo:
+        AnchorManagementService.delete_anchor(
+            str(uuid.uuid4()), admin_user=authenticated_admin["user"]
+        )
+
+    assert excinfo.value.code == "ANCHOR_NOT_FOUND"

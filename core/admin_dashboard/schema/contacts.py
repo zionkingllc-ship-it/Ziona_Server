@@ -38,6 +38,7 @@ class AdminContactType:
     message: str
     topic: str = ""
     requester_username: str = strawberry.field(name="requesterUsername", default="")
+    requester_avatar_url: str = strawberry.field(name="requesterAvatarUrl", default="")
     source: str
     brand: str
     status: str
@@ -118,6 +119,7 @@ def _map_contact(data: dict) -> AdminContactType:
         message=data["message"],
         topic=data.get("topic", ""),
         requester_username=data.get("requester_username", ""),
+        requester_avatar_url=data.get("requester_avatar_url", ""),
         source=data.get("source", ""),
         brand=data.get("brand", ""),
         status=data["status"],

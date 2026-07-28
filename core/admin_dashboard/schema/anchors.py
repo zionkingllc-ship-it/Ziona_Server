@@ -312,3 +312,28 @@ class AnchorsAdminMutations:
                 success=False,
                 error=ErrorType(code=e.code, message=e.message),
             )
+
+    @strawberry.mutation(
+        name="adminDeleteAnchor",
+        description="Soft-delete any anchor (including a live one) for moderation.",
+    )
+    @admin_required
+    def admin_delete_anchor(self, info: Info, anchor_id: str) -> AdminAnchorPayload:
+        from core.admin_dashboard.anchor_services import AnchorManagementService
+        from core.shared.exceptions import AdminError
+
+        admin_user = info.context.admin_user
+        ip = getattr(info.context, "admin_ip", "")
+
+        try:
+            result = AnchorManagementService.delete_anchor(
+                anchor_id=anchor_id,
+                admin_user=admin_user,
+                ip_address=ip,
+            )
+            return AdminAnchorPayload(success=True, anchor=_map_anchor(result))
+        except AdminError as e:
+            return AdminAnchorPayload(
+                success=False,
+                error=ErrorType(code=e.code, message=e.message),
+            )

@@ -41,6 +41,38 @@ def test_list_users_includes_submitted_report_count(authenticated_admin):
 
 
 @pytest.mark.django_db
+def test_list_users_includes_received_report_count(authenticated_admin):
+    from core.moderation.models import Report
+    from core.posts.models import Post
+
+    author = User.objects.create_user(
+        email="reported-author@example.com",
+        username="reportedauthor",
+        password="Pass123!",
+    )
+    reporter = User.objects.create_user(
+        email="the-reporter@example.com",
+        username="thereporter",
+        password="Pass123!",
+    )
+    post = Post.objects.create(user=author, post_type="text", caption="reported content")
+
+    # Report against the author's post + a direct profile report.
+    Report.objects.create(
+        target_type="post", target_id=post.id, post=post, reason="spam", reporter=reporter
+    )
+    Report.objects.create(
+        target_type="profile", target_id=author.id, reason="abuse", reporter=reporter
+    )
+
+    result = UserManagementService.list_users(search="reportedauthor")
+    users = {u["username"]: u for u in result["users"]}
+    assert users["reportedauthor"]["received_reports"] == 2
+    # The author filed none.
+    assert users["reportedauthor"]["submitted_reports"] == 0
+
+
+@pytest.mark.django_db
 def test_list_users_includes_all_admin_account_states(authenticated_admin):
     User.objects.create_user(
         email="warned@example.com",
@@ -187,3 +219,26 @@ def test_redact_legacy_user_snapshot_payloads_strips_existing_snapshots(
     assert moderation_action.metadata["subject_user_id"] == str(user.id)
     assert audit_log.details["legacy_snapshot_redacted"] is True
     assert moderation_action.metadata["legacy_snapshot_redacted"] is True
+
+
+@pytest.mark.django_db
+def test_recent_activities_have_friendly_descriptions_for_all_actions(authenticated_admin):
+    from core.admin_dashboard.services import DashboardService
+
+    admin = authenticated_admin["user"]
+    for action in ("ANCHOR_DELETED", "CIRCLE_REPORT_REVIEWED", "USER_PERMANENTLY_DELETED"):
+        AdminAuditLog.objects.create(
+            admin_user=admin,
+            action=action,
+            target_type="Anchor",
+            target_id="x",
+            ip_address="10.0.0.1",
+        )
+
+    activities = DashboardService.get_recent_activities(limit=10)
+    by_action = {a["action"]: a["description"] for a in activities}
+
+    # Newly mapped actions read as verb-phrases, not raw ACTION_CODE text.
+    assert "deleted an anchor" in by_action["ANCHOR_DELETED"]
+    assert "reviewed a circle report" in by_action["CIRCLE_REPORT_REVIEWED"]
+    assert "permanently deleted a user" in by_action["USER_PERMANENTLY_DELETED"]

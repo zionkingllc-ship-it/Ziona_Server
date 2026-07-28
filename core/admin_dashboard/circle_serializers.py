@@ -9,8 +9,10 @@ def _circle_to_dict(circle) -> dict:
     member_count = getattr(circle, "member_count_val", 0)
 
     created_by_name = ""
+    created_by_email = ""
     if circle.created_by:
         created_by_name = circle.created_by.full_name or circle.created_by.username
+        created_by_email = circle.created_by.email or ""
 
     return {
         "id": str(circle.id),
@@ -23,6 +25,7 @@ def _circle_to_dict(circle) -> dict:
         "is_active": circle.is_active,
         "member_count": member_count,
         "created_by_name": created_by_name,
+        "created_by_email": created_by_email,
         "last_edited_at": circle.last_edited_at.isoformat() if circle.last_edited_at else None,
         "created_at": circle.created_at.isoformat() if circle.created_at else "",
     }

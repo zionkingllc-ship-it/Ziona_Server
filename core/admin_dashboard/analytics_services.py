@@ -92,6 +92,13 @@ class AnalyticsService:
                     total_data[0] if total_data else 0,
                     total_data[-1] if total_data else 0,
                 ),
+                # Day-over-day: today's new users vs yesterday's, and the % change.
+                "new_users_today": new_data[-1] if new_data else 0,
+                "new_users_yesterday": new_data[-2] if len(new_data) >= 2 else 0,
+                "daily_growth_rate": _calc_percentage_change(
+                    new_data[-2] if len(new_data) >= 2 else 0,
+                    new_data[-1] if new_data else 0,
+                ),
             },
         }
         result = _with_cache_metadata(result, CACHE_TTL_ANALYTICS)

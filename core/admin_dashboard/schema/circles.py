@@ -27,6 +27,7 @@ class AdminCircleType:
     is_active: bool = strawberry.field(name="isActive")
     member_count: int = strawberry.field(name="memberCount")
     created_by_name: str = strawberry.field(name="createdByName")
+    created_by_email: str = strawberry.field(name="createdByEmail", default="")
     can_edit: bool = strawberry.field(name="canEdit", default=True)
     cooldown_remaining_days: int = strawberry.field(name="cooldownRemainingDays", default=0)
     last_edited_at: str | None = strawberry.field(name="lastEditedAt", default=None)
@@ -113,6 +114,7 @@ def _map_circle(data: dict) -> AdminCircleType:
         is_active=data["is_active"],
         member_count=data["member_count"],
         created_by_name=data.get("created_by_name", ""),
+        created_by_email=data.get("created_by_email", ""),
         can_edit=data.get("can_edit", True),
         cooldown_remaining_days=data.get("cooldown_remaining_days", 0),
         last_edited_at=data.get("last_edited_at"),

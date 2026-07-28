@@ -16,6 +16,34 @@ def test_list_contacts(authenticated_admin):
 
 
 @pytest.mark.django_db
+def test_contact_serves_live_requester_avatar(authenticated_admin):
+    from core.users.models import User
+
+    user = User.objects.create_user(
+        email="requester@example.com", username="requester", password="Pass123!"
+    )
+    ContactMessage.objects.create(
+        name="Stale Name",
+        email="requester@example.com",
+        message="Help",
+        status="pending",
+        requester_user=user,
+    )
+
+    # Profile updates AFTER the ticket was filed.
+    user.avatar_url = "https://cdn.example.com/new-avatar.jpg"
+    user.username = "requester_renamed"
+    user.save(update_fields=["avatar_url", "username"])
+
+    result = ContactService.list_contacts("pending", None, 1, 10)
+    contact = result["contacts"][0]
+
+    # Avatar + username come live from the profile, not the ticket snapshot.
+    assert contact["requester_avatar_url"] == "https://cdn.example.com/new-avatar.jpg"
+    assert contact["requester_username"] == "requester_renamed"
+
+
+@pytest.mark.django_db
 def test_update_contact_status(authenticated_admin):
     contact = ContactMessage.objects.create(
         name="Test User", email="test@example.com", message="Help me", status="pending"

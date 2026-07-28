@@ -151,6 +151,7 @@ type AdminCircleType {
   cooldownRemainingDays: Int!
   coverImage: String!
   createdAt: String!
+  createdByEmail: String!
   createdByName: String!
   description: String!
   id: String!
@@ -193,6 +194,7 @@ type AdminContactType {
   name: String!
   repliedAt: String
   replies: [ContactReplyType!]!
+  requesterAvatarUrl: String!
   requesterUsername: String!
   source: String!
   status: String!
@@ -374,6 +376,7 @@ type AdminUserType {
   lastLogin: String
   lifecycleState: String!
   postsCount: Int!
+  receivedReports: Int!
   role: String!
   status: String!
   submittedReports: Int!
@@ -1291,6 +1294,7 @@ type MediaUploadPayload {
 
 type MetricCardType {
   change: Float!
+  engagementRate: Float
   label: String!
   value: Int!
 }
@@ -1325,6 +1329,9 @@ type Mutation {
 
   """Deactivate a circle."""
   adminDeactivateCircle(circleId: String!): AdminCirclePayload!
+
+  """Soft-delete any anchor (including a live one) for moderation."""
+  adminDeleteAnchor(anchorId: String!): AdminAnchorPayload!
 
   """Soft-delete a circle."""
   adminDeleteCircle(circleId: String!): AdminCirclePayload!

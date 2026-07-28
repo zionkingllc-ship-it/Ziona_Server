@@ -119,6 +119,67 @@ def test_analytics_live_fallback_returns_current_source_data():
 
 
 @pytest.mark.django_db
+def test_user_growth_includes_day_over_day_new_user_comparison():
+    cache.clear()
+    today = timezone.now().date()
+
+    # Yesterday comes from the pre-aggregated DailyAnalytics row...
+    DailyAnalytics.objects.create(
+        date=today - timedelta(days=1),
+        total_users=105,
+        new_users=1,
+        dau=0,
+        wau=0,
+        mau=0,
+        posts_count=0,
+        comments_count=0,
+        reports_received=0,
+        reports_resolved=0,
+        avg_resolution_minutes=0.0,
+    )
+    # ...today is always computed live from the User table (2 new users today).
+    for i in range(2):
+        User.objects.create_user(
+            email=f"grow{i}@example.com", username=f"grow{i}", password="SecurePass1!"
+        )
+
+    summary = AnalyticsService.get_user_growth("last_month")["summary"]
+
+    assert summary["new_users_today"] == 2
+    assert summary["new_users_yesterday"] == 1
+    assert summary["daily_growth_rate"] == 100.0  # (2 - 1) / 1 * 100
+
+
+@pytest.mark.django_db
+def test_dashboard_engagement_rate_is_share_of_active_users():
+    cache.clear()
+    now = timezone.now()
+    u1 = User.objects.create_user(
+        email="eng1@example.com", username="eng1", password="SecurePass1!"
+    )
+    u2 = User.objects.create_user(
+        email="eng2@example.com", username="eng2", password="SecurePass1!"
+    )
+    # Both active today; only u1 engages.
+    User.objects.filter(id__in=[u1.id, u2.id]).update(last_login=now)
+    post = Post.objects.create(user=u1, post_type="text", caption="hello")
+    Comment.objects.create(post=post, user=u1, text="engaged")
+
+    metrics = DashboardService.get_metrics()
+
+    # Raw count field is unchanged; the additive rate is 1 engaged / 2 active = 50%.
+    assert metrics["engagement"]["value"] == 1
+    assert metrics["engagement"]["rate"] == 50.0
+
+
+@pytest.mark.django_db
+def test_dashboard_engagement_rate_handles_zero_active_users():
+    cache.clear()
+    metrics = DashboardService.get_metrics()
+    assert metrics["engagement"]["rate"] == 0.0  # no divide-by-zero
+
+
+@pytest.mark.django_db
 def test_last_quarter_user_growth_does_not_recompute_every_day():
     cache.clear()
     today = timezone.now().date()

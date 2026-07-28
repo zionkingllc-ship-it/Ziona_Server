@@ -10,6 +10,7 @@ def _user_to_dict(user) -> dict:
     """Convert User model to admin-facing dict."""
     posts_count = getattr(user, "posts_count", 0)
     submitted_reports = getattr(user, "submitted_report_count", 0)
+    received_reports = getattr(user, "received_report_count", 0)
 
     deletion_request = getattr(user, "account_deletion_request", None)
     return {
@@ -35,6 +36,7 @@ def _user_to_dict(user) -> dict:
         ),
         "posts_count": posts_count,
         "submitted_reports": submitted_reports,
+        "received_reports": received_reports,
         "warned_at": user.warned_at.isoformat() if user.warned_at else None,
         "suspended_at": user.suspended_at.isoformat() if user.suspended_at else None,
         "suspension_reason": user.suspension_reason,

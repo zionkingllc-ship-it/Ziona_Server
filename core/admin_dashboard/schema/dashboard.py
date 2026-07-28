@@ -28,6 +28,9 @@ class MetricCardType:
     label: str
     value: int
     change: float
+    # Optional percentage (0–100). Populated for the engagement card only;
+    # null on the other cards. Additive — `value` is unchanged.
+    rate: float | None = strawberry.field(name="engagementRate", default=None)
 
 
 @strawberry.type

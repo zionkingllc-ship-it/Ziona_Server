@@ -70,7 +70,7 @@ class DashboardService:
         # Pending Reports
         pending_reports = Report.objects.filter(status=ReportStatus.PENDING).count()
 
-        # Avg Engagement (likes + comments today / posts today)
+        # Engagement Today — raw likes + comments count (kept for back-compat).
         likes_today = Like.objects.filter(created_at__gte=today_start).count()
         comments_today = Comment.objects.filter(
             deleted_at__isnull=True, created_at__gte=today_start
@@ -86,6 +86,27 @@ class DashboardService:
         ).count()
         engagement_yesterday = likes_yesterday + comments_yesterday
         engagement_change = _calc_percentage_change(engagement_yesterday, engagement_today)
+
+        # Engagement rate — share of today's active users who engaged (0–100%).
+        active_users_today = User.objects.filter(
+            deleted_at__isnull=True, last_login__gte=today_start
+        ).count()
+        liker_ids = (
+            Like.objects.filter(created_at__gte=today_start)
+            .values_list("user_id", flat=True)
+            .distinct()
+        )
+        commenter_ids = (
+            Comment.objects.filter(deleted_at__isnull=True, created_at__gte=today_start)
+            .values_list("user_id", flat=True)
+            .distinct()
+        )
+        engaged_users_today = len(set(liker_ids) | set(commenter_ids))
+        engagement_rate = (
+            round((engaged_users_today / active_users_today) * 100, 1)
+            if active_users_today
+            else 0.0
+        )
 
         result = {
             "total_users": {
@@ -107,6 +128,7 @@ class DashboardService:
                 "value": engagement_today,
                 "change": engagement_change,
                 "label": "Engagement Today",
+                "rate": engagement_rate,
             },
         }
 
@@ -250,17 +272,25 @@ def _format_action_description(audit_entry) -> str:
         "USER_WARNED": "warned a user",
         "USER_SUSPENDED": "suspended a user",
         "USER_DELETED": "deleted a user",
+        "USER_PERMANENTLY_DELETED": "permanently deleted a user",
         "USER_REACTIVATED": "reactivated a user",
         "CIRCLE_CREATED": "created a new circle",
         "CIRCLE_EDITED": "edited a circle",
         "CIRCLE_ACTIVATED": "activated a circle",
         "CIRCLE_DEACTIVATED": "deactivated a circle",
+        "CIRCLE_DELETED": "deleted a circle",
         "ANCHOR_CREATED": "created a new anchor",
         "ANCHOR_SCHEDULED": "scheduled an anchor",
         "ANCHOR_POSTED": "posted an anchor",
+        "ANCHOR_EDITED": "edited an anchor",
         "ANCHOR_CANCELLED": "cancelled a scheduled anchor",
+        "ANCHOR_DELETED": "deleted an anchor",
         "REPORT_REVIEWED": "reviewed a report",
+        "CIRCLE_REPORT_REVIEWED": "reviewed a circle report",
+        "CONTENT_RESTORED": "restored hidden content",
         "CONTACT_REPLIED": "replied to a contact message",
+        "CONTACT_STATUS_UPDATED": "updated a support ticket status",
+        "SUBSCRIPTION_CANCELLED": "cancelled a subscription",
         "ADMIN_LOGIN": "logged in",
         "UNAUTHORIZED_ACCESS_ATTEMPT": "unauthorized access attempt detected",
     }

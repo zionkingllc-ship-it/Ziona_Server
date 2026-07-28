@@ -337,6 +337,13 @@ def _contact_to_dict(contact) -> dict:
         "requester_username": (
             contact.requester_user.username if getattr(contact, "requester_user", None) else ""
         ),
+        # Read live from the linked profile so admins see the current avatar,
+        # not a value frozen at submission time.
+        "requester_avatar_url": (
+            (contact.requester_user.avatar_url or "")
+            if getattr(contact, "requester_user", None)
+            else ""
+        ),
         "source": contact.source,
         "brand": contact.brand,
         "status": contact.status,
