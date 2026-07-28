@@ -12,6 +12,23 @@ from core.engagement.hidden_content import hide_circle_content_for_user
 from core.shared.exceptions import ZionaError
 from core.shared.utils import parse_uuid
 
+# Canonical circle-report target types are lowercase. Accept case-insensitive
+# input and common client aliases (e.g. "CIRCLE_POST") so the mobile app's
+# enum-style values map cleanly instead of erroring with INVALID_TARGET_TYPE.
+_CIRCLE_REPORT_TARGET_TYPES = ("anchor", "response", "circle", "post")
+_CIRCLE_REPORT_TARGET_ALIASES = {
+    "circle_post": "post",
+    "circlepost": "post",
+    "anchor_response": "response",
+    "circle_anchor": "anchor",
+}
+
+
+def _normalize_report_target_type(target_type: str) -> str:
+    """Lowercase + de-alias a client-supplied target type to its canonical value."""
+    normalized = (target_type or "").strip().lower()
+    return _CIRCLE_REPORT_TARGET_ALIASES.get(normalized, normalized)
+
 
 @transaction.atomic
 def report_circle_content(
@@ -22,8 +39,9 @@ def report_circle_content(
     If the content reaches 3 distinct reports, it is auto-hidden (soft deleted).
     """
     # ── Validation ──
-    valid_targets = ["anchor", "response", "circle", "post"]
-    if target_type not in valid_targets:
+    # Normalize first so "POST", "CIRCLE_POST", "post" all resolve to "post".
+    target_type = _normalize_report_target_type(target_type)
+    if target_type not in _CIRCLE_REPORT_TARGET_TYPES:
         raise ZionaError(message="Invalid report target", code="INVALID_TARGET_TYPE")
 
     # Guard client-supplied ids before they reach a UUIDField query — a

@@ -409,3 +409,22 @@ def test_report_invalid_target_type_rejected(circle_with_anchor, test_users):
         report_circle_content(reporter.id, "bogus", anchor.id, "Spam", circle.id)
 
     assert excinfo.value.code == "INVALID_TARGET_TYPE"
+
+
+def test_report_circle_post_normalizes_case_and_alias_target_types(circle_with_anchor, test_users):
+    circle, _ = circle_with_anchor
+    author, reporter, _ = test_users
+
+    # The mobile client sends enum-style values; all must resolve to "post".
+    for raw_target in ("POST", "CIRCLE_POST", "post"):
+        post = CirclePost.objects.create(circle=circle, user=author, text="reportable")
+        report = report_circle_content(reporter.id, raw_target, post.id, "Spam", circle.id)
+        assert report.target_type == "post"
+
+
+def test_report_anchor_accepts_uppercase_target_type(circle_with_anchor, test_users):
+    circle, anchor = circle_with_anchor
+    _author, reporter, _ = test_users
+
+    report = report_circle_content(reporter.id, "ANCHOR", anchor.id, "Spam", circle.id)
+    assert report.target_type == "anchor"
