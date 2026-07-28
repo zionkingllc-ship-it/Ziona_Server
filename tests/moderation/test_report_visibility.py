@@ -123,6 +123,23 @@ def test_reported_post_is_hidden_for_reporter_only_and_saved_posts(
 
 
 @pytest.mark.django_db
+def test_reported_post_is_hidden_from_for_you_feed_for_reporter(
+    author, reporter, other_viewer, post
+):
+    ReportService.report_content(
+        reporter_id=str(reporter.id),
+        reason="policy_violation",
+        post_id=str(post.id),
+    )
+
+    reporter_feed = [item.id for item in FeedService.get_for_you_feed(str(reporter.id)).posts]
+    other_feed = [item.id for item in FeedService.get_for_you_feed(str(other_viewer.id)).posts]
+
+    assert str(post.id) not in reporter_feed
+    assert str(post.id) in other_feed
+
+
+@pytest.mark.django_db
 def test_reported_top_level_comment_disappears_for_reporter_only(
     author, reporter, other_viewer, post
 ):
