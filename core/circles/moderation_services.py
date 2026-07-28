@@ -7,9 +7,10 @@ implements the auto-hide threshold logic (3 distinct reports).
 from django.db import transaction
 
 from core.circles.access import require_circle_membership
-from core.circles.models import Anchor, AnchorResponse, Circle, CircleReport
+from core.circles.models import Anchor, AnchorResponse, Circle, CirclePost, CircleReport
 from core.engagement.hidden_content import hide_circle_content_for_user
 from core.shared.exceptions import ZionaError
+from core.shared.utils import parse_uuid
 
 
 @transaction.atomic
@@ -21,9 +22,15 @@ def report_circle_content(
     If the content reaches 3 distinct reports, it is auto-hidden (soft deleted).
     """
     # ── Validation ──
-    valid_targets = ["anchor", "response", "circle"]
+    valid_targets = ["anchor", "response", "circle", "post"]
     if target_type not in valid_targets:
         raise ZionaError(message="Invalid report target", code="INVALID_TARGET_TYPE")
+
+    # Guard client-supplied ids before they reach a UUIDField query — a
+    # malformed id would otherwise raise a ValidationError and surface as a
+    # generic, unparseable error instead of a structured payload.
+    if parse_uuid(circle_id) is None or parse_uuid(target_id) is None:
+        raise ZionaError(message="Invalid content identifier", code="INVALID_ID")
 
     try:
         circle = Circle.objects.get(id=circle_id, deleted_at__isnull=True)
@@ -50,6 +57,13 @@ def report_circle_content(
         ).exists()
     ):
         raise ZionaError(message="Response not found in this circle", code="TARGET_NOT_FOUND")
+    if (
+        target_type == "post"
+        and not CirclePost.objects.filter(
+            id=target_id, circle_id=circle_id, deleted_at__isnull=True
+        ).exists()
+    ):
+        raise ZionaError(message="Post not found in this circle", code="TARGET_NOT_FOUND")
     if target_type == "circle" and str(circle.id) != str(target_id):
         raise ZionaError(message="Target ID must match Circle ID", code="TARGET_MISMATCH")
 
@@ -116,6 +130,12 @@ def _auto_hide_content(target_type: str, target_id: str):
             from core.circles.anchor_services import invalidate_active_anchor_cache
 
             invalidate_active_anchor_cache(str(anchor.circle_id))
+
+    elif target_type == "post":
+        post = CirclePost.objects.filter(id=target_id).first()
+        if post and not post.deleted_at:
+            post.deleted_at = now
+            post.save(update_fields=["deleted_at"])
 
     elif target_type == "circle":
         # Circles require manual admin review before deletion, just flag them

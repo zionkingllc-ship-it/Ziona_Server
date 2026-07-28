@@ -27,7 +27,7 @@ from core.shared.dtos import (
     ViewerStateDTO,
 )
 from core.shared.exceptions import ErrorCode, PostError
-from core.shared.utils import build_post_share_url, normalize_duration_seconds
+from core.shared.utils import build_post_share_url, normalize_duration_seconds, parse_uuid
 
 logger = logging.getLogger("core.posts")
 
@@ -185,12 +185,15 @@ class PostService:
                 ),
             )
 
+        video_max_duration = getattr(
+            settings, "MEDIA_VIDEO_MAX_DURATION_SECONDS", VIDEO_MAX_DURATION
+        )
         for media_file in video_media_files:
             if media_file.duration is None:
                 continue
-            if media_file.duration > VIDEO_MAX_DURATION:
+            if media_file.duration > video_max_duration:
                 raise PostError(
-                    message=f"Video duration exceeds the {VIDEO_MAX_DURATION}-second limit.",
+                    message=f"Video duration exceeds the {video_max_duration}-second limit.",
                     code=ErrorCode.VIDEO_TOO_LONG,
                     extensions=_build_post_media_validation_details(
                         received_duration_seconds=media_file.duration,
@@ -331,6 +334,9 @@ class PostService:
         Raises:
             PostError: If post not found or deleted.
         """
+        if parse_uuid(post_id) is None:
+            raise PostError(message="Post not found", code=ErrorCode.POST_NOT_FOUND)
+
         post = PostSelector.get_post_with_context(post_id)
         if not post:
             raise PostError(
@@ -518,12 +524,14 @@ class PostService:
             for m in sorted_items:
                 m_id = str(getattr(m, "id", ""))
                 m_url = getattr(m, "url", getattr(m, "media_url", ""))
+                m_thumb = getattr(m, "thumbnail_url", None)
                 m_width = getattr(m, "width", 0)
                 m_height = getattr(m, "height", 0)
                 media_items_dto.append(
                     MediaItemDTO(
                         id=m_id,
                         url=m_url,
+                        thumbnail_url=m_thumb or None,
                         width=m_width,
                         height=m_height,
                         order=getattr(m, "order", 0),

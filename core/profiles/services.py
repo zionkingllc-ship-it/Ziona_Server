@@ -20,6 +20,7 @@ from core.shared.dtos import (
     UserProfileStatsDTO,
 )
 from core.shared.exceptions import ErrorCode, ProfileError
+from core.shared.utils import parse_uuid
 
 logger = logging.getLogger("core.profiles")
 
@@ -137,6 +138,9 @@ class ProfileService:
             ProfileError: If user not found.
         """
         from core.users.models import User
+
+        if parse_uuid(target_user_id) is None:
+            raise ProfileError(message="User not found.", code=ErrorCode.USER_NOT_FOUND)
 
         user = User.objects.filter(id=target_user_id, deleted_at__isnull=True).first()
 

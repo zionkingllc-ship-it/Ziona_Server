@@ -395,6 +395,9 @@ GCP_CREDENTIALS_FILE = env("GCP_CREDENTIALS_FILE", default="")
 GCP_SIGNED_URL_EXPIRY = 900
 MEDIA_URL_ALLOWLIST = env.list("MEDIA_URL_ALLOWLIST", default=["storage.googleapis.com"])
 MEDIA_IMAGE_MAX_DIMENSION = env.int("MEDIA_IMAGE_MAX_DIMENSION", default=1600)
+# Small feed/discover thumbnail variant so clients don't download the full
+# ~1600px image as a "thumbnail". Generated alongside the optimized image.
+MEDIA_IMAGE_THUMBNAIL_MAX_DIMENSION = env.int("MEDIA_IMAGE_THUMBNAIL_MAX_DIMENSION", default=400)
 MEDIA_IMAGE_JPEG_QUALITY = env.int("MEDIA_IMAGE_JPEG_QUALITY", default=82)
 MEDIA_VIDEO_MAX_DIMENSION = env.int("MEDIA_VIDEO_MAX_DIMENSION", default=1280)
 # CRF 23 (was 28): visibly better quality; the phone already compressed once, so
@@ -404,6 +407,12 @@ MEDIA_VIDEO_CRF = env.int("MEDIA_VIDEO_CRF", default=23)
 # driver of the "3-minute upload". Net faster than veryfast+CRF28 even at CRF 23.
 # (Dashboard env vars still override these defaults if set.)
 MEDIA_VIDEO_PRESET = env("MEDIA_VIDEO_PRESET", default="ultrafast")
+# Max video duration, configurable per surface. Circle videos allow longer
+# clips (120s) than the global feed (90s). Both env-overridable.
+MEDIA_VIDEO_MAX_DURATION_SECONDS = env.int("MEDIA_VIDEO_MAX_DURATION_SECONDS", default=90)
+MEDIA_CIRCLE_VIDEO_MAX_DURATION_SECONDS = env.int(
+    "MEDIA_CIRCLE_VIDEO_MAX_DURATION_SECONDS", default=120
+)
 MEDIA_STALE_UPLOAD_MINUTES = env.int("MEDIA_STALE_UPLOAD_MINUTES", default=15)
 MEDIA_STALE_UPLOAD_HOURS = env.int("MEDIA_STALE_UPLOAD_HOURS", default=24)
 MEDIA_PROCESS_TASK_SOFT_TIME_LIMIT_SECONDS = env.int(
@@ -478,11 +487,32 @@ STRIPE_SUPPORT_MAX_AMOUNT_USD = env(
 )
 STRIPE_CURRENCY = env("STRIPE_CURRENCY", default="usd")
 
-# App Store Links (used by seed_app_links management command)
+# App Store Links (used by seed_app_links + the share-preview store fallback)
+# NOTE: IOS_APP_STORE_URL still needs the real App Store numeric id once the app
+# is live (the default below is a placeholder path).
 IOS_APP_STORE_URL = env("IOS_APP_STORE_URL", default="https://apps.apple.com/app/ziona")
 ANDROID_PLAY_STORE_URL = env(
-    "ANDROID_PLAY_STORE_URL", default="https://play.google.com/store/apps/ziona"
+    "ANDROID_PLAY_STORE_URL",
+    default="https://play.google.com/store/apps/details?id=com.zionking.ziona",
 )
+
+# ── Deep linking (App Links / Universal Links) ──────────────────────────────
+# Values that populate /.well-known/assetlinks.json and
+# /.well-known/apple-app-site-association. Fingerprints are a list so the Play
+# App Signing key AND the upload key can both be authorized. These are public by
+# design (the well-known files are world-readable), so shipping real defaults is
+# fine; env vars let staging/prod differ.
+ANDROID_APP_PACKAGE_NAME = env("ANDROID_APP_PACKAGE_NAME", default="com.zionking.ziona")
+ANDROID_SHA256_CERT_FINGERPRINTS = env.list(
+    "ANDROID_SHA256_CERT_FINGERPRINTS",
+    default=[
+        "B6:A8:22:F3:C7:E0:71:56:6B:24:93:C4:57:6A:85:D9:81:01:65:3D:BD:CB:70:D2:0E:34:23:4B:5D:45:6B:52"
+    ],
+)
+# Apple Team ID for the Universal Links appID (f"{TEAM_ID}.{bundle_id}"). Left
+# empty until the iOS team provides it; the view falls back to a visible
+# "TEAMID" placeholder so an unset value is obvious, not silently broken.
+APPLE_TEAM_ID = env("APPLE_TEAM_ID", default="")
 
 
 FIREBASE_CREDENTIALS_FILE = env("FIREBASE_CREDENTIALS_FILE", default="")

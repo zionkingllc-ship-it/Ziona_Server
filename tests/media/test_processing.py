@@ -7,11 +7,13 @@ from django.utils import timezone
 from core.media.models import MediaFile
 from core.media.tasks import (
     _classify_processing_failure,
+    _generate_image_thumbnail_file,
     _optimize_image_file,
     _optimize_video_file,
     _optimize_video_media,
     cleanup_stale_media_uploads,
     finalize_media_ready,
+    generate_image_thumbnail_stage,
     generate_video_thumbnail_stage,
     optimize_image_media_stage,
     process_media_upload,
@@ -147,7 +149,8 @@ def test_process_media_upload_queues_image_pipeline(create_user, monkeypatch):
 
     assert result == str(media.id)
     assert queued["applied"] is True
-    assert len(queued["steps"]) == 2
+    # optimize → generate thumbnail → finalize
+    assert len(queued["steps"]) == 3
 
 
 @pytest.mark.django_db
@@ -177,6 +180,60 @@ def test_optimize_image_media_stage_sets_metadata(create_user, monkeypatch):
     assert result == str(media.id)
     assert media.file_size == 1024
     assert media.width == 640
+
+
+def test_generate_image_thumbnail_file_resizes_to_bounds(tmp_path):
+    from PIL import Image
+
+    input_path = tmp_path / "original.jpg"
+    output_path = tmp_path / "thumb.jpg"
+    Image.new("RGB", (1800, 1200), color="blue").save(input_path, format="JPEG", quality=95)
+
+    _generate_image_thumbnail_file(input_path, output_path, 320)
+
+    assert output_path.exists()
+    with Image.open(output_path) as thumb:
+        assert thumb.format == "JPEG"
+        assert max(thumb.size) == 320
+
+
+def test_generate_image_thumbnail_file_flattens_transparency(tmp_path):
+    from PIL import Image
+
+    input_path = tmp_path / "original.png"
+    output_path = tmp_path / "thumb.jpg"
+    Image.new("RGBA", (600, 600), color=(0, 0, 0, 0)).save(input_path, format="PNG")
+
+    _generate_image_thumbnail_file(input_path, output_path, 200)
+
+    with Image.open(output_path) as thumb:
+        assert thumb.format == "JPEG"  # alpha flattened to an opaque JPEG
+        assert thumb.mode == "RGB"
+
+
+@pytest.mark.django_db
+def test_generate_image_thumbnail_stage_is_best_effort_on_failure(create_user, monkeypatch):
+    """A thumbnail failure must NOT fail the image (unlike the video stage)."""
+    user = create_user()
+    media = MediaFile.objects.create(
+        user=user,
+        file_name="image.jpg",
+        file_type="image/jpeg",
+        file_size=2048,
+        media_type="image",
+        storage_path="uploads/test/images/image.jpg",
+        status="processing",
+    )
+
+    monkeypatch.setattr(
+        "core.media.tasks._generate_image_thumbnail",
+        lambda media_file: (_ for _ in ()).throw(RuntimeError("thumbnail failed")),
+    )
+
+    # No exception raised, image not marked failed — thumbnail is best-effort.
+    assert generate_image_thumbnail_stage(str(media.id)) == str(media.id)
+    media.refresh_from_db()
+    assert media.status == "processing"
 
 
 @pytest.mark.django_db

@@ -6,9 +6,29 @@ Provides common helper functions used across all modules.
 
 import logging
 import math
+import uuid
 from urllib.parse import quote
 
 logger = logging.getLogger("core.shared")
+
+
+def parse_uuid(value) -> uuid.UUID | None:
+    """Parse a client-supplied id into a UUID, or return None if malformed.
+
+    Single-item resolvers query ``UUIDField`` primary keys directly; a non-UUID
+    string raises Django's ``ValidationError`` at query-evaluation time, which
+    surfaces to the client as a generic, unparseable GraphQL error instead of a
+    clean not-found. Callers use this to short-circuit to their existing
+    not-found path before ever touching the database.
+    """
+    if value is None:
+        return None
+    if isinstance(value, uuid.UUID):
+        return value
+    try:
+        return uuid.UUID(str(value))
+    except (ValueError, TypeError, AttributeError):
+        return None
 
 
 def normalize_duration_seconds(duration: int | float | None) -> int | None:

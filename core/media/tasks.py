@@ -23,6 +23,7 @@ logger = logging.getLogger("core.media")
 from core.media.media_processing import (  # noqa: E402,F401
     _classify_processing_failure,
     _extract_video_metadata,
+    _generate_image_thumbnail_file,
     _generate_video_thumbnail_file,
     _has_alpha,
     _optimize_image_file,
@@ -83,6 +84,7 @@ def process_media_upload(self, media_id: str) -> str | None:
     if media_file.media_type == MediaType.IMAGE:
         pipeline = chain(
             optimize_image_media_stage.s(str(media_file.id)),
+            generate_image_thumbnail_stage.s(),
             finalize_media_ready.s(),
         )
     elif media_file.media_type == MediaType.VIDEO:
@@ -127,6 +129,37 @@ def optimize_image_media_stage(self, media_id: str) -> str:
         _optimize_image_media(media_file)
     except Exception as exc:  # noqa: BLE001
         _handle_stage_failure(self, media_file, exc, stage="image_optimize")
+
+    return str(media_file.id)
+
+
+@shared_task(
+    bind=True,
+    max_retries=2,
+    default_retry_delay=30,
+    retry_backoff=True,
+    retry_jitter=True,
+    soft_time_limit=_media_setting("MEDIA_THUMBNAIL_TASK_SOFT_TIME_LIMIT_SECONDS", 100),
+    time_limit=120,
+)
+def generate_image_thumbnail_stage(self, media_id: str) -> str:
+    """Generate a small thumbnail from the optimized canonical image.
+
+    Best-effort: a thumbnail failure is logged and skipped, never failing the
+    image itself — the feed falls back to the full optimized image URL.
+    """
+    media_file = _get_media_file_or_raise(media_id)
+    if media_file.status == MediaStatus.FAILED:
+        return str(media_file.id)
+
+    try:
+        _generate_image_thumbnail(media_file)
+    except Exception:  # noqa: BLE001
+        logger.warning(
+            "image_thumbnail_failed",
+            extra={"media_id": str(media_file.id)},
+            exc_info=True,
+        )
 
     return str(media_file.id)
 
@@ -410,6 +443,36 @@ def _download_blob(storage_path: str, destination: Path) -> None:
 def _upload_blob(storage_path: str, source: Path, content_type: str) -> None:
     bucket = _get_gcs_bucket()
     bucket.blob(storage_path).upload_from_filename(str(source), content_type=content_type)
+
+
+def _generate_image_thumbnail(media_file: MediaFile) -> None:
+    """Generate a small JPEG thumbnail from the optimized image blob in GCS."""
+    suffix = Path(media_file.storage_path).suffix or ".img"
+    with tempfile.TemporaryDirectory() as tmpdir:
+        source_path = Path(tmpdir) / f"source{suffix}"
+        thumbnail_file_path = Path(tmpdir) / "thumbnail.jpg"
+
+        _download_blob(media_file.storage_path, source_path)
+        _generate_image_thumbnail_file(
+            source_path,
+            thumbnail_file_path,
+            settings.MEDIA_IMAGE_THUMBNAIL_MAX_DIMENSION,
+        )
+
+        thumbnail_path = f"thumbnails/{media_file.user_id}/{media_file.id}.jpg"
+        _upload_blob(thumbnail_path, thumbnail_file_path, "image/jpeg")
+
+        media_file.thumbnail_path = thumbnail_path
+        media_file.save(update_fields=["thumbnail_path", "updated_at"])
+
+        logger.info(
+            "image_thumbnail_generated",
+            extra={
+                "media_id": str(media_file.id),
+                "thumbnail_path": thumbnail_path,
+                "size_bytes": thumbnail_file_path.stat().st_size,
+            },
+        )
 
 
 def _generate_video_thumbnail(media_file: MediaFile) -> None:

@@ -112,6 +112,10 @@ def get_anchor_by_id(anchor_id: str, viewer_id: str | None = None) -> Anchor:
     undesirable. Raises ZionaError if the anchor does not exist or is deleted.
     """
     from core.shared.exceptions import ZionaError
+    from core.shared.utils import parse_uuid
+
+    if parse_uuid(anchor_id) is None:
+        raise ZionaError(message="Anchor not found", code="ANCHOR_NOT_FOUND") from None
 
     queryset = Anchor.objects.select_related("created_by", "circle").filter(
         id=anchor_id,

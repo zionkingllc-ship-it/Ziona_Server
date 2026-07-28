@@ -429,6 +429,41 @@ class TestCirclePostMediaCreation(TestCase):
                     )
                 self.assertEqual(ctx.exception.code, "VALIDATION_ERROR")
 
+    def test_create_circle_post_accepts_video_up_to_circle_limit(self):
+        video = _make_media_file(
+            user=self.author,
+            storage_path="circle-posts/short.mp4",
+            media_type=StoredMediaType.VIDEO,
+        )
+        video.duration = 120  # circle default limit
+        video.save(update_fields=["duration"])
+
+        post = create_circle_post(
+            user_id=str(self.author.id),
+            circle_id=str(self.circle.id),
+            media_ids=[str(video.id)],
+        )
+
+        self.assertEqual(list(post.media_files.values_list("id", flat=True)), [video.id])
+
+    def test_create_circle_post_rejects_video_over_circle_limit(self):
+        video = _make_media_file(
+            user=self.author,
+            storage_path="circle-posts/toolong.mp4",
+            media_type=StoredMediaType.VIDEO,
+        )
+        video.duration = 121  # just over the 120s circle limit
+        video.save(update_fields=["duration"])
+
+        with self.assertRaises(ZionaError) as ctx:
+            create_circle_post(
+                user_id=str(self.author.id),
+                circle_id=str(self.circle.id),
+                media_ids=[str(video.id)],
+            )
+
+        self.assertEqual(ctx.exception.code, "VALIDATION_ERROR")
+
 
 @pytest.mark.django_db
 class TestCirclePostMediaMigration(TestCase):

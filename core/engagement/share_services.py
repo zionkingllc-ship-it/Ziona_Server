@@ -13,7 +13,7 @@ from core.engagement.models import Share
 from core.posts.models import Post
 from core.shared.dtos import AuthorDTO, ShareResponseDTO
 from core.shared.exceptions import ErrorCode, ShareError
-from core.shared.utils import build_post_share_url
+from core.shared.utils import build_post_share_url, parse_uuid
 
 logger = logging.getLogger("core.engagement")
 
@@ -42,12 +42,18 @@ class ShareService:
         """
         from core.users.models import User
 
+        if parse_uuid(post_id) is None:
+            raise ShareError(message="Post not found.", code=ErrorCode.POST_NOT_FOUND)
+
         post = Post.objects.filter(id=post_id, deleted_at__isnull=True).first()
         if not post:
             raise ShareError(
                 message="Post not found.",
                 code=ErrorCode.POST_NOT_FOUND,
             )
+
+        if parse_uuid(recipient_id) is None:
+            raise ShareError(message="Recipient not found.", code=ErrorCode.RECIPIENT_NOT_FOUND)
 
         recipient = User.objects.filter(id=recipient_id, deleted_at__isnull=True).first()
         if not recipient:
@@ -95,6 +101,9 @@ class ShareService:
         Raises:
             ShareError: If post not found.
         """
+        if parse_uuid(post_id) is None:
+            raise ShareError(message="Post not found.", code=ErrorCode.POST_NOT_FOUND)
+
         post = Post.objects.filter(id=post_id, deleted_at__isnull=True).first()
         if not post:
             raise ShareError(

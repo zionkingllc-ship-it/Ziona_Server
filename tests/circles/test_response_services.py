@@ -18,6 +18,7 @@ from core.circles.models import (
     AnchorResponse,
     Circle,
     CircleMembership,
+    CirclePost,
 )
 from core.circles.moderation_services import report_circle_content
 from core.circles.response_services import (
@@ -26,7 +27,7 @@ from core.circles.response_services import (
     get_anchor_responses,
     toggle_reaction,
 )
-from core.circles.services import get_all_circles, get_circle_by_id
+from core.circles.services import get_all_circles, get_circle_by_id, get_circle_feed
 from core.shared.exceptions import ZionaError
 from core.users.models import User
 
@@ -344,3 +345,67 @@ def test_reported_circle_hidden_for_reporter_only(circle_with_anchor, test_users
     assert str(circle.id) in author_circle_ids
     assert get_circle_by_id(circle.id, viewer_id=reporter.id) is None
     assert get_circle_by_id(circle.id, viewer_id=author.id).id == circle.id
+
+
+def test_report_circle_post_hidden_for_reporter_only(circle_with_anchor, test_users):
+    circle, _ = circle_with_anchor
+    author, reporter, _ = test_users
+    post = CirclePost.objects.create(circle=circle, user=author, text="Hello circle")
+
+    report_circle_content(reporter.id, "post", post.id, "Spam", circle.id)
+
+    reporter_post_ids = [p.id for p in get_circle_feed(circle.id, viewer_id=reporter.id)[0]]
+    author_post_ids = [p.id for p in get_circle_feed(circle.id, viewer_id=author.id)[0]]
+
+    assert post.id not in reporter_post_ids
+    assert post.id in author_post_ids
+
+
+def test_report_circle_post_auto_hides_after_three(circle_with_anchor, test_users):
+    circle, _ = circle_with_anchor
+    author, member, _ = test_users
+    post = CirclePost.objects.create(circle=circle, user=author, text="Bad post")
+
+    report_circle_content(author.id, "post", post.id, "Spam", circle.id)
+    report_circle_content(member.id, "post", post.id, "Spam", circle.id)
+    post.refresh_from_db()
+    assert post.deleted_at is None  # only 2 distinct reporters
+
+    third = User.objects.create_user(email="postmod4@example.com", password="password123")
+    CircleMembership.objects.create(circle=circle, user=third, role="member")
+    report_circle_content(third.id, "post", post.id, "Spam", circle.id)
+
+    post.refresh_from_db()
+    assert post.deleted_at is not None  # soft-deleted at 3 distinct reporters
+
+
+def test_report_circle_post_invalid_uuid_returns_structured_error(circle_with_anchor, test_users):
+    circle, _ = circle_with_anchor
+    _author, reporter, _ = test_users
+
+    with pytest.raises(ZionaError) as excinfo:
+        report_circle_content(reporter.id, "post", "not-a-uuid", "Spam", circle.id)
+
+    assert excinfo.value.code == "INVALID_ID"
+
+
+def test_report_circle_post_not_in_circle(circle_with_anchor, test_users):
+    circle, _ = circle_with_anchor
+    _author, reporter, _ = test_users
+    other_circle = Circle.objects.create(name="Other Circle", description="x")
+    stray = CirclePost.objects.create(circle=other_circle, user=reporter, text="elsewhere")
+
+    with pytest.raises(ZionaError) as excinfo:
+        report_circle_content(reporter.id, "post", stray.id, "Spam", circle.id)
+
+    assert excinfo.value.code == "TARGET_NOT_FOUND"
+
+
+def test_report_invalid_target_type_rejected(circle_with_anchor, test_users):
+    circle, anchor = circle_with_anchor
+    _author, reporter, _ = test_users
+
+    with pytest.raises(ZionaError) as excinfo:
+        report_circle_content(reporter.id, "bogus", anchor.id, "Spam", circle.id)
+
+    assert excinfo.value.code == "INVALID_TARGET_TYPE"

@@ -8,6 +8,7 @@ import mimetypes
 import os
 from urllib.parse import urlparse
 
+from django.conf import settings
 from django.db import transaction
 from django.db.models import Exists, F, OuterRef
 
@@ -23,6 +24,7 @@ from core.media.models import MediaFile, MediaStatus
 from core.media.models import MediaType as StoredMediaType
 from core.media.services import validate_trusted_external_image_url
 from core.shared.exceptions import ZionaError
+from core.shared.utils import parse_uuid
 
 logger = logging.getLogger("core.circles")
 
@@ -118,6 +120,19 @@ def _resolve_circle_post_media(
                 )
             )
 
+    # Enforce the circle-specific video duration limit (longer than global feed).
+    circle_video_max = getattr(settings, "MEDIA_CIRCLE_VIDEO_MAX_DURATION_SECONDS", 120)
+    for media_file in resolved_media_files:
+        if (
+            media_file.media_type == StoredMediaType.VIDEO
+            and media_file.duration
+            and media_file.duration > circle_video_max
+        ):
+            raise ZionaError(
+                message=f"Video duration exceeds the {circle_video_max}-second limit.",
+                code=VALIDATION_ERROR,
+            )
+
     normalized_hint = _normalize_media_type_hint(media_type)
     resolved_types = {media_file.media_type for media_file in resolved_media_files}
     if len(resolved_types) > 1:
@@ -166,6 +181,9 @@ def get_circle_feed(
         .select_related("user")
         .prefetch_related("media_files")
     )
+
+    # Suppress posts this viewer has reported/hidden (per-reporter suppression).
+    queryset = exclude_hidden_circle_content(queryset, viewer_id, target_type="post")
 
     # ── Author filter ("My Posts" toggle) ──────────────────────────────────
     if author_id:
@@ -219,6 +237,9 @@ def get_circle_post(post_id: str, viewer_id: str | None = None) -> CirclePost:
     Fetch a single CirclePost by ID with viewer engagement annotations.
     Raises ZionaError(CIRCLE_POST_NOT_FOUND) if not found or soft-deleted.
     """
+    if parse_uuid(post_id) is None:
+        raise ZionaError(message="Circle post not found", code=CIRCLE_POST_NOT_FOUND)
+
     queryset = (
         CirclePost.objects.filter(id=post_id, deleted_at__isnull=True)
         .select_related("user", "circle")

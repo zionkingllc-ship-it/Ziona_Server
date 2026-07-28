@@ -238,7 +238,9 @@ def build_media_validation_details(
     details: dict[str, Any] = {
         "allowedTypes": allowed_types or list(ALLOWED_UPLOAD_TYPES),
         "maxVideoSizeBytes": VIDEO_MAX_UPLOAD_BYTES,
-        "maxVideoDurationSeconds": MAX_VIDEO_DURATION_SECONDS,
+        "maxVideoDurationSeconds": getattr(
+            settings, "MEDIA_VIDEO_MAX_DURATION_SECONDS", MAX_VIDEO_DURATION_SECONDS
+        ),
         "maxVideosPerPost": MAX_VIDEOS_PER_POST,
     }
     if max_size is not None:

@@ -191,6 +191,38 @@ def _generate_video_thumbnail_file(input_path: Path, output_path: Path) -> None:
         raise RuntimeError("FFmpeg produced an empty thumbnail image")
 
 
+def _generate_image_thumbnail_file(input_path: Path, output_path: Path, max_dim: int) -> None:
+    """Generate a small JPEG thumbnail from a local image file.
+
+    Always outputs JPEG (alpha flattened onto white) so a single cheap variant
+    serves every image type in the feed. The full-size optimized image remains
+    the fallback when this best-effort step is skipped.
+    """
+    from PIL import Image, ImageOps
+
+    with Image.open(input_path) as image:
+        image = ImageOps.exif_transpose(image)
+        image.thumbnail((max_dim, max_dim), Image.Resampling.LANCZOS)
+
+        if _has_alpha(image):
+            rgba = image.convert("RGBA")
+            optimized = Image.new("RGB", rgba.size, (255, 255, 255))
+            optimized.paste(rgba, mask=rgba.split()[-1])
+        else:
+            optimized = image.convert("RGB")
+
+        optimized.save(
+            output_path,
+            format="JPEG",
+            quality=settings.MEDIA_IMAGE_JPEG_QUALITY,
+            optimize=True,
+            progressive=True,
+        )
+
+    if not output_path.exists() or output_path.stat().st_size == 0:
+        raise RuntimeError("Generated an empty image thumbnail")
+
+
 def get_ffmpeg_runtime_info() -> dict[str, str | None]:
     """Return the resolved FFmpeg binary path and version banner."""
     import imageio_ffmpeg

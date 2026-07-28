@@ -3,6 +3,7 @@
 Split from the former core/circles/schema.py (no contract change).
 """
 
+import logging
 
 import strawberry
 from strawberry.types import Info
@@ -41,6 +42,8 @@ from core.shared.exceptions import ZionaError
 from core.shared.types import ErrorType
 from core.shared.types import MediaType as GraphQLMediaType
 from core.users.schema import UserType, _get_authenticated_user_id
+
+logger = logging.getLogger("core.circles")
 
 
 @strawberry.type
@@ -269,6 +272,15 @@ class CircleMutations:
         except ZionaError as e:
             return CircleReportPayload(
                 success=False, error=ErrorType(code=e.code, message=e.message)
+            )
+        except Exception:
+            logger.exception("reportCircleContent failed unexpectedly")
+            return CircleReportPayload(
+                success=False,
+                error=ErrorType(
+                    code="REPORT_FAILED",
+                    message="Unable to submit report. Please try again.",
+                ),
             )
 
     @strawberry.mutation(name="createCirclePost")

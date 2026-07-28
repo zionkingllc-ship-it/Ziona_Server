@@ -169,6 +169,31 @@ class TestCreatePost:
         assert excinfo.value.code == "VIDEO_TOO_LONG"
         assert excinfo.value.extensions["maxVideoDurationSeconds"] == 90
 
+    def test_video_duration_limit_is_configurable(self, user_a, settings):
+        from core.media.models import MediaFile
+        from core.posts.services import PostService
+
+        settings.MEDIA_VIDEO_MAX_DURATION_SECONDS = 120
+        media = MediaFile.objects.create(
+            user=user_a,
+            file_name="ninetyfive.mp4",
+            storage_path="uploads/test/videos/ninetyfive.mp4",
+            file_type="video/mp4",
+            file_size=1024,
+            media_type="video",
+            duration=95,
+            status="ready",
+        )
+
+        result = PostService.create_post(
+            user_id=str(user_a.id),
+            post_type="video",
+            caption="Now allowed at the raised limit",
+            media_ids=[str(media.id)],
+        )
+
+        assert result.media.duration == 95
+
     def test_create_video_post_normalizes_fractional_duration(self, user_a):
         from core.media.models import MediaFile
         from core.posts.services import PostService

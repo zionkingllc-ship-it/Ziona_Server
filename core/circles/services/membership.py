@@ -15,6 +15,7 @@ from core.circles.models import (
 )
 from core.engagement.hidden_content import exclude_hidden_circle_content
 from core.shared.exceptions import ZionaError
+from core.shared.utils import parse_uuid
 
 logger = logging.getLogger("core.circles")
 
@@ -36,6 +37,9 @@ def get_circle_by_id(circle_id: str, viewer_id: str | None = None) -> Circle | N
     can decide whether to join. Mutations and engagement paths still call
     ``require_circle_membership`` and remain member-only.
     """
+    if parse_uuid(circle_id) is None:
+        return None
+
     queryset = Circle.objects.filter(id=circle_id, is_active=True, deleted_at__isnull=True)
     queryset = _exclude_hidden_circles(queryset, viewer_id)
     circle = queryset.first()

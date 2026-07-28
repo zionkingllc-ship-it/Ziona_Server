@@ -386,6 +386,7 @@ class CircleReport(models.Model):
         ("anchor", "Anchor"),
         ("response", "Anchor Response"),
         ("circle", "Circle"),
+        ("post", "Circle Post"),
     )
 
     STATUS_CHOICES = (

@@ -43,6 +43,7 @@ class MediaItemDTO(CamelCaseModel):
 
     id: str
     url: str
+    thumbnail_url: str | None = None
     width: int | None = None
     height: int | None = None
     order: int
