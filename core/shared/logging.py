@@ -132,3 +132,34 @@ def log_security_event(
             "metadata": metadata or {},
         },
     )
+
+
+def log_rejected_mutation(info, *, operation: str, error, **context) -> None:
+    """Log a handled GraphQL mutation rejection so it is visible in logs.
+
+    A handled domain error (a ``ZionaError`` mapped to a ``success: false``
+    payload) returns HTTP 200, so it never surfaces in the request log or in
+    Sentry. This records the error ``code``, the request ``trace_id``, and any
+    operation-specific context (e.g. the reported ``targetType``) at WARNING so
+    failures like ``INVALID_TARGET_TYPE`` are debuggable from the server log
+    instead of guessed.
+
+    Args:
+        info: Strawberry resolver ``Info`` (used to read the request trace_id).
+        operation: GraphQL mutation name, e.g. ``"reportCircleContent"``.
+        error: The raised ``ZionaError`` — its ``code``/``message`` are logged.
+        **context: Extra scalar fields to log, e.g. ``target_type="POST"``.
+            Avoid keys reserved by ``LogRecord`` (e.g. ``message``, ``module``).
+    """
+    request = getattr(getattr(info, "context", None), "request", None)
+    trace_id = getattr(request, "trace_id", None)
+    logging.getLogger("core.graphql").warning(
+        "graphql_mutation_rejected",
+        extra={
+            "operation": operation,
+            "code": getattr(error, "code", None),
+            "error_message": getattr(error, "message", None),
+            "trace_id": trace_id,
+            **context,
+        },
+    )

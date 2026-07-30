@@ -39,6 +39,7 @@ from core.circles.services import (
     pray_for_circle_post,
 )
 from core.shared.exceptions import ZionaError
+from core.shared.logging import log_rejected_mutation
 from core.shared.types import ErrorType
 from core.shared.types import MediaType as GraphQLMediaType
 from core.users.schema import UserType, _get_authenticated_user_id
@@ -65,6 +66,7 @@ class CircleMutations:
             circle._is_viewer_subscribed = True
             return JoinCirclePayload(success=True, circle=CircleType.from_db_model(circle))
         except ZionaError as e:
+            log_rejected_mutation(info, operation="joinCircle", error=e, circle_id=circle_id)
             return JoinCirclePayload(success=False, error=ErrorType(code=e.code, message=e.message))
 
     @strawberry.mutation(name="leaveCircle")
@@ -82,6 +84,7 @@ class CircleMutations:
             leave_circle(viewer_id, circle_id)
             return JoinCirclePayload(success=True)
         except ZionaError as e:
+            log_rejected_mutation(info, operation="leaveCircle", error=e, circle_id=circle_id)
             return JoinCirclePayload(success=False, error=ErrorType(code=e.code, message=e.message))
 
     @strawberry.mutation(name="createAnchor")
@@ -152,6 +155,13 @@ class CircleMutations:
             )
             return CreateAnchorPayload(success=True, anchor=AnchorType.from_db_model(anchor))
         except ZionaError as e:
+            log_rejected_mutation(
+                info,
+                operation="createAnchor",
+                error=e,
+                circle_id=circle_id,
+                anchor_type=anchor_type,
+            )
             return CreateAnchorPayload(
                 success=False, error=ErrorType(code=e.code, message=e.message)
             )
@@ -186,6 +196,7 @@ class CircleMutations:
                 success=True, response=AnchorResponseType.from_db_model(response)
             )
         except ZionaError as e:
+            log_rejected_mutation(info, operation="respondToAnchor", error=e, anchor_id=anchor_id)
             return AnchorResponsePayload(
                 success=False, error=ErrorType(code=e.code, message=e.message)
             )
@@ -218,6 +229,12 @@ class CircleMutations:
                 success=True, response=AnchorResponseType.from_db_model(reply)
             )
         except ZionaError as e:
+            log_rejected_mutation(
+                info,
+                operation="replyToResponse",
+                error=e,
+                parent_response_id=parent_response_id,
+            )
             return AnchorResponsePayload(
                 success=False, error=ErrorType(code=e.code, message=e.message)
             )
@@ -247,6 +264,9 @@ class CircleMutations:
                 return ReactionPayload(success=True, reaction=reaction_obj)
             return ReactionPayload(success=True, reaction=None)  # Toggled off
         except ZionaError as e:
+            log_rejected_mutation(
+                info, operation="reactToResponse", error=e, response_id=response_id
+            )
             return ReactionPayload(success=False, error=ErrorType(code=e.code, message=e.message))
 
     @strawberry.mutation(name="reportCircleContent")
@@ -270,6 +290,14 @@ class CircleMutations:
             )
             return CircleReportPayload(success=True)
         except ZionaError as e:
+            log_rejected_mutation(
+                info,
+                operation="reportCircleContent",
+                error=e,
+                target_type=target_type,
+                target_id=target_id,
+                circle_id=circle_id,
+            )
             return CircleReportPayload(
                 success=False, error=ErrorType(code=e.code, message=e.message)
             )
@@ -318,6 +346,7 @@ class CircleMutations:
             )
             return CreateCirclePostPayload(success=True, post=CirclePostType.from_db_model(post))
         except ZionaError as e:
+            log_rejected_mutation(info, operation="createCirclePost", error=e, circle_id=circle_id)
             return CreateCirclePostPayload(
                 success=False, error=ErrorType(code=e.code, message=e.message)
             )
@@ -338,6 +367,7 @@ class CircleMutations:
                 prayed_count=result["prayed_count"],
             )
         except ZionaError as e:
+            log_rejected_mutation(info, operation="prayForAnchor", error=e, anchor_id=anchor_id)
             return AnchorEngagementPayload(
                 success=False, error=ErrorType(code=e.code, message=e.message)
             )
@@ -358,6 +388,7 @@ class CircleMutations:
                 anchor_liked_count=result["anchor_liked_count"],
             )
         except ZionaError as e:
+            log_rejected_mutation(info, operation="likeAnchor", error=e, anchor_id=anchor_id)
             return AnchorEngagementPayload(
                 success=False, error=ErrorType(code=e.code, message=e.message)
             )
@@ -378,6 +409,7 @@ class CircleMutations:
                 prayed_count=result["prayed_count"],
             )
         except ZionaError as e:
+            log_rejected_mutation(info, operation="prayForCirclePost", error=e, post_id=post_id)
             return CirclePostEngagementPayload(
                 success=False, error=ErrorType(code=e.code, message=e.message)
             )
@@ -401,6 +433,7 @@ class CircleMutations:
                 likes_count=result["likes_count"],
             )
         except ZionaError as e:
+            log_rejected_mutation(info, operation="likeCirclePost", error=e, post_id=post_id)
             return LikeCirclePostPayload(
                 success=False, error=ErrorType(code=e.code, message=e.message)
             )
@@ -424,6 +457,7 @@ class CircleMutations:
                 likes_count=result["likes_count"],
             )
         except ZionaError as e:
+            log_rejected_mutation(info, operation="ensureCirclePostLiked", error=e, post_id=post_id)
             return LikeCirclePostPayload(
                 success=False, error=ErrorType(code=e.code, message=e.message)
             )
@@ -450,6 +484,7 @@ class CircleMutations:
                 success=True, comment=CirclePostCommentType.from_db_model(comment)
             )
         except ZionaError as e:
+            log_rejected_mutation(info, operation="commentOnCirclePost", error=e, post_id=post_id)
             return CirclePostCommentPayload(
                 success=False, error=ErrorType(code=e.code, message=e.message)
             )
@@ -470,6 +505,9 @@ class CircleMutations:
             delete_circle_post_comment(user_id=viewer_id, comment_id=comment_id)
             return CirclePostCommentPayload(success=True)
         except ZionaError as e:
+            log_rejected_mutation(
+                info, operation="deleteCirclePostComment", error=e, comment_id=comment_id
+            )
             return CirclePostCommentPayload(
                 success=False, error=ErrorType(code=e.code, message=e.message)
             )
@@ -494,6 +532,9 @@ class CircleMutations:
             )
             return CirclePostCommentLikePayload(success=True, liked=liked, likes_count=likes_count)
         except ZionaError as e:
+            log_rejected_mutation(
+                info, operation="likeCirclePostComment", error=e, comment_id=comment_id
+            )
             return CirclePostCommentLikePayload(
                 success=False, error=ErrorType(code=e.code, message=e.message)
             )
