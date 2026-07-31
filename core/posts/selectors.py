@@ -9,6 +9,7 @@ import logging
 
 from django.db.models import Count, Q, QuerySet
 
+from core.media.ordering import ordered_post_media_prefetch
 from core.posts.models import Post
 
 logger = logging.getLogger("core.posts")
@@ -34,7 +35,7 @@ class PostSelector:
             Post.objects.select_related("user")
             # Prefetch both relations: media_files (M2M, used by create_post)
             # and post_media (legacy FK, kept for backward-compat read paths).
-            .prefetch_related("media_files", "post_media")
+            .prefetch_related(ordered_post_media_prefetch(), "post_media")
             .filter(id=post_id, deleted_at__isnull=True)
             .annotate(
                 likes_count=Count("likes", distinct=True),
@@ -65,7 +66,7 @@ class PostSelector:
         return (
             Post.objects.select_related("user")
             # media_files (M2M) is the active relation; post_media is legacy.
-            .prefetch_related("media_files", "post_media")
+            .prefetch_related(ordered_post_media_prefetch(), "post_media")
             .filter(id__in=post_ids, deleted_at__isnull=True)
             .annotate(
                 likes_count=Count("likes", distinct=True),
@@ -98,7 +99,7 @@ class PostSelector:
         qs = (
             Post.objects.select_related("user")
             # media_files (M2M) is the active relation; post_media is legacy.
-            .prefetch_related("media_files", "post_media")
+            .prefetch_related(ordered_post_media_prefetch(), "post_media")
             .filter(user_id=user_id, deleted_at__isnull=True)
             .annotate(
                 likes_count=Count("likes", distinct=True),

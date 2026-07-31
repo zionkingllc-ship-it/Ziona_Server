@@ -11,6 +11,7 @@ from django.db import transaction
 from django.db.models import Count, Q
 
 from core.admin_dashboard.permissions import log_admin_action
+from core.media.ordering import ordered_post_media_prefetch
 from core.shared.exceptions import AdminError, ErrorCode
 
 logger = logging.getLogger("core.admin_dashboard")
@@ -50,7 +51,10 @@ class AdminModerationService:
                 "comment__post__user",
                 "reviewed_by",
             )
-            .prefetch_related("post__media_files", "comment__post__media_files")
+            .prefetch_related(
+                ordered_post_media_prefetch("post__media_files"),
+                ordered_post_media_prefetch("comment__post__media_files"),
+            )
             .order_by("-created_at")
         )
 
@@ -402,9 +406,8 @@ def _report_media_preview(post) -> list[dict]:
         return []
 
     media_items = []
-    # media_files' default ordering is newest-first; present in upload order.
-    # sorted() works on the prefetched cache without extra queries.
-    ordered = sorted(post.media_files.all(), key=lambda m: m.created_at)
+    # media_files is prefetched in selected order (position); present as-is.
+    ordered = list(post.media_files.all())
     for i, media in enumerate(ordered):
         thumbnail_url = media.thumbnail_url or ""
         if media.media_type == "image" and not thumbnail_url:

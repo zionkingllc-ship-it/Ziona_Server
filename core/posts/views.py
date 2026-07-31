@@ -12,6 +12,11 @@ from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import render
 from django.views.decorators.cache import cache_control
 
+from core.media.ordering import (
+    POST_MEDIA_POSITION,
+    order_media_by_position,
+    ordered_post_media_prefetch,
+)
 from core.posts.models import Post
 from core.shared.utils import build_post_share_url, parse_uuid
 
@@ -83,7 +88,7 @@ def share_preview(request: HttpRequest, post_id: str) -> HttpResponse:
 
     post = (
         Post.objects.select_related("user")
-        .prefetch_related("media_files", "post_media")
+        .prefetch_related(ordered_post_media_prefetch(), "post_media")
         .filter(id=post_id, deleted_at__isnull=True)
         .first()
     )
@@ -91,8 +96,12 @@ def share_preview(request: HttpRequest, post_id: str) -> HttpResponse:
     if not post:
         return HttpResponse("Post not found", status=404)
 
-    # Try media_files first (new path), fallback to post_media (legacy)
-    media = post.media_files.first() or post.post_media.first()
+    # Try media_files first (new path), fallback to post_media (legacy).
+    # Order by selected position so the OG preview uses the first chosen image.
+    media = (
+        order_media_by_position(post.media_files, POST_MEDIA_POSITION).first()
+        or post.post_media.first()
+    )
     preview_image = None
     if media:
         preview_image = (

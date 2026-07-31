@@ -23,6 +23,7 @@ from django.db.models.functions import Coalesce
 from django.utils import timezone
 
 from core.engagement.hidden_content import exclude_hidden_posts
+from core.media.ordering import ordered_post_media_prefetch
 from core.posts.models import Post
 
 logger = logging.getLogger("core.feed")
@@ -54,7 +55,7 @@ def _base_post_queryset():
     """Common feed queryset with related objects needed for feed DTO hydration."""
     return (
         Post.objects.select_related("user")
-        .prefetch_related("media_files", "post_media")
+        .prefetch_related(ordered_post_media_prefetch(), "post_media")
         .filter(deleted_at__isnull=True)
     )
 

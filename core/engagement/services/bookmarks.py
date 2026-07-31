@@ -2,6 +2,7 @@
 
 Split from the former core/engagement/services.py (no behavior change).
 """
+
 import logging
 import re
 
@@ -11,6 +12,7 @@ from core.engagement.models import (
     BookmarkFolder,
     Save,
 )
+from core.media.ordering import POST_MEDIA_POSITION, order_media_by_position
 from core.posts.models import Post
 from core.shared.decorators import rate_limit
 from core.shared.dtos import (
@@ -100,7 +102,9 @@ def save_post(
         from core.posts.services import PostService
 
         post_dto = PostService._build_post_dto(
-            post=post, media_items=list(post.media_files.all()), viewer_id=user_id
+            post=post,
+            media_items=list(order_media_by_position(post.media_files, POST_MEDIA_POSITION)),
+            viewer_id=user_id,
         )
 
         return SaveResponseDTO(success=True, saved=True, folder=folder_dto, post=post_dto)

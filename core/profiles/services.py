@@ -14,6 +14,7 @@ from django.core.validators import URLValidator
 from django.db.models import Count, Q
 
 from core.follows.selectors import FollowSelector
+from core.media.ordering import ordered_post_media_prefetch
 from core.posts.models import Post
 from core.shared.dtos import (
     UserProfileDTO,
@@ -174,7 +175,7 @@ class ProfileService:
             # Use media_files (M2M) — the relation that create_post writes to.
             # The legacy post_media (FK reverse) is never populated by the current
             # post creation flow and must NOT be used here.
-            .prefetch_related("media_files")
+            .prefetch_related(ordered_post_media_prefetch())
             .filter(user_id=target_user_id, deleted_at__isnull=True)
             .annotate(
                 likes_count=Count("likes", distinct=True),
@@ -343,7 +344,7 @@ class ProfileService:
 
         qs = (
             Post.objects.select_related("user")
-            .prefetch_related("media_files", "post_media")
+            .prefetch_related(ordered_post_media_prefetch(), "post_media")
             .filter(user_id=user_id, deleted_at__isnull=True)
             .annotate(
                 likes_count=Count("likes", distinct=True),
@@ -412,7 +413,7 @@ class ProfileService:
 
         qs = (
             Post.objects.select_related("user")
-            .prefetch_related("media_files", "post_media")
+            .prefetch_related(ordered_post_media_prefetch(), "post_media")
             .filter(id__in=liked_post_ids, deleted_at__isnull=True)
             .annotate(
                 likes_count=Count("likes", distinct=True),

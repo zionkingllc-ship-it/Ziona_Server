@@ -481,6 +481,7 @@ class CirclePost(models.Model):
     media_url = models.URLField(max_length=500, blank=True, default="")
     media_files = models.ManyToManyField(
         "media.MediaFile",
+        through="CirclePostMediaThrough",
         related_name="circle_posts",
         blank=True,
     )
@@ -511,6 +512,27 @@ class CirclePost(models.Model):
 
     def __str__(self):
         return f"Post by {self.user_id} in {self.circle_id}"
+
+
+class CirclePostMediaThrough(models.Model):
+    """Through table for `CirclePost.media_files`, carrying the selected order.
+
+    Adopts the pre-existing implicit M2M table (`circle_posts_media_files`) and
+    adds a `position` column so multi-image circle posts render in the order the
+    user picked instead of upload time.
+    """
+
+    circlepost = models.ForeignKey(
+        CirclePost, on_delete=models.CASCADE, related_name="media_through"
+    )
+    mediafile = models.ForeignKey(
+        "media.MediaFile", on_delete=models.CASCADE, related_name="circle_post_media_through"
+    )
+    position = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        db_table = "circle_posts_media_files"
+        unique_together = (("circlepost", "mediafile"),)
 
 
 class AnchorEngagement(models.Model):

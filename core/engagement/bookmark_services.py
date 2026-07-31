@@ -8,6 +8,11 @@ import logging
 
 from core.engagement.hidden_content import exclude_hidden_posts
 from core.engagement.models import BookmarkFolder, Save
+from core.media.ordering import (
+    POST_MEDIA_POSITION,
+    order_media_by_position,
+    ordered_post_media_prefetch,
+)
 from core.shared.dtos import BookmarkFolderDTO
 from core.shared.exceptions import BookmarkError, ErrorCode
 
@@ -192,7 +197,7 @@ class BookmarkService:
             # Use media_files (M2M) — the relation that create_post writes to.
             # post_media (FK reverse) is the legacy relation and is not populated
             # by the current post creation flow.
-            .prefetch_related("post__media_files")
+            .prefetch_related(ordered_post_media_prefetch("post__media_files"))
             .filter(
                 user_id=user_id,
                 post__deleted_at__isnull=True,
@@ -331,7 +336,7 @@ class BookmarkService:
         if not folder or folder.thumbnail_url:
             return
 
-        media = post.media_files.order_by("created_at", "id").first()
+        media = order_media_by_position(post.media_files, POST_MEDIA_POSITION).first()
         if not media:
             return
 

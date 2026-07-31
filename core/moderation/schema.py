@@ -2,6 +2,7 @@
 
 import strawberry
 
+from core.media.ordering import ordered_post_media_prefetch
 from core.shared.types import ErrorType
 from core.users.schema import _get_authenticated_user_id
 
@@ -278,9 +279,9 @@ def _report_queryset():
         "reviewed_by",
     ).prefetch_related(
         "post__post_media",
-        "post__media_files",
+        ordered_post_media_prefetch("post__media_files"),
         "comment__post__post_media",
-        "comment__post__media_files",
+        ordered_post_media_prefetch("comment__post__media_files"),
     )
 
 

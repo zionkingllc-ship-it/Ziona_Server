@@ -18,10 +18,12 @@ from core.circles.models import (
     CircleMembership,
     CirclePost,
     CirclePostEngagement,
+    CirclePostMediaThrough,
 )
 from core.engagement.hidden_content import exclude_hidden_circle_content
 from core.media.models import MediaFile, MediaStatus
 from core.media.models import MediaType as StoredMediaType
+from core.media.ordering import ordered_circle_post_media_prefetch
 from core.media.services import validate_trusted_external_image_url
 from core.shared.exceptions import ZionaError
 from core.shared.utils import parse_uuid
@@ -179,7 +181,7 @@ def get_circle_feed(
     queryset = (
         CirclePost.objects.filter(circle=circle, deleted_at__isnull=True)
         .select_related("user")
-        .prefetch_related("media_files")
+        .prefetch_related(ordered_circle_post_media_prefetch())
     )
 
     # Suppress posts this viewer has reported/hidden (per-reporter suppression).
@@ -243,7 +245,7 @@ def get_circle_post(post_id: str, viewer_id: str | None = None) -> CirclePost:
     queryset = (
         CirclePost.objects.filter(id=post_id, deleted_at__isnull=True)
         .select_related("user", "circle")
-        .prefetch_related("media_files")
+        .prefetch_related(ordered_circle_post_media_prefetch())
     )
     queryset = exclude_hidden_circle_content(
         queryset,
@@ -411,10 +413,19 @@ def create_circle_post(
         text=trimmed_text,
     )
     if resolved_media_files:
-        post.media_files.set(resolved_media_files)
+        # `_resolve_circle_post_media` returns files in the request order; persist
+        # that order via `position` so multi-image circle posts render as chosen.
+        CirclePostMediaThrough.objects.bulk_create(
+            [
+                CirclePostMediaThrough(circlepost=post, mediafile=media_file, position=position)
+                for position, media_file in enumerate(resolved_media_files)
+            ]
+        )
 
     full_post = (
-        CirclePost.objects.select_related("user").prefetch_related("media_files").get(id=post.id)
+        CirclePost.objects.select_related("user")
+        .prefetch_related(ordered_circle_post_media_prefetch())
+        .get(id=post.id)
     )
 
     # Dispatch @mention notifications — scoped to circle members only.

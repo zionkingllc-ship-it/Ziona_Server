@@ -12,7 +12,8 @@ from django.db import transaction
 
 from core.engagement.models import Like, Save
 from core.follows.models import Follow
-from core.posts.models import Post, PostType
+from core.media.ordering import POST_MEDIA_POSITION, order_media_by_position
+from core.posts.models import Post, PostMediaThrough, PostType
 from core.posts.selectors import PostSelector
 from core.scripture.constants import normalize_translation
 from core.shared.dtos import (
@@ -175,6 +176,12 @@ class PostService:
                 )
                 resolved_media_files.append(media_file)
 
+        # Preserve the creator's selected order: `filter(id__in=media_ids)` above
+        # does not honour list order, so reorder to match the client's sequence.
+        if media_ids:
+            media_by_id = {str(m.id): m for m in resolved_media_files}
+            resolved_media_files = [media_by_id[str(mid)] for mid in media_ids]
+
         video_media_files = [m for m in resolved_media_files if m.media_type == "video"]
         if len(video_media_files) > MAX_VIDEOS_PER_POST:
             raise PostError(
@@ -262,7 +269,15 @@ class PostService:
             )
 
             if resolved_media_files:
-                post.media_files.set(resolved_media_files)
+                through_rows = []
+                for position, media_file in enumerate(resolved_media_files):
+                    through_rows.append(
+                        PostMediaThrough(post=post, mediafile=media_file, position=position)
+                    )
+                    # Surface position on the in-memory instances so the create
+                    # response DTO (built from this list) reflects the order.
+                    media_file.order = position
+                PostMediaThrough.objects.bulk_create(through_rows)
 
             post_dto = PostService._build_post_dto(
                 post,
@@ -344,7 +359,7 @@ class PostService:
                 code=ErrorCode.POST_NOT_FOUND,
             )
 
-        media_items = list(post.media_files.all())
+        media_items = list(order_media_by_position(post.media_files, POST_MEDIA_POSITION))
         return PostService._build_post_dto(post, media_items, viewer_id=viewer_id)
 
     @staticmethod
@@ -416,7 +431,7 @@ class PostService:
             extra={"post_id": str(post.id), "user_id": user_id},
         )
 
-        media_items = list(post.media_files.all())
+        media_items = list(order_media_by_position(post.media_files, POST_MEDIA_POSITION))
         return PostService._build_post_dto(post, media_items, viewer_id=user_id)
 
     @staticmethod

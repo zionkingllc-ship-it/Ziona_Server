@@ -72,6 +72,7 @@ class Post(SoftDeleteModel):
     is_mature_content = models.BooleanField(default=False)
     media_files = models.ManyToManyField(
         "media.MediaFile",
+        through="PostMediaThrough",
         related_name="posts",
         blank=True,
         help_text="Attached media files via uploadMedia",
@@ -101,6 +102,25 @@ class Post(SoftDeleteModel):
     def __str__(self) -> str:
         """Return string representation."""
         return f"Post({self.post_type}) by {self.user_id} — {self.id}"
+
+
+class PostMediaThrough(models.Model):
+    """Through table for `Post.media_files`, carrying the selected image order.
+
+    Adopts the pre-existing implicit M2M table (`posts_media_files`) and adds a
+    `position` column so multi-image posts render in the order the user picked
+    (the `media_ids` list order) instead of upload time.
+    """
+
+    post = models.ForeignKey(Post, on_delete=models.CASCADE, related_name="media_through")
+    mediafile = models.ForeignKey(
+        "media.MediaFile", on_delete=models.CASCADE, related_name="post_media_through"
+    )
+    position = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        db_table = "posts_media_files"
+        unique_together = (("post", "mediafile"),)
 
 
 class PostMedia(TimestampedModel):
