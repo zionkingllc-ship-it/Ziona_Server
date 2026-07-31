@@ -28,6 +28,24 @@ ALREADY_MEMBER = "ALREADY_MEMBER"
 NOT_MEMBER = "NOT_MEMBER"
 
 
+def _locked_anchor(anchor_id: str) -> Anchor:
+    """Fetch and row-lock a single anchor for a like/pray toggle.
+
+    of=("self",) scopes FOR UPDATE to the anchors table only. Anchor.objects
+    (ActiveCreatorContentManager) LEFT-joins users via the active-creator
+    filter, and Postgres rejects FOR UPDATE on the nullable side of an outer
+    join. Locking only "self" preserves the row lock without the join error.
+    """
+    anchor = (
+        Anchor.objects.select_for_update(of=("self",))
+        .filter(id=anchor_id, deleted_at__isnull=True)
+        .first()
+    )
+    if anchor is None:
+        raise ZionaError(message="Anchor not found", code=ANCHOR_NOT_FOUND)
+    return anchor
+
+
 @transaction.atomic
 def pray_for_anchor(user_id: str, anchor_id: str) -> dict:
     """
@@ -38,10 +56,7 @@ def pray_for_anchor(user_id: str, anchor_id: str) -> dict:
     Returns:
         {"prayed": bool, "prayed_count": int}
     """
-    try:
-        anchor = Anchor.objects.select_for_update().get(id=anchor_id, deleted_at__isnull=True)
-    except Anchor.DoesNotExist:
-        raise ZionaError(message="Anchor not found", code=ANCHOR_NOT_FOUND) from None
+    anchor = _locked_anchor(anchor_id)
     require_circle_membership(
         user_id,
         str(anchor.circle_id),
@@ -71,10 +86,7 @@ def like_anchor(user_id: str, anchor_id: str) -> dict:
     Returns:
         {"liked": bool, "anchor_liked_count": int}
     """
-    try:
-        anchor = Anchor.objects.select_for_update().get(id=anchor_id, deleted_at__isnull=True)
-    except Anchor.DoesNotExist:
-        raise ZionaError(message="Anchor not found", code=ANCHOR_NOT_FOUND) from None
+    anchor = _locked_anchor(anchor_id)
     require_circle_membership(
         user_id,
         str(anchor.circle_id),
