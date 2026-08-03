@@ -442,7 +442,11 @@ ENSEND_API_KEY = env("ENSEND_API_KEY", default="")
 ENSEND_API_URL = env("ENSEND_API_URL", default="https://api.smtpexpress.com/send")
 ENSEND_SENDER_NAME = env("ENSEND_SENDER_NAME", default="Ziona Team")
 DEFAULT_FROM_EMAIL = env("DEFAULT_FROM_EMAIL", default="noreply@ziona.app")
-APP_SHARE_BASE_URL = env("APP_SHARE_BASE_URL", default="https://ziona.app")
+# Deep-link/share domain. Must be the host that SERVES the site (not a host that
+# redirects): Apple/Google refuse to verify a Universal/App Link domain whose
+# .well-known files 30x-redirect, and will not open the app through a redirect.
+# `ziona.app` permanently 308s to `www.ziona.app`, so www is the canonical target.
+APP_SHARE_BASE_URL = env("APP_SHARE_BASE_URL", default="https://www.ziona.app")
 EMAIL_ASSET_BASE_URL = env(
     "EMAIL_ASSET_BASE_URL",
     default="https://storage.googleapis.com/ziona-media-dev/email-assets",

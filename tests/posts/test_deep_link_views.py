@@ -70,3 +70,13 @@ def test_share_preview_includes_store_fallback_and_deep_link(client, settings):
     assert "play.google.com/store/apps/details?id=com.zionking.ziona" in body
     # …and the primary CTA points at the post deep link (not a bare root URL).
     assert f"https://ziona.app/post/{post.id}" in body
+
+
+def test_share_base_url_defaults_to_the_serving_host_not_a_redirecting_one(settings):
+    """Deep links must target the host that serves the site.
+
+    `ziona.app` permanently 308s to `www.ziona.app`; Apple/Google refuse to verify
+    a deep-link domain whose .well-known files redirect, and will not open the app
+    through a redirect. Guards against reverting the default to the bare apex.
+    """
+    assert settings.APP_SHARE_BASE_URL == "https://www.ziona.app"
