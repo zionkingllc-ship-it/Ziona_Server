@@ -43,6 +43,22 @@ class AdminReportMediaType:
 
 
 @strawberry.type
+class AdminPriorReportType:
+    """A prior report on the same content, shown as history on the detail view."""
+
+    id: str
+    reporter: ReporterType | None = None
+    reason: str
+    description: str
+    status: str
+    action: str
+    internal_notes: str = strawberry.field(name="internalNotes")
+    reviewed_by_name: str = strawberry.field(name="reviewedByName", default="")
+    reviewed_at: str | None = strawberry.field(name="reviewedAt", default=None)
+    created_at: str = strawberry.field(name="createdAt")
+
+
+@strawberry.type
 class AdminReportType:
     """Admin-facing report representation."""
 
@@ -68,6 +84,11 @@ class AdminReportType:
     reviewed_by_name: str = strawberry.field(name="reviewedByName")
     reviewed_at: str | None = strawberry.field(name="reviewedAt", default=None)
     created_at: str = strawberry.field(name="createdAt")
+    prior_reports: list[AdminPriorReportType] = strawberry.field(
+        name="priorReports",
+        default_factory=list,
+        description="Other reports on the same content (detail view only), newest first.",
+    )
 
 
 @strawberry.type
@@ -137,6 +158,29 @@ def _map_report(data: dict) -> AdminReportType:
             )
             for item in data.get("content_media", [])
         ],
+        reviewed_by_name=data.get("reviewed_by_name", ""),
+        reviewed_at=data.get("reviewed_at"),
+        created_at=data["created_at"],
+        prior_reports=[_map_prior_report(p) for p in data.get("prior_reports", [])],
+    )
+
+
+def _map_prior_report(data: dict) -> AdminPriorReportType:
+    reporter = None
+    if data.get("reporter"):
+        reporter = ReporterType(
+            id=data["reporter"]["id"],
+            username=data["reporter"]["username"],
+            avatar_url=data["reporter"].get("avatar_url", ""),
+        )
+    return AdminPriorReportType(
+        id=data["id"],
+        reporter=reporter,
+        reason=data["reason"],
+        description=data.get("description", ""),
+        status=data["status"],
+        action=data.get("action", ""),
+        internal_notes=data.get("internal_notes", ""),
         reviewed_by_name=data.get("reviewed_by_name", ""),
         reviewed_at=data.get("reviewed_at"),
         created_at=data["created_at"],
@@ -288,6 +332,21 @@ class ModerationAdminQueries:
             total_pages=result["total_pages"],
             summary=ReportSummaryType(**result["summary"]),
         )
+
+    @strawberry.field(
+        name="adminReport",
+        description="A single report with the history of prior reports on the same content.",
+    )
+    @admin_required
+    def admin_report(self, info: Info, report_id: str) -> AdminReportType | None:
+        from core.admin_dashboard.moderation_services import AdminModerationService
+        from core.shared.exceptions import AdminError
+
+        try:
+            data = AdminModerationService.get_report_detail(report_id)
+        except AdminError:
+            return None
+        return _map_report(data)
 
 
 @strawberry.type

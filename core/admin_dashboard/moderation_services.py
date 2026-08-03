@@ -91,6 +91,43 @@ class AdminModerationService:
         }
 
     @staticmethod
+    def get_report_detail(report_id: str) -> dict:
+        """Fetch one report plus the history of prior reports on the same content.
+
+        `prior_reports` lists every other report on the same
+        ``(target_type, target_id)`` — most-recent first — so a reviewer can see
+        why the content was reported before and any internal notes earlier
+        reviewers left. Populated only here (never in the paginated list), so the
+        history query runs at most once per detail view.
+        """
+        from core.moderation.models import Report
+
+        report = (
+            Report.objects.select_related(
+                "reporter",
+                "post",
+                "post__user",
+                "comment",
+                "comment__user",
+                "comment__post",
+                "comment__post__user",
+                "reviewed_by",
+            )
+            .prefetch_related(
+                ordered_post_media_prefetch("post__media_files"),
+                ordered_post_media_prefetch("comment__post__media_files"),
+            )
+            .filter(id=report_id)
+            .first()
+        )
+        if report is None:
+            raise AdminError(message="Report not found.", code=ErrorCode.REPORT_NOT_FOUND)
+
+        data = _report_to_dict(report)
+        data["prior_reports"] = _prior_reports_for(report)
+        return data
+
+    @staticmethod
     @transaction.atomic
     def review_report(
         report_id: str,
@@ -343,6 +380,51 @@ def _warn_content_owner(report, reason: str, admin_user, ip_address: str):
         except AdminError:
             # User might already be warned — that's acceptable
             logger.info("User already warned, skipping", extra={"user_id": owner_id})
+
+
+def _prior_reports_for(report) -> list[dict]:
+    """Other reports on the same content (target_type + target_id), newest first.
+
+    Uses the ``idx_report_target`` index. Includes every status so a reviewer sees
+    the full history and any internal notes left on earlier reports.
+    """
+    if not report.target_id:
+        return []
+    from core.moderation.models import Report
+
+    prior = (
+        Report.objects.select_related("reporter", "reviewed_by")
+        .filter(target_type=report.target_type, target_id=report.target_id)
+        .exclude(id=report.id)
+        .order_by("-created_at")
+    )
+    return [_report_to_prior_summary(r) for r in prior]
+
+
+def _report_to_prior_summary(report) -> dict:
+    """Lightweight serialization of a prior report (no content/media preview)."""
+    reporter_info = {}
+    if report.reporter:
+        reporter_info = {
+            "id": str(report.reporter.id),
+            "username": report.reporter.username,
+            "avatar_url": report.reporter.avatar_url or "",
+        }
+    reviewed_by_name = ""
+    if report.reviewed_by:
+        reviewed_by_name = report.reviewed_by.full_name or report.reviewed_by.username
+    return {
+        "id": str(report.id),
+        "reporter": reporter_info,
+        "reason": report.reason,
+        "description": report.description or "",
+        "status": report.status,
+        "action": report.action or "",
+        "internal_notes": report.internal_notes or "",
+        "reviewed_by_name": reviewed_by_name,
+        "reviewed_at": report.reviewed_at.isoformat() if report.reviewed_at else None,
+        "created_at": report.created_at.isoformat(),
+    }
 
 
 def _report_to_dict(report) -> dict:
