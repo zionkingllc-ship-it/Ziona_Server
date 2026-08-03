@@ -244,25 +244,34 @@ def test_send_push_notification_logs_provider_summary(db, user, monkeypatch):
 
 
 @pytest.mark.django_db
-def test_create_notification_push_payload_uses_camelcase_keys(user, monkeypatch):
-    """The FCM push payload must use camelCase keys the mobile tap-handler reads."""
+def test_create_notification_push_payload_uses_camelcase_keys(
+    user, monkeypatch, django_capture_on_commit_callbacks
+):
+    """The FCM push payload must use camelCase keys the mobile tap-handler reads.
+
+    Push is now queued to Celery after commit, so the on-commit callback is
+    executed here and the task's payload is what we assert on.
+    """
     captured = {}
 
-    def fake_push(user_id, title, body, data):
-        captured["data"] = data
+    def fake_apply_async(*args, **kwargs):
+        captured["data"] = kwargs["kwargs"]["data"]
 
-    monkeypatch.setattr("core.notifications.services.send_push_notification", fake_push)
+    monkeypatch.setattr(
+        "core.notifications.tasks.send_push_notification_task.apply_async", fake_apply_async
+    )
 
     ref = uuid.uuid4()
-    create_notification(
-        user_id=user.id,
-        type_str=NotificationType.LIKE_POST,
-        reference_id=ref,
-        reference_type="post",
-        message="liked your post",
-        respect_preferences=False,
-        bypass_duplicate_check=True,
-    )
+    with django_capture_on_commit_callbacks(execute=True):
+        create_notification(
+            user_id=user.id,
+            type_str=NotificationType.LIKE_POST,
+            reference_id=ref,
+            reference_type="post",
+            message="liked your post",
+            respect_preferences=False,
+            bypass_duplicate_check=True,
+        )
 
     data = captured["data"]
     assert data["referenceType"] == "post"
@@ -272,3 +281,88 @@ def test_create_notification_push_payload_uses_camelcase_keys(user, monkeypatch)
     # Old snake_case keys must be gone (they broke mobile deep-linking).
     assert "reference_type" not in data
     assert "reference_id" not in data
+
+
+@pytest.mark.django_db
+def test_push_is_queued_not_sent_inline(user, monkeypatch, django_capture_on_commit_callbacks):
+    """The FCM round-trip must not happen inside the request."""
+    calls = {"queued": 0, "inline": 0}
+    monkeypatch.setattr(
+        "core.notifications.tasks.send_push_notification_task.apply_async",
+        lambda *a, **k: calls.__setitem__("queued", calls["queued"] + 1),
+    )
+    monkeypatch.setattr(
+        "core.notifications.services.send_fcm_notification",
+        lambda *a, **k: calls.__setitem__("inline", calls["inline"] + 1),
+    )
+
+    with django_capture_on_commit_callbacks(execute=True):
+        create_notification(
+            user_id=user.id,
+            type_str=NotificationType.LIKE_POST,
+            reference_id=uuid.uuid4(),
+            reference_type="post",
+            message="liked your post",
+            respect_preferences=False,
+            bypass_duplicate_check=True,
+        )
+
+    assert calls["queued"] == 1
+    assert calls["inline"] == 0  # never sent on the request thread
+
+
+@pytest.mark.django_db
+def test_push_is_not_queued_until_transaction_commits(user, monkeypatch):
+    """A rolled-back transaction must not send a push for a vanished notification."""
+    queued = []
+    monkeypatch.setattr(
+        "core.notifications.tasks.send_push_notification_task.apply_async",
+        lambda *a, **k: queued.append(k),
+    )
+
+    create_notification(
+        user_id=user.id,
+        type_str=NotificationType.LIKE_POST,
+        reference_id=uuid.uuid4(),
+        reference_type="post",
+        message="liked your post",
+        respect_preferences=False,
+        bypass_duplicate_check=True,
+    )
+
+    # The test's surrounding transaction never commits, so nothing was dispatched.
+    assert queued == []
+
+
+@pytest.mark.django_db
+def test_push_falls_back_to_inline_when_broker_is_unreachable(
+    user, monkeypatch, django_capture_on_commit_callbacks
+):
+    """A dead broker must not silently swallow the notification."""
+    sent_inline = []
+
+    def broker_down(*args, **kwargs):
+        raise OSError("broker unreachable")
+
+    monkeypatch.setattr(
+        "core.notifications.tasks.send_push_notification_task.apply_async", broker_down
+    )
+    monkeypatch.setattr(
+        "core.notifications.services.send_fcm_notification",
+        lambda tokens, title, body, data: sent_inline.append(title) or {},
+    )
+    DeviceToken.objects.create(user=user, token="fcm-token-abc", platform="ios", is_active=True)
+
+    with django_capture_on_commit_callbacks(execute=True):
+        create_notification(
+            user_id=user.id,
+            type_str=NotificationType.LIKE_POST,
+            reference_id=uuid.uuid4(),
+            reference_type="post",
+            message="liked your post",
+            title="New Like",
+            respect_preferences=False,
+            bypass_duplicate_check=True,
+        )
+
+    assert sent_inline == ["New Like"]

@@ -6,9 +6,28 @@ from django.utils import timezone
 
 from core.circles.models import Anchor
 from core.notifications.models import Notification, NotificationStatus, NotificationType
-from core.notifications.services import create_notification
+from core.notifications.services import create_notification, send_push_notification
 
 logger = logging.getLogger(__name__)
+
+
+@shared_task(bind=True, max_retries=3, default_retry_delay=30, soft_time_limit=60)
+def send_push_notification_task(self, user_id, title: str, body: str, data: dict | None = None):
+    """Deliver a push notification off the request thread.
+
+    FCM is a network round-trip; doing it inline made every like/comment hold the
+    HTTP request open for its duration (and an FCM outage would slow the whole
+    API). Queued from `create_notification` via `transaction.on_commit`.
+    """
+    try:
+        send_push_notification(user_id=user_id, title=title, body=body, data=data or {})
+    except Exception as exc:
+        logger.warning(
+            "push_notification_task_failed",
+            extra={"user_id": str(user_id), "notification_type": (data or {}).get("type")},
+            exc_info=True,
+        )
+        raise self.retry(exc=exc) from exc
 
 
 @shared_task(bind=True, max_retries=3, default_retry_delay=60, soft_time_limit=120)

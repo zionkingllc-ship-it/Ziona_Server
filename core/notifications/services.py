@@ -53,6 +53,37 @@ def _is_notification_enabled(user_id: int, notification_type: str) -> bool:
     return mapping.get(notification_type, True)
 
 
+def queue_push_notification(user_id, title: str, body: str, data: dict[str, Any]) -> None:
+    """Queue push delivery after commit instead of blocking the request.
+
+    Deferred with `transaction.on_commit` so a rolled-back transaction never
+    sends a push for a notification that no longer exists. If the broker cannot
+    be reached the push is sent inline rather than silently dropped — a slow
+    request is better than a lost notification.
+    """
+    payload = {
+        "user_id": str(user_id),
+        "title": title,
+        "body": body,
+        "data": data,
+    }
+
+    def _dispatch() -> None:
+        from core.notifications.tasks import send_push_notification_task
+
+        try:
+            send_push_notification_task.apply_async(kwargs=payload)
+        except Exception:
+            logger.warning(
+                "push_notification_enqueue_failed_sending_inline",
+                extra={"user_id": str(user_id), "notification_type": data.get("type")},
+                exc_info=True,
+            )
+            send_push_notification(user_id=user_id, title=title, body=body, data=data)
+
+    transaction.on_commit(_dispatch)
+
+
 def create_notification(
     user_id: int,
     type_str: str,
@@ -104,7 +135,8 @@ def create_notification(
         sender_id=sender_id,
     )
 
-    # Trigger push notification asynchronously (would be a Celery task in prod).
+    # Push is queued to Celery (see queue_push_notification) so the FCM
+    # round-trip never blocks the request that created this notification.
     # Keys are camelCase to match the app-wide mobile contract (CLAUDE.md §5.1)
     # and the GraphQL notification fields — the mobile tap-handler reads
     # data.referenceType / data.referenceId.
@@ -117,7 +149,7 @@ def create_notification(
     if push_data:
         notification_data.update({key: str(value) for key, value in push_data.items()})
 
-    send_push_notification(
+    queue_push_notification(
         user_id=user_id,
         title=title or "Ziona App",
         body=message,
