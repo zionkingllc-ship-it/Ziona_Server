@@ -19,6 +19,7 @@ class HelpConversationOps:
     """Help-conversation methods mixed into ContactService."""
 
     @staticmethod
+    @transaction.atomic
     def submit_help_message(
         *,
         message: str,
@@ -30,14 +31,46 @@ class HelpConversationOps:
         origin_url: str = "",
         platform: str = "",
     ) -> dict:
-        """Create a new authenticated in-app support thread."""
-        from core.admin_dashboard.models import ContactMessage
+        """Continue the user's open in-app support chat, or start a new thread.
+
+        Reuses the user's most recent OPEN thread (pending/in-progress) so a
+        continuing conversation stays in one thread. A new thread is created only
+        when the user has no open thread (first message, or after the previous was
+        resolved). This keeps the chat continuous regardless of whether the client
+        calls this mutation or `sendHelpMessage` for follow-ups.
+        """
+        from core.admin_dashboard.models import ContactMessage, ContactStatus
 
         if not user:
             raise AdminError(
                 message="Authentication is required for in-app support.",
                 code=ErrorCode.UNAUTHORIZED,
             )
+
+        cleaned_message = (message or "").strip()
+        if not cleaned_message:
+            raise AdminError(message="Message is required.", code=ErrorCode.VALIDATION_ERROR)
+
+        existing = (
+            ContactMessage.objects.select_for_update()
+            .filter(
+                requester_user=user,
+                source__in=["mobile_help", "mobile_app"],
+                status__in=[ContactStatus.PENDING, ContactStatus.IN_PROGRESS],
+            )
+            .order_by("-last_message_at", "-created_at")
+            .first()
+        )
+        if existing:
+            _check_help_rate_limit("append_minute", str(user.id), 30, 60)
+            _check_help_rate_limit("append_day", str(user.id), 500, 86400)
+            thread = _append_user_message(existing, message=cleaned_message, user=user)
+            return {
+                "success": True,
+                "contact_id": str(existing.id),
+                "message": "Your message has been received. We'll get back to you soon.",
+                "contact": thread,
+            }
 
         _check_help_rate_limit(
             action="create",
@@ -63,7 +96,7 @@ class HelpConversationOps:
         result = ContactService.submit_message(
             name=resolved_name,
             email=resolved_email,
-            message=message,
+            message=cleaned_message,
             ip_address=ip_address,
             source="mobile_help",
             brand="ZIONA",
@@ -161,8 +194,6 @@ class HelpConversationOps:
         from core.admin_dashboard.models import (
             ContactConversationMessage,
             ContactMessage,
-            ContactSenderType,
-            ContactStatus,
         )
 
         if not user:
@@ -201,19 +232,10 @@ class HelpConversationOps:
         _check_help_rate_limit("append_minute", str(user.id), 30, 60)
         _check_help_rate_limit("append_day", str(user.id), 500, 86400)
 
-        appended = ContactConversationMessage.objects.create(
-            contact=contact,
-            sender_type=ContactSenderType.USER,
-            sender_user=user,
-            message=cleaned_message,
-            client_message_id=cleaned_client_id,
+        thread = _append_user_message(
+            contact, message=cleaned_message, user=user, client_message_id=cleaned_client_id
         )
-        if contact.status == ContactStatus.RESOLVED:
-            contact.status = ContactStatus.PENDING
-        contact.last_message_at = appended.created_at
-        contact.save(update_fields=["status", "last_message_at", "updated_at"])
-        contact = _reload_help_contact(contact.id)
-        return {"success": True, "contact": _contact_to_help_thread(contact)}
+        return {"success": True, "contact": thread}
 
     @staticmethod
     @transaction.atomic
@@ -239,6 +261,32 @@ class HelpConversationOps:
         contact.status = ContactStatus.RESOLVED
         contact.save(update_fields=["status"])
         return {"success": True, "contact": _contact_to_help_thread(contact)}
+
+
+def _append_user_message(contact, *, message, user, client_message_id=""):
+    """Append a USER message to a thread; reopen if resolved; return the thread dict.
+
+    Shared by `submit_help_message` (continuing an open chat) and
+    `send_help_message` (explicit append by contactId).
+    """
+    from core.admin_dashboard.models import (
+        ContactConversationMessage,
+        ContactSenderType,
+        ContactStatus,
+    )
+
+    appended = ContactConversationMessage.objects.create(
+        contact=contact,
+        sender_type=ContactSenderType.USER,
+        sender_user=user,
+        message=message,
+        client_message_id=client_message_id,
+    )
+    if contact.status == ContactStatus.RESOLVED:
+        contact.status = ContactStatus.PENDING
+    contact.last_message_at = appended.created_at
+    contact.save(update_fields=["status", "last_message_at", "updated_at"])
+    return _contact_to_help_thread(_reload_help_contact(contact.id))
 
 
 def _contact_to_help_thread(contact) -> dict:
