@@ -75,6 +75,7 @@ class ContactService:
         message: str,
         ip_address: str,
         honeypot: str = "",
+        origin_url: str = "",
     ) -> dict:
         """Validate, persist and route a contact form submission.
 
@@ -139,6 +140,7 @@ class ContactService:
                     message=message,
                     source="landing_page",
                     brand=submission.brand,
+                    origin_url=(origin_url or "").strip()[:255],
                     ip_address=ip_address or None,
                 )
                 initial_message = ContactConversationMessage.objects.create(

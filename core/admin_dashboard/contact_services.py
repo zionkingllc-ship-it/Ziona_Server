@@ -215,6 +215,8 @@ class ContactService(HelpConversationOps):
         brand: str = "",
         topic: str = "",
         requester_user=None,
+        origin_url: str = "",
+        platform: str = "",
     ) -> dict:
         """Public endpoint: submit a contact/support message.
 
@@ -276,6 +278,8 @@ class ContactService(HelpConversationOps):
                 topic=(topic or "").strip()[:100],
                 source=(source or "mobile_app").strip()[:50],
                 brand=(brand or "").strip()[:50],
+                origin_url=(origin_url or "").strip()[:255],
+                platform=normalize_platform(platform),
                 ip_address=ip_address or None,
             )
             initial_message = ContactConversationMessage.objects.create(
@@ -303,6 +307,50 @@ class ContactService(HelpConversationOps):
 # ─────────────────────────────────────────
 # Private helpers
 # ─────────────────────────────────────────
+
+
+# Known web origins → friendly source labels shown in the admin UI.
+_ORIGIN_LABELS = {
+    "zionking.org": "zionking.org",
+    "www.zionking.org": "zionking.org",
+    "ziona.app": "ziona.app",
+    "www.ziona.app": "ziona.app",
+    "admin.ziona.app": "Admin dashboard",
+}
+_PLATFORM_LABELS = {"ios": "iOS", "android": "Android"}
+
+
+def normalize_platform(value: str | None) -> str:
+    """Normalize a client-declared platform to ``ios``/``android`` (else ``""``)."""
+    normalized = (value or "").strip().lower()
+    return normalized if normalized in _PLATFORM_LABELS else ""
+
+
+def contact_source_label(source: str, brand: str, origin_url: str, platform: str) -> str:
+    """Human-readable origin for the admin UI.
+
+    Prefers the actually-observed web origin; falls back to the landing `brand`
+    for pre-`origin_url` rows, then to the mobile platform, then to `source`.
+    e.g. "ziona.app", "zionking.org", "Mobile app (iOS)", "Mobile app".
+    """
+    from urllib.parse import urlsplit
+
+    host = urlsplit(origin_url or "").netloc.lower()
+    if host:
+        return _ORIGIN_LABELS.get(host, host)
+
+    if source == "landing_page":
+        normalized_brand = (brand or "").strip().upper()
+        if normalized_brand == "ZIONKING":
+            return "zionking.org"
+        if normalized_brand == "ZIONA":
+            return "ziona.app"
+
+    if source in ("mobile_app", "mobile_help"):
+        suffix = _PLATFORM_LABELS.get((platform or "").strip().lower())
+        return f"Mobile app ({suffix})" if suffix else "Mobile app"
+
+    return source or "Unknown"
 
 
 def _contact_to_dict(contact) -> dict:
@@ -346,6 +394,11 @@ def _contact_to_dict(contact) -> dict:
         ),
         "source": contact.source,
         "brand": contact.brand,
+        "origin_url": contact.origin_url,
+        "platform": contact.platform,
+        "source_label": contact_source_label(
+            contact.source, contact.brand, contact.origin_url, contact.platform
+        ),
         "status": contact.status,
         "replies": replies,
         "replied_at": contact.replied_at.isoformat() if contact.replied_at else None,

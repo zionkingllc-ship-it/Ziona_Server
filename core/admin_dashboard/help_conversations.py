@@ -27,6 +27,8 @@ class HelpConversationOps:
         user=None,
         name: str = "",
         email: str = "",
+        origin_url: str = "",
+        platform: str = "",
     ) -> dict:
         """Create a new authenticated in-app support thread."""
         from core.admin_dashboard.models import ContactMessage
@@ -67,6 +69,8 @@ class HelpConversationOps:
             brand="ZIONA",
             topic=category.title if category else "",
             requester_user=user,
+            origin_url=origin_url,
+            platform=platform,
         )
         contact = (
             ContactMessage.objects.select_related("requester_user")

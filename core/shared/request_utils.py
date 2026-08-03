@@ -36,6 +36,36 @@ def get_client_ip(request: HttpRequest, *, default: str = "unknown") -> str:
     return str(remote_ip)
 
 
+def get_request_origin(request: HttpRequest) -> str:
+    """Return the requesting web origin as ``scheme://host``, or ``""``.
+
+    Reads the ``Origin`` header (sent by browsers on the cross-origin GraphQL
+    POST), falling back to ``Referer``. Only the scheme+host is kept — any path
+    or query string is stripped so we never persist Referer PII. Native mobile
+    clients typically send neither header, so this returns ``""`` for them (their
+    platform is captured separately).
+    """
+    origin = request.META.get("HTTP_ORIGIN", "").strip()
+    if not origin:
+        referer = request.META.get("HTTP_REFERER", "").strip()
+        origin = _origin_from_url(referer)
+    else:
+        origin = _origin_from_url(origin)
+    return origin[:255]
+
+
+def _origin_from_url(value: str) -> str:
+    """Normalize a URL/origin string down to ``scheme://host`` (no path/query)."""
+    if not value:
+        return ""
+    from urllib.parse import urlsplit
+
+    parts = urlsplit(value)
+    if parts.scheme and parts.netloc:
+        return f"{parts.scheme}://{parts.netloc}"
+    return ""
+
+
 def _parse_ip(value: str) -> ipaddress.IPv4Address | ipaddress.IPv6Address | None:
     """Parse a literal IP string into an address object."""
     if not value:

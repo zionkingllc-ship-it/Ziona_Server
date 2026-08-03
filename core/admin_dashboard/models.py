@@ -182,6 +182,8 @@ class ContactMessage(models.Model):
         message: The support message body.
         source: Origin of the ticket (mobile_app, landing_page, admin_dashboard).
         brand: Optional brand/app context for routed submissions.
+        origin_url: Web origin actually observed (scheme://host); "" for mobile.
+        platform: Client-declared mobile platform (ios/android); "" for web.
         status: Current ticket status.
         replied_at: Timestamp of the first admin reply.
     """
@@ -200,6 +202,11 @@ class ContactMessage(models.Model):
     topic = models.CharField(max_length=100, blank=True, default="")
     source = models.CharField(max_length=50, default="mobile_app", db_index=True)
     brand = models.CharField(max_length=50, blank=True, default="")
+    # Web origin actually observed on the request (scheme://host); empty for
+    # native mobile clients and pre-feature rows.
+    origin_url = models.CharField(max_length=255, blank=True, default="")
+    # Client-declared mobile platform (ios/android); empty for web submissions.
+    platform = models.CharField(max_length=20, blank=True, default="")
     ip_address = models.GenericIPAddressField(null=True, blank=True)
     status = models.CharField(
         max_length=20,

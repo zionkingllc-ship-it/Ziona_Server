@@ -8,7 +8,7 @@ from __future__ import annotations
 import strawberry
 from strawberry.types import Info
 
-from core.shared.request_utils import get_client_ip
+from core.shared.request_utils import get_client_ip, get_request_origin
 from core.shared.types import ErrorType
 
 
@@ -271,6 +271,7 @@ class HelpCenterAdminMutations:
         category_slug: str | None = None,
         name: str | None = None,
         email: str | None = None,
+        platform: str | None = None,
     ) -> HelpConversationPayload:
         from core.admin_dashboard.contact_services import ContactService
         from core.shared.exceptions import AdminError
@@ -299,6 +300,8 @@ class HelpCenterAdminMutations:
                 user=user,
                 name=name or "",
                 email=email or "",
+                origin_url=get_request_origin(info.context.request),
+                platform=platform or "",
             )
             return HelpConversationPayload(
                 success=True,

@@ -13,7 +13,7 @@ from core.admin_dashboard.schema.help_center import (
     HelpConversationType,
     _map_help_conversation,
 )
-from core.shared.request_utils import get_client_ip
+from core.shared.request_utils import get_client_ip, get_request_origin
 from core.shared.types import ErrorType
 
 
@@ -41,6 +41,9 @@ class AdminContactType:
     requester_avatar_url: str = strawberry.field(name="requesterAvatarUrl", default="")
     source: str
     brand: str
+    origin_url: str = strawberry.field(name="originUrl", default="")
+    platform: str = ""
+    source_label: str = strawberry.field(name="sourceLabel", default="")
     status: str
     replies: list[ContactReplyType]
     replied_at: str | None = strawberry.field(name="repliedAt", default=None)
@@ -122,6 +125,9 @@ def _map_contact(data: dict) -> AdminContactType:
         requester_avatar_url=data.get("requester_avatar_url", ""),
         source=data.get("source", ""),
         brand=data.get("brand", ""),
+        origin_url=data.get("origin_url", ""),
+        platform=data.get("platform", ""),
+        source_label=data.get("source_label", ""),
         status=data["status"],
         replies=replies,
         replied_at=data.get("replied_at"),
@@ -243,6 +249,7 @@ class ContactsAdminMutations:
         name: str | None = None,
         email: str | None = None,
         category_slug: str | None = None,
+        platform: str | None = None,
     ) -> SubmitContactPayload:
         from core.admin_dashboard.contact_services import ContactService
         from core.shared.exceptions import AdminError
@@ -251,6 +258,7 @@ class ContactsAdminMutations:
 
         try:
             ip_address = get_client_ip(info.context.request, default="")
+            origin_url = get_request_origin(info.context.request)
             user_id = _get_authenticated_user_id(info)
             user = None
             if user_id:
@@ -264,6 +272,8 @@ class ContactsAdminMutations:
                     user=user,
                     name=name or "",
                     email=email or "",
+                    origin_url=origin_url,
+                    platform=platform or "",
                 )
             else:
                 result = ContactService.submit_message(
@@ -271,6 +281,8 @@ class ContactsAdminMutations:
                     email=email or "",
                     message=message,
                     ip_address=ip_address,
+                    origin_url=origin_url,
+                    platform=platform or "",
                 )
             return SubmitContactPayload(
                 success=True,

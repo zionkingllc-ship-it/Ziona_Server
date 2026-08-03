@@ -16,7 +16,7 @@ import strawberry
 from strawberry.types import Info
 
 from core.shared.exceptions import AdminError, ErrorCode
-from core.shared.request_utils import get_client_ip
+from core.shared.request_utils import get_client_ip, get_request_origin
 from core.shared.types import ErrorType
 
 # ──────────────────────────────────────────────────────────────
@@ -237,6 +237,7 @@ class LandingMutations:
                 message=message,
                 ip_address=_get_ip(info),
                 honeypot=honeypot,
+                origin_url=get_request_origin(info.context.request),
             )
             return ContactPayload(success=True, ticket_id=result["ticket_id"])
         except AdminError as e:
