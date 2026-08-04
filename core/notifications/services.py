@@ -7,6 +7,7 @@ from typing import Any
 from django.contrib.auth import get_user_model
 from django.core.cache import cache
 from django.db import transaction
+from django.db.models import Q
 from django.db.models.functions import Lower
 from django.utils import timezone
 
@@ -358,6 +359,13 @@ def register_device_token(user_id: int, token: str, platform: str) -> str:
         raise ValueError("DEVICE_PLATFORM_REQUIRED")
 
     with transaction.atomic():
+        # Take every row lock this registration could need up front, in one
+        # globally consistent order — see _lock_registration_rows. Without
+        # this, two concurrent registrations for the same user deadlock:
+        # each locks its own token row (update_or_create), then sweeps the
+        # user's other rows (limit enforcement) that the other one holds.
+        _lock_registration_rows(user_id=user_id, token=token)
+
         token_obj, created = DeviceToken.objects.update_or_create(
             token=token,
             defaults={
@@ -383,12 +391,38 @@ def register_device_token(user_id: int, token: str, platform: str) -> str:
         return "Success"
 
 
-def _enforce_device_token_limit(user_id: int, keep_token: str, max_tokens: int = 5) -> None:
-    """Keep at most ``max_tokens`` active device tokens for a user."""
-    user_tokens = list(
+def _registration_lock_queryset(user_id: int, token: str):
+    """Queryset of every row a registration may touch, in global lock order.
+
+    Covers the user's existing tokens (limit enforcement deletes among them)
+    plus the incoming token's row even if it currently belongs to another user
+    (the transfer case). Ordered by pk so every concurrent registration
+    acquires locks in the same sequence — the invariant that makes a lock
+    cycle (deadlock) impossible.
+    """
+    return (
         DeviceToken.objects.select_for_update()
-        .filter(user_id=user_id)
-        .order_by("is_active", "created_at")
+        .filter(Q(user_id=user_id) | Q(token=token))
+        .order_by("pk")
+    )
+
+
+def _lock_registration_rows(user_id: int, token: str) -> None:
+    """Acquire all row locks for a token registration. Must run in a transaction."""
+    # list() forces the SELECT ... FOR UPDATE to execute and take the locks.
+    list(_registration_lock_queryset(user_id=user_id, token=token))
+
+
+def _enforce_device_token_limit(user_id: int, keep_token: str, max_tokens: int = 5) -> None:
+    """Keep at most ``max_tokens`` active device tokens for a user.
+
+    Takes no locks of its own: the caller (register_device_token) has already
+    locked the user's rows via _lock_registration_rows. Locking again here —
+    after update_or_create locked the incoming token's row — is what used to
+    deadlock concurrent registrations.
+    """
+    user_tokens = list(
+        DeviceToken.objects.filter(user_id=user_id).order_by("is_active", "created_at")
     )
     excess_count = len(user_tokens) - max_tokens
     if excess_count <= 0:

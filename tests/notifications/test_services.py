@@ -163,6 +163,68 @@ def test_register_device_token_keeps_transferred_token_when_enforcing_limit(db, 
     assert not DeviceToken.objects.filter(user=other_user).exists()
 
 
+class TestRegisterDeviceTokenLocking:
+    """Deadlock regression: concurrent registrations must lock rows in one order.
+
+    Two concurrent registerDeviceToken calls used to deadlock on Postgres: each
+    locked its own token row (update_or_create), then swept the user's other
+    rows (limit enforcement) that the other transaction held. The fix takes
+    every needed lock up front, ordered by pk. SQLite no-ops FOR UPDATE, so
+    these assert the lock query's shape and coverage rather than real blocking.
+    """
+
+    def test_lock_queryset_is_for_update_in_pk_order(self, db, user):
+        from core.notifications.services import _registration_lock_queryset
+
+        qs = _registration_lock_queryset(user_id=user.id, token="some-token")
+
+        assert qs.query.select_for_update is True
+        assert qs.query.order_by == ("pk",)
+
+    def test_lock_covers_users_rows_and_foreign_owned_incoming_token(self, db, user, other_user):
+        """The sweep must include the transfer case: the incoming token's row
+        even when it currently belongs to another user."""
+        from core.notifications.services import _registration_lock_queryset
+
+        register_device_token(user.id, "user-token-1", "ios")
+        register_device_token(user.id, "user-token-2", "ios")
+        register_device_token(other_user.id, "shared-token", "ios")
+        register_device_token(other_user.id, "unrelated-token", "ios")
+
+        locked = list(_registration_lock_queryset(user_id=user.id, token="shared-token"))
+        locked_tokens = {t.token for t in locked}
+
+        assert locked_tokens == {"user-token-1", "user-token-2", "shared-token"}
+        assert "unrelated-token" not in locked_tokens  # untouched rows stay unlocked
+        assert [t.pk for t in locked] == sorted(t.pk for t in locked)
+
+    def test_register_takes_locks_before_writing(self, db, user, monkeypatch):
+        """The pre-lock must run (and run first) on every registration."""
+        import core.notifications.services as services
+
+        calls = []
+        original = services._lock_registration_rows
+
+        def spy(**kwargs):
+            calls.append(kwargs)
+            return original(**kwargs)
+
+        monkeypatch.setattr(services, "_lock_registration_rows", spy)
+
+        register_device_token(user.id, "lock-order-token", "ios")
+
+        assert calls == [{"user_id": user.id, "token": "lock-order-token"}]
+        assert DeviceToken.objects.filter(token="lock-order-token", user=user).exists()
+
+    def test_limit_enforcement_takes_no_locks_of_its_own(self, db):
+        """Re-locking inside the sweep was half of the deadlock cycle."""
+        import inspect
+
+        from core.notifications.services import _enforce_device_token_limit
+
+        assert "select_for_update" not in inspect.getsource(_enforce_device_token_limit)
+
+
 def test_batch_like_notifications(db, user, other_user):
     post_id = uuid.uuid4()
 
