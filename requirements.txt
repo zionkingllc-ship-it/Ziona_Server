@@ -17,7 +17,7 @@ dj-database-url==2.1.0
 PyJWT==2.13.0
 bcrypt==4.1.2
 firebase-admin==6.3.0
-cryptography==48.0.1
+cryptography==50.0.0
 
 # Redis & Celery
 redis==5.0.1
