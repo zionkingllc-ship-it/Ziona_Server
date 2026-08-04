@@ -19,7 +19,9 @@ User = get_user_model()
 
 def _user(username):
     return User.objects.create_user(
-        email=f"{username}@example.com", username=username, password="password123"
+        email=f"{username}@example.com",
+        username=username,
+        password="password123",  # pragma: allowlist secret
     )
 
 
