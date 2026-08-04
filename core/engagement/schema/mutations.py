@@ -269,6 +269,37 @@ class EngagementMutations:
         except EngagementError as e:
             return LikePayload(success=False, message=e.message, error_code=e.code)
 
+    @strawberry.mutation(description="Remove a like from a comment")
+    def unlike_comment(self, info: strawberry.types.Info, comment_id: str) -> LikePayload:
+        """Unlike a comment.
+
+        Mirrors likeComment (which only adds a like) so the client can undo it.
+        Idempotent: unliking a comment the viewer has not liked still succeeds.
+        """
+        from core.engagement.services import EngagementService
+        from core.shared.exceptions import EngagementError
+
+        user_id = _get_authenticated_user_id(info)
+        if not user_id:
+            return LikePayload(
+                success=False,
+                message="Authentication required",
+                error_code="UNAUTHORIZED",
+            )
+
+        try:
+            stats = EngagementService.unlike_comment(user_id, comment_id)
+            return LikePayload(
+                success=True,
+                liked=False,
+                comment_stats=CommentStats(
+                    likes_count=stats.likes_count,
+                    replies_count=stats.replies_count,
+                ),
+            )
+        except EngagementError as e:
+            return LikePayload(success=False, message=e.message, error_code=e.code)
+
     @strawberry.mutation(description="Add bookmark saving a post strictly.")
     def save_post(
         self,

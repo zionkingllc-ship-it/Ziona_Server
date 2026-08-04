@@ -2,6 +2,7 @@
 
 Split from the former core/engagement/services.py (no behavior change).
 """
+
 import logging
 import re
 
@@ -198,18 +199,38 @@ def like_comment(user_id: str, comment_id: str) -> CommentStatsDTO:
     )
 
 
-def unlike_comment(user_id: str, comment_id: str) -> bool:
-    """Unlike a comment.
+@rate_limit(max_requests=30, window_seconds=60)
+def unlike_comment(user_id: str, comment_id: str) -> CommentStatsDTO:
+    """Remove a like from a comment.
 
     Args:
         user_id: UUID of the user.
         comment_id: UUID of the comment.
 
     Returns:
-        True if successfully unliked.
+        Updated stats (likes/replies counts) for the comment, mirroring
+        like_comment() so the client can refresh the counter without a
+        follow-up query.
+
+    Raises:
+        EngagementError: If comment not found.
     """
+    comment = Comment.objects.filter(id=comment_id, deleted_at__isnull=True).first()
+
+    if not comment:
+        raise EngagementError(
+            message="Comment not found.",
+            code=ErrorCode.COMMENT_NOT_FOUND,
+        )
+
+    # Idempotent: deleting a like that was never created is a no-op, so a
+    # repeated unlike (or an unlike of an un-liked comment) succeeds quietly.
     CommentLike.objects.filter(user_id=user_id, comment_id=comment_id).delete()
-    return True
+
+    return CommentStatsDTO(
+        likes_count=comment.comment_likes.count(),
+        replies_count=comment.replies.filter(deleted_at__isnull=True).count(),
+    )
 
 
 def get_post_comments(

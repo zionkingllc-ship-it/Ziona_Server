@@ -177,6 +177,72 @@ class TestLikeComment:
         assert exc.value.code == "COMMENT_NOT_FOUND"
 
 
+class TestUnlikeComment:
+    """Comment likes must be removable (P1: users could like but not unlike)."""
+
+    def test_unlike_comment_removes_like_and_returns_updated_stats(self, user_a, user_b, post):
+        comment = EngagementService.create_comment(
+            user_id=str(user_a.id),
+            post_id=str(post.id),
+            text="Parent comment",
+        )
+        EngagementService.create_comment(
+            user_id=str(user_b.id),
+            post_id=str(post.id),
+            text="A reply",
+            parent_comment_id=comment.id,
+        )
+        assert EngagementService.like_comment(str(user_b.id), str(comment.id)).likes_count == 1
+
+        stats = EngagementService.unlike_comment(str(user_b.id), str(comment.id))
+
+        assert stats.likes_count == 0
+        # replies_count is still reported so the client can refresh both counters.
+        assert stats.replies_count == 1
+
+    def test_unlike_comment_is_idempotent(self, user_b, post):
+        comment = EngagementService.create_comment(
+            user_id=str(user_b.id),
+            post_id=str(post.id),
+            text="A comment",
+        )
+        EngagementService.like_comment(str(user_b.id), str(comment.id))
+
+        EngagementService.unlike_comment(str(user_b.id), str(comment.id))
+        stats = EngagementService.unlike_comment(str(user_b.id), str(comment.id))
+
+        assert stats.likes_count == 0
+
+    def test_unlike_comment_never_liked_is_a_no_op(self, user_b, post):
+        comment = EngagementService.create_comment(
+            user_id=str(user_b.id),
+            post_id=str(post.id),
+            text="A comment",
+        )
+
+        stats = EngagementService.unlike_comment(str(user_b.id), str(comment.id))
+
+        assert stats.likes_count == 0
+
+    def test_unlike_only_removes_the_viewers_own_like(self, user_a, user_b, post):
+        comment = EngagementService.create_comment(
+            user_id=str(user_a.id),
+            post_id=str(post.id),
+            text="A comment",
+        )
+        EngagementService.like_comment(str(user_a.id), str(comment.id))
+        EngagementService.like_comment(str(user_b.id), str(comment.id))
+
+        stats = EngagementService.unlike_comment(str(user_b.id), str(comment.id))
+
+        assert stats.likes_count == 1  # user_a's like survives
+
+    def test_unlike_nonexistent_comment(self, user_b):
+        with pytest.raises(EngagementError) as exc:
+            EngagementService.unlike_comment(str(user_b.id), "00000000-0000-0000-0000-000000000000")
+        assert exc.value.code == "COMMENT_NOT_FOUND"
+
+
 class TestSavePost:
     """Tests for save/unsave operations."""
 

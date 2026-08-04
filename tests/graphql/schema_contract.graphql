@@ -192,11 +192,14 @@ type AdminContactType {
   lastMessageAt: String
   message: String!
   name: String!
+  originUrl: String!
+  platform: String!
   repliedAt: String
   replies: [ContactReplyType!]!
   requesterAvatarUrl: String!
   requesterUsername: String!
   source: String!
+  sourceLabel: String!
   status: String!
   topic: String!
   updatedAt: String!
@@ -252,6 +255,19 @@ type AdminLoginPayload {
   success: Boolean!
 }
 
+type AdminPriorReportType {
+  action: String!
+  createdAt: String!
+  description: String!
+  id: String!
+  internalNotes: String!
+  reason: String!
+  reporter: ReporterType
+  reviewedAt: String
+  reviewedByName: String!
+  status: String!
+}
+
 type AdminReportMediaType {
   mediaType: String!
   order: Int!
@@ -279,6 +295,9 @@ type AdminReportType {
   id: String!
   internalNotes: String!
   postId: String
+
+  """Other reports on the same content (detail view only), newest first."""
+  priorReports: [AdminPriorReportType!]!
   reason: String!
   reporter: ReporterType
   reviewedAt: String
@@ -1577,10 +1596,10 @@ type Mutation {
   submitContact(brand: ContactBrand!, email: String!, honeypot: String! = "", message: String!, name: String!): ContactPayload!
 
   """Public: submit a contact/support message (no auth required)."""
-  submitContactMessage(categorySlug: String = null, email: String = null, message: String!, name: String = null): SubmitContactPayload!
+  submitContactMessage(categorySlug: String = null, email: String = null, message: String!, name: String = null, platform: String = null): SubmitContactPayload!
 
   """Authenticated in-app help/support submission."""
-  submitHelpMessage(categorySlug: String = null, email: String = null, message: String!, name: String = null): HelpConversationPayload!
+  submitHelpMessage(categorySlug: String = null, email: String = null, message: String!, name: String = null, platform: String = null): HelpConversationPayload!
 
   """Get username suggestions based on a name"""
   suggestUsernames(baseName: String!): [String!]!
@@ -1593,6 +1612,9 @@ type Mutation {
 
   """Unhide a previously hidden post"""
   unhidePost(postId: String!): HidePostPayload!
+
+  """Remove a like from a comment"""
+  unlikeComment(commentId: String!): LikePayload!
 
   """Unlike a post"""
   unlikePost(postId: String!): LikePayload!
@@ -1884,6 +1906,9 @@ type Query {
 
   """Get recent admin activities timeline."""
   adminRecentActivities(limit: Int! = 15): [ActivityType!]!
+
+  """A single report with the history of prior reports on the same content."""
+  adminReport(reportId: String!): AdminReportType
 
   """List reports with search and filter."""
   adminReports(page: Int! = 1, pageSize: Int! = 20, search: String! = "", status: String! = ""): AdminReportsPaginatedType!
