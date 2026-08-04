@@ -8,7 +8,7 @@ and interest-based creator suggestions.
 import logging
 
 from django.db import IntegrityError
-from django.db.models import Count, Exists, OuterRef, Q
+from django.db.models import Case, Count, Exists, IntegerField, OuterRef, Q, Value, When
 
 from core.follows.models import Follow
 from core.shared.decorators import rate_limit
@@ -16,6 +16,11 @@ from core.shared.dtos import AuthorDTO, FollowResponseDTO
 from core.shared.exceptions import ErrorCode, FollowError
 
 logger = logging.getLogger("core.follows")
+
+# Below this length a search would match most of the table, so we return nothing
+# instead of scanning it.
+MIN_SEARCH_QUERY_LENGTH = 2
+MAX_SEARCH_PAGE_SIZE = 50
 
 
 class FollowService:
@@ -358,6 +363,111 @@ class FollowService:
             )
 
         return suggestions
+
+    @staticmethod
+    def search_creators(
+        query: str,
+        viewer_id: str | None = None,
+        page: int = 1,
+        page_size: int = 20,
+    ) -> dict:
+        """Search creators by username or full name for the Discover screen.
+
+        Ranked so the most likely match surfaces first: exact username, then
+        prefix matches, then anywhere-in-the-string, breaking ties by follower
+        count. Returns the same fields as get_suggested_creators() so the client
+        can reuse its creator card.
+
+        Args:
+            query: Search text. Queries shorter than MIN_SEARCH_QUERY_LENGTH
+                return no results rather than scanning the whole user table.
+            viewer_id: Optional viewer, used to exclude self and flag isFollowing.
+            page: 1-based page number.
+            page_size: Results per page (capped at MAX_SEARCH_PAGE_SIZE).
+
+        Returns:
+            Dict with creators, total_count, page, page_size and has_more.
+        """
+        from core.users.models import User, UserRole
+
+        page = max(1, page)
+        page_size = max(1, min(page_size, MAX_SEARCH_PAGE_SIZE))
+        term = (query or "").strip()
+
+        empty = {
+            "creators": [],
+            "total_count": 0,
+            "page": page,
+            "page_size": page_size,
+            "has_more": False,
+        }
+        if len(term) < MIN_SEARCH_QUERY_LENGTH:
+            return empty
+
+        qs = (
+            User.objects.filter(deleted_at__isnull=True)
+            .filter(is_active=True, role=UserRole.USER, status__in=["active", "warned"])
+            .filter(lifecycle_state="active")
+            .exclude(username__isnull=True)
+            .exclude(username="")
+            .filter(Q(username__icontains=term) | Q(full_name__icontains=term))
+        )
+        if viewer_id:
+            qs = qs.exclude(id=viewer_id)
+
+        following_ids: set = set()
+        if viewer_id:
+            following_ids = set(
+                Follow.objects.filter(follower_id=viewer_id).values_list("following_id", flat=True)
+            )
+
+        qs = qs.annotate(
+            followers_count=Count(
+                "follower_set",
+                filter=Q(
+                    follower_set__follower__deleted_at__isnull=True,
+                    follower_set__follower__lifecycle_state="active",
+                ),
+                distinct=True,
+            ),
+            posts_count=Count("posts", filter=Q(posts__deleted_at__isnull=True), distinct=True),
+            # Relevance buckets (0 sorts first): exact handle, then prefix, then
+            # anywhere. Keeps "john" ahead of "notjohnny" for a "john" search.
+            match_rank=Case(
+                When(username__iexact=term, then=Value(0)),
+                When(username__istartswith=term, then=Value(1)),
+                When(full_name__istartswith=term, then=Value(2)),
+                default=Value(3),
+                output_field=IntegerField(),
+            ),
+        ).order_by("match_rank", "-followers_count", "-posts_count", "username")
+
+        total_count = qs.count()
+        offset = (page - 1) * page_size
+        results = list(qs[offset : offset + page_size])
+
+        creators = [
+            {
+                "user": AuthorDTO(
+                    id=str(user.id),
+                    username=user.username or "",
+                    avatar_url=user.avatar_url or None,
+                ),
+                "bio": user.bio or None,
+                "followers_count": user.followers_count,
+                "posts_count": user.posts_count,
+                "is_following": user.id in following_ids,
+            }
+            for user in results
+        ]
+
+        return {
+            "creators": creators,
+            "total_count": total_count,
+            "page": page,
+            "page_size": page_size,
+            "has_more": offset + len(results) < total_count,
+        }
 
     @staticmethod
     def _invalidate_follow_cache(follower_id: str, following_id: str) -> None:

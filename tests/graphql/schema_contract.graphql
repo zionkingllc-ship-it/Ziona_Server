@@ -924,6 +924,23 @@ type CreatePostPayload {
   success: Boolean!
 }
 
+type CreatorSearchResponse {
+  creators: [CreatorSearchResultType!]!
+  hasMore: Boolean!
+  page: Int!
+  pageSize: Int!
+  totalCount: Int!
+}
+
+type CreatorSearchResultType {
+  avatarUrl: String
+  bio: String
+  id: String!
+  isFollowing: Boolean!
+  stats: ProfileStatsType
+  username: String!
+}
+
 type CurrentUserResponse {
   accountDetails: AccountDetails!
   createdAt: String!
@@ -2068,6 +2085,9 @@ type Query {
   Fetch verses in a range and return combined text as a single string. No verse numbers included — just the concatenated text.
   """
   scriptureRange(book: String!, chapter: Int!, translation: String! = "KJV", verseEnd: Int = null, verseStart: Int! = 1): String!
+
+  """Search creators by username or name for the Discover screen."""
+  searchCreators(page: Int! = 1, pageSize: Int! = 20, query: String!): CreatorSearchResponse!
 
   """
   Generate 4 available username suggestions based on email and optional date of birth. Returns unique, available usernames.

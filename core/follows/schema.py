@@ -72,6 +72,29 @@ class SuggestedCreatorType:
 
 
 @strawberry.type
+class CreatorSearchResultType:
+    """A creator matched by a Discover search."""
+
+    id: str
+    username: str
+    avatar_url: str | None = None
+    bio: str | None = None
+    stats: ProfileStatsType | None = None
+    is_following: bool = False
+
+
+@strawberry.type
+class CreatorSearchResponse:
+    """Paginated creator search results for the Discover screen."""
+
+    creators: list[CreatorSearchResultType]
+    total_count: int = strawberry.field(name="totalCount", default=0)
+    page: int = 1
+    page_size: int = strawberry.field(name="pageSize", default=20)
+    has_more: bool = strawberry.field(name="hasMore", default=False)
+
+
+@strawberry.type
 class FollowMutations:
     """Follow domain GraphQL mutations."""
 
@@ -298,3 +321,57 @@ class FollowQueries:
             )
             for s in suggestions
         ]
+
+    @strawberry.field(description="Search creators by username or name for the Discover screen.")
+    def search_creators(
+        self,
+        info: strawberry.types.Info,
+        query: str,
+        page: int = 1,
+        page_size: int = 20,
+    ) -> CreatorSearchResponse:
+        """
+        Search creators for the Discover search bar.
+
+        Matches username and full name, case-insensitive, ranked by relevance
+        (exact handle → prefix → anywhere) then follower count.
+
+        **Authentication:** Optional — results are viewer-aware when signed in
+        (excludes self and populates isFollowing).
+        **Parameters:**
+        - query (String, required) - Search text; under 2 characters returns no results
+        - page (Int, optional) - 1-based page number
+        - pageSize (Int, optional) - Results per page, capped at 50
+        **Returns:** CreatorSearchResponse with creators, totalCount, page, pageSize, hasMore
+        """
+        from core.follows.services import FollowService
+
+        viewer_id = _get_authenticated_user_id(info)
+        result = FollowService.search_creators(
+            query=query,
+            viewer_id=viewer_id,
+            page=page,
+            page_size=page_size,
+        )
+
+        return CreatorSearchResponse(
+            creators=[
+                CreatorSearchResultType(
+                    id=c["user"].id,
+                    username=c["user"].username,
+                    avatar_url=c["user"].avatar_url,
+                    bio=c.get("bio"),
+                    stats=ProfileStatsType(
+                        _followers=c.get("followers_count", 0),
+                        _following=0,
+                        _posts=c.get("posts_count", 0),
+                    ),
+                    is_following=c.get("is_following", False),
+                )
+                for c in result["creators"]
+            ],
+            total_count=result["total_count"],
+            page=result["page"],
+            page_size=result["page_size"],
+            has_more=result["has_more"],
+        )
