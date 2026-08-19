@@ -19,6 +19,7 @@ REQUIRED_SERVICES = {
     "ziona-cron-daily-analytics",
     "ziona-cron-expired-anchor-purge",
     "ziona-cron-notification-cleanup",
+    "ziona-cron-inactive-session-cleanup",
     "ziona-cron-stale-media-cleanup",
 }
 

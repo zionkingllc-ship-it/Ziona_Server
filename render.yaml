@@ -96,8 +96,30 @@ services:
         value: https://staging.ziona.app,https://ziona-admin-dashboard-git-staging-zionking-llc.vercel.app,https://ziona-admin-dashboard.vercel.app,https://admin.staging.ziona.app,http://localhost:3000,http://localhost:8080
       - key: GCP_STORAGE_BUCKET
         value: ziona-media-dev
+      - key: GCP_SIGNED_URL_EXPIRY
+        value: "3600"
       - key: MEDIA_STALE_UPLOAD_MINUTES
         value: "15"
+      - key: MEDIA_VIDEO_MAX_UPLOAD_MB
+        value: "100"
+      - key: MEDIA_VIDEO_MAX_DURATION_SECONDS
+        value: "150"
+      - key: MEDIA_CIRCLE_VIDEO_MAX_DURATION_SECONDS
+        value: "150"
+      - key: MEDIA_VIDEO_OPTIMIZE_TIMEOUT_SECONDS
+        value: "840"
+      - key: MEDIA_VIDEO_TASK_SOFT_TIME_LIMIT_SECONDS
+        value: "900"
+      - key: MEDIA_VIDEO_TASK_TIME_LIMIT_SECONDS
+        value: "960"
+      - key: MEDIA_THUMBNAIL_TIMEOUT_SECONDS
+        value: "120"
+      - key: MEDIA_THUMBNAIL_TASK_TIME_LIMIT_SECONDS
+        value: "180"
+      - key: AUTH_REFRESH_TOKEN_INACTIVITY_DAYS
+        value: "30"
+      - key: AUTH_REVOKE_ON_REFRESH_TOKEN_REUSE
+        value: "false"
       - key: GCP_CREDENTIALS_FILE
         value: /etc/secrets/gcp-credentials.json
       - key: FIREBASE_CREDENTIALS_FILE
@@ -151,8 +173,30 @@ services:
         value: https://ziona.app,https://www.ziona.app,https://admin.ziona.app,https://zionking.org,https://www.zionking.org
       - key: GCP_STORAGE_BUCKET
         value: ziona-media-prod
+      - key: GCP_SIGNED_URL_EXPIRY
+        value: "3600"
       - key: MEDIA_STALE_UPLOAD_MINUTES
         value: "15"
+      - key: MEDIA_VIDEO_MAX_UPLOAD_MB
+        value: "100"
+      - key: MEDIA_VIDEO_MAX_DURATION_SECONDS
+        value: "150"
+      - key: MEDIA_CIRCLE_VIDEO_MAX_DURATION_SECONDS
+        value: "150"
+      - key: MEDIA_VIDEO_OPTIMIZE_TIMEOUT_SECONDS
+        value: "840"
+      - key: MEDIA_VIDEO_TASK_SOFT_TIME_LIMIT_SECONDS
+        value: "900"
+      - key: MEDIA_VIDEO_TASK_TIME_LIMIT_SECONDS
+        value: "960"
+      - key: MEDIA_THUMBNAIL_TIMEOUT_SECONDS
+        value: "120"
+      - key: MEDIA_THUMBNAIL_TASK_TIME_LIMIT_SECONDS
+        value: "180"
+      - key: AUTH_REFRESH_TOKEN_INACTIVITY_DAYS
+        value: "30"
+      - key: AUTH_REVOKE_ON_REFRESH_TOKEN_REUSE
+        value: "false"
       - key: GCP_CREDENTIALS_FILE
         value: /etc/secrets/gcp-credentials.json
       - key: FIREBASE_CREDENTIALS_FILE
@@ -227,7 +271,7 @@ services:
     name: ziona-worker-prod
     runtime: python
     region: oregon
-    plan: starter
+    plan: standard
     branch: main
     autoDeployTrigger: checksPass
     buildCommand: *buildCommand
@@ -328,6 +372,18 @@ services:
     schedule: "0 2 * * 0"
     buildCommand: *buildCommand
     startCommand: python manage.py enqueue_scheduled_task cleanup-old-notifications
+    envVars: *prodEnv
+
+  - type: cron
+    name: ziona-cron-inactive-session-cleanup
+    runtime: python
+    region: oregon
+    plan: starter
+    branch: main
+    autoDeployTrigger: checksPass
+    schedule: "30 2 * * *"
+    buildCommand: *buildCommand
+    startCommand: python manage.py enqueue_scheduled_task cleanup-inactive-refresh-tokens
     envVars: *prodEnv
 
   - type: cron

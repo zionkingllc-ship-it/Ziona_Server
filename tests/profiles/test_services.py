@@ -96,10 +96,15 @@ class TestGetUserPosts:
 
     @pytest.fixture
     def posts(self, author):
+        import datetime
+
+        from django.utils import timezone
+
         from core.categories.models import Category
         from core.posts.models import Post, PostType
 
         category = Category.objects.create(label="Test", slug="test", order=1)
+        base_time = timezone.now()
 
         posts = []
         for i in range(5):
@@ -109,6 +114,10 @@ class TestGetUserPosts:
                 caption=f"Post {i}",
                 category=category,
             )
+            Post.objects.filter(id=p.id).update(
+                created_at=base_time + datetime.timedelta(seconds=i)
+            )
+            p.refresh_from_db()
             posts.append(p)
         return posts
 

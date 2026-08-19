@@ -15,7 +15,7 @@ env:
   DJANGO_SECRET_KEY: ci-only-django-secret-key-long-enough-for-deploy-checks-123456789 # pragma: allowlist secret
   JWT_SECRET_KEY: ci-only-jwt-secret-key-long-enough-for-tests-123456789 # pragma: allowlist secret
   ENCRYPTION_KEY: KmL2Fsoq9wd1MR_wy_QKdKI-ghgEsnU-VBSyCrEV-Bs=
-  SECRET_SCAN_EXCLUDES: '(^|/)(\.git|\.secrets\.baseline|venv|\.venv|__pycache__|\.pytest_cache|\.mypy_cache|\.ruff_cache|node_modules|\.next|out|build|coverage)(/|$)'
+  SECRET_SCAN_EXCLUDES: '(^|[\\/])(\.git|\.secrets\.baseline|venv|\.venv|\.python312|__pycache__|\.pytest_cache|\.pytest_tmp|\.pip-audit-cache|\.mypy_cache|\.ruff_cache|node_modules|\.next|out|build|coverage)([\\/]|$)'
   BANDIT_EXCLUDES: tests,migrations,docs,venv,.venv
 
 jobs:

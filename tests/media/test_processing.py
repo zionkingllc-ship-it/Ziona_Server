@@ -57,10 +57,50 @@ def test_optimize_video_file_uses_bundled_ffmpeg_profile(settings, tmp_path, mon
     _optimize_video_file(input_path, output_path)
 
     assert output_path.read_bytes() == b"optimized video"
-    command = seen_commands[0]
+    command = seen_commands[-1]
     assert command[0] == "/opt/ffmpeg"
     assert "libx264" in command
     assert "+faststart" in command
+
+
+def test_optimize_video_file_remuxes_already_compatible_video(settings, tmp_path, monkeypatch):
+    settings.MEDIA_VIDEO_MAX_DIMENSION = 1280
+    settings.MEDIA_VIDEO_MAX_DURATION_SECONDS = 150
+    settings.MEDIA_CIRCLE_VIDEO_MAX_DURATION_SECONDS = 150
+    input_path = tmp_path / "original.mp4"
+    output_path = tmp_path / "optimized.mp4"
+    input_path.write_bytes(b"fake video")
+    seen_commands = []
+
+    class Result:
+        returncode = 0
+        stdout = ""
+        stderr = ""
+
+    def fake_run(cmd, **kwargs):
+        seen_commands.append(cmd)
+        result = Result()
+        if "-hide_banner" in cmd:
+            result.stderr = (
+                "Duration: 00:01:12.00\n"
+                "Stream #0:0: Video: h264, yuv420p, 720x1280\n"
+                "Stream #0:1: Audio: aac, 44100 Hz"
+            )
+        else:
+            Path(cmd[-1]).write_bytes(b"remuxed video")
+        return result
+
+    monkeypatch.setattr("imageio_ffmpeg.get_ffmpeg_exe", lambda: "/opt/ffmpeg")
+    monkeypatch.setattr("core.media.tasks.subprocess.run", fake_run)
+
+    _optimize_video_file(input_path, output_path)
+
+    assert output_path.read_bytes() == b"remuxed video"
+    assert len(seen_commands) == 2
+    remux_command = seen_commands[-1]
+    assert "-c" in remux_command
+    assert "copy" in remux_command
+    assert "libx264" not in remux_command
 
 
 def test_optimize_video_file_raises_when_ffmpeg_fails(tmp_path, monkeypatch):
@@ -151,6 +191,40 @@ def test_process_media_upload_queues_image_pipeline(create_user, monkeypatch):
     assert queued["applied"] is True
     # optimize → generate thumbnail → finalize
     assert len(queued["steps"]) == 3
+
+
+@pytest.mark.django_db
+def test_process_media_upload_queues_video_optimize_then_finalize(create_user, monkeypatch):
+    user = create_user()
+    media = MediaFile.objects.create(
+        user=user,
+        file_name="video.mp4",
+        file_type="video/mp4",
+        file_size=2048,
+        media_type="video",
+        storage_path="uploads/test/videos/video.mp4",
+        status="processing",
+    )
+    queued = {}
+
+    class FakeAsyncResult:
+        id = "pipeline-1"
+
+    class FakePipeline:
+        def __init__(self, steps):
+            queued["steps"] = steps
+
+        def apply_async(self):
+            queued["applied"] = True
+            return FakeAsyncResult()
+
+    monkeypatch.setattr("core.media.tasks.chain", lambda *steps: FakePipeline(steps))
+
+    result = process_media_upload(str(media.id))
+
+    assert result == str(media.id)
+    assert queued["applied"] is True
+    assert len(queued["steps"]) == 2
 
 
 @pytest.mark.django_db
@@ -301,8 +375,15 @@ def test_optimize_video_media_persists_duration_and_dimensions(create_user, monk
         output_path.write_bytes(b"optimized video")
 
     monkeypatch.setattr("core.media.tasks._download_blob", fake_download)
-    monkeypatch.setattr("core.media.tasks._upload_blob", lambda *args, **kwargs: None)
+    uploaded = []
+    monkeypatch.setattr(
+        "core.media.tasks._upload_blob", lambda *args, **kwargs: uploaded.append(args)
+    )
     monkeypatch.setattr("core.media.tasks._optimize_video_file", fake_optimize)
+    monkeypatch.setattr(
+        "core.media.tasks._generate_video_thumbnail_file",
+        lambda input_path, output_path: output_path.write_bytes(b"thumbnail"),
+    )
     monkeypatch.setattr(
         "core.media.tasks._extract_video_metadata",
         lambda path: (720, 1280, 89.5),
@@ -315,6 +396,11 @@ def test_optimize_video_media_persists_duration_and_dimensions(create_user, monk
     assert media.width == 720
     assert media.height == 1280
     assert media.duration == 89.5
+    assert media.thumbnail_path == f"thumbnails/{user.id}/{media.id}.jpg"
+    assert [call[0] for call in uploaded] == [
+        "uploads/test/videos/video.mp4",
+        f"thumbnails/{user.id}/{media.id}.jpg",
+    ]
 
 
 @pytest.mark.django_db

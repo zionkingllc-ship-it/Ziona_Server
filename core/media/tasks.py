@@ -90,7 +90,6 @@ def process_media_upload(self, media_id: str) -> str | None:
     elif media_file.media_type == MediaType.VIDEO:
         pipeline = chain(
             optimize_video_media_stage.s(str(media_file.id)),
-            generate_video_thumbnail_stage.s(),
             finalize_media_ready.s(),
         )
     else:
@@ -171,10 +170,10 @@ def generate_image_thumbnail_stage(self, media_id: str) -> str:
     retry_backoff=True,
     retry_jitter=True,
     soft_time_limit=_media_setting("MEDIA_VIDEO_TASK_SOFT_TIME_LIMIT_SECONDS", 270),
-    time_limit=300,
+    time_limit=_media_setting("MEDIA_VIDEO_TASK_TIME_LIMIT_SECONDS", 300),
 )
 def optimize_video_media_stage(self, media_id: str) -> str:
-    """Normalize an uploaded video and persist canonical metadata."""
+    """Normalize an uploaded video, create its thumbnail, and persist metadata."""
     media_file = _get_media_file_or_raise(media_id)
     if media_file.status == MediaStatus.FAILED:
         return str(media_file.id)
@@ -194,7 +193,7 @@ def optimize_video_media_stage(self, media_id: str) -> str:
     retry_backoff=True,
     retry_jitter=True,
     soft_time_limit=_media_setting("MEDIA_THUMBNAIL_TASK_SOFT_TIME_LIMIT_SECONDS", 100),
-    time_limit=120,
+    time_limit=_media_setting("MEDIA_THUMBNAIL_TASK_TIME_LIMIT_SECONDS", 120),
 )
 def generate_video_thumbnail_stage(self, media_id: str) -> str:
     """Generate a thumbnail from the already-optimized canonical video."""
@@ -404,24 +403,48 @@ def _optimize_image_media(media_file: MediaFile) -> None:
 
 
 def _optimize_video_media(media_file: MediaFile) -> None:
-    """Download, normalize, and replace a video blob in GCS."""
+    """Download once, normalize, generate thumbnail locally, then upload both."""
     suffix = Path(media_file.storage_path).suffix or ".mp4"
     with tempfile.TemporaryDirectory() as tmpdir:
         original_path = Path(tmpdir) / f"original{suffix}"
         optimized_path = Path(tmpdir) / "optimized.mp4"
+        thumbnail_file_path = Path(tmpdir) / "thumbnail.jpg"
 
         _download_blob(media_file.storage_path, original_path)
         _optimize_video_file(original_path, optimized_path)
-        _upload_blob(media_file.storage_path, optimized_path, "video/mp4")
         width, height, duration = _extract_video_metadata(optimized_path)
+        _generate_video_thumbnail_file(optimized_path, thumbnail_file_path)
+
+        thumbnail_path = f"thumbnails/{media_file.user_id}/{media_file.id}.jpg"
+        _upload_blob(media_file.storage_path, optimized_path, "video/mp4")
+        _upload_blob(thumbnail_path, thumbnail_file_path, "image/jpeg")
 
         media_file.file_type = "video/mp4"
         media_file.file_size = optimized_path.stat().st_size
         media_file.width = width
         media_file.height = height
         media_file.duration = duration
+        media_file.thumbnail_path = thumbnail_path
         media_file.save(
-            update_fields=["file_type", "file_size", "width", "height", "duration", "updated_at"]
+            update_fields=[
+                "file_type",
+                "file_size",
+                "width",
+                "height",
+                "duration",
+                "thumbnail_path",
+                "updated_at",
+            ]
+        )
+
+        logger.info(
+            "video_optimized_with_thumbnail",
+            extra={
+                "media_id": str(media_file.id),
+                "size_bytes": media_file.file_size,
+                "thumbnail_path": thumbnail_path,
+                "thumbnail_size_bytes": thumbnail_file_path.stat().st_size,
+            },
         )
 
 
@@ -549,8 +572,12 @@ def _mark_media_failed(media_file: MediaFile, *, stage: str, exc: Exception) -> 
         "media_processing_failed",
         extra={
             "media_id": str(media_file.id),
+            "user_id": str(media_file.user_id),
             "stage": stage,
             "code": code,
+            "media_type": media_file.media_type,
+            "file_size": media_file.file_size,
+            "content_type": media_file.file_type,
             "error": str(exc),
         },
         exc_info=True,

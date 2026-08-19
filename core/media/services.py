@@ -118,14 +118,19 @@ class MediaService:
                 method="PUT",
             )
         except Exception as e:
+            code, message = _classify_gcs_exception(
+                e,
+                default_code="UPLOAD_URL_GENERATION_FAILED",
+                default_message="Could not prepare a secure upload URL. Please try again.",
+            )
             logger.error(
-                "Failed to generate signed upload URL",
-                extra={"storage_path": storage_path, "file_type": file_type},
+                "upload_url_generation_failed",
+                extra={"storage_path": storage_path, "file_type": file_type, "code": code},
                 exc_info=True,
             )
             raise MediaError(
-                "Could not prepare a secure upload URL. Please try again.",
-                code="UPLOAD_URL_GENERATION_FAILED",
+                message,
+                code=code,
             ) from e
 
         media_file = MediaFile.objects.create(
@@ -390,9 +395,19 @@ def _verify_uploaded_object(media_file: MediaFile) -> tuple[str, int]:
     try:
         blob.reload()
     except Exception as exc:  # noqa: BLE001
+        code, message = _classify_gcs_exception(
+            exc,
+            default_code="MEDIA_OBJECT_NOT_FOUND",
+            default_message="Uploaded media object was not found.",
+        )
+        logger.warning(
+            "upload_object_verification_failed",
+            extra={"media_id": str(media_file.id), "stage": "blob_reload", "code": code},
+            exc_info=True,
+        )
         raise MediaError(
-            "Uploaded media object was not found.",
-            code="MEDIA_OBJECT_NOT_FOUND",
+            message,
+            code=code,
         ) from exc
 
     actual_size = int(blob.size or 0)
@@ -430,7 +445,20 @@ def _verify_uploaded_object(media_file: MediaFile) -> tuple[str, int]:
             details=build_media_validation_details(),
         )
 
-    file_head = blob.download_as_bytes(start=0, end=31)
+    try:
+        file_head = blob.download_as_bytes(start=0, end=31)
+    except Exception as exc:  # noqa: BLE001
+        code, message = _classify_gcs_exception(
+            exc,
+            default_code="UPLOAD_GCS_READ_FAILED",
+            default_message="Could not verify uploaded media. Please try again.",
+        )
+        logger.warning(
+            "upload_object_head_read_failed",
+            extra={"media_id": str(media_file.id), "stage": "download_head", "code": code},
+            exc_info=True,
+        )
+        raise MediaError(message, code=code) from exc
     if not validate_magic_bytes(file_head, actual_type):
         raise MediaError(
             "Uploaded file contents do not match its declared type.",
@@ -468,7 +496,14 @@ def _mark_media_failed(media_file: MediaFile, reason: str | None = None) -> None
     )
     logger.warning(
         "media_marked_failed",
-        extra={"media_id": str(media_file.id), "reason": reason},
+        extra={
+            "media_id": str(media_file.id),
+            "user_id": str(media_file.user_id),
+            "stage": "upload_confirm",
+            "reason": reason,
+            "file_size": media_file.file_size,
+            "content_type": media_file.file_type,
+        },
     )
 
 
@@ -476,9 +511,67 @@ def _media_failure_message(reason: str | None) -> str:
     messages = {
         "MEDIA_PROCESSING_QUEUE_FAILED": "Media uploaded, but processing could not be queued. Please retry.",
         "MEDIA_OBJECT_NOT_FOUND": "Uploaded media object was not found. Please upload the file again.",
+        "UPLOAD_GCS_PERMISSION_DENIED": "Storage permission denied while validating the upload. Please try again later.",
+        "UPLOAD_GCS_TIMEOUT": "Storage timed out while validating the upload. Please try again.",
+        "UPLOAD_GCS_RATE_LIMITED": "Storage is temporarily busy. Please try again shortly.",
+        "UPLOAD_GCS_READ_FAILED": "Could not verify uploaded media. Please try again.",
         "MEDIA_TOO_LARGE": "Uploaded file exceeds the allowed size.",
         "INVALID_FILE_SIZE": "Uploaded file is empty or invalid.",
         "INVALID_MEDIA_TYPE": "Uploaded file type is not allowed.",
         "INVALID_MEDIA_SIGNATURE": "Uploaded file contents do not match its declared type.",
     }
     return messages.get(reason or "", "Media validation failed before processing.")
+
+
+def _classify_gcs_exception(
+    exc: Exception,
+    *,
+    default_code: str,
+    default_message: str,
+) -> tuple[str, str]:
+    """Map known Google Cloud errors to stable upload-stage failure codes."""
+    try:
+        from google.api_core import exceptions as gcs_exceptions
+    except Exception:  # noqa: BLE001
+        return default_code, default_message
+
+    permission_errors = tuple(
+        cls
+        for cls in (
+            getattr(gcs_exceptions, "Forbidden", None),
+            getattr(gcs_exceptions, "PermissionDenied", None),
+            getattr(gcs_exceptions, "Unauthorized", None),
+        )
+        if cls is not None
+    )
+    timeout_errors = tuple(
+        cls
+        for cls in (
+            getattr(gcs_exceptions, "DeadlineExceeded", None),
+            getattr(gcs_exceptions, "ServiceUnavailable", None),
+            getattr(gcs_exceptions, "RetryError", None),
+        )
+        if cls is not None
+    )
+    rate_limit_errors = tuple(
+        cls
+        for cls in (
+            getattr(gcs_exceptions, "TooManyRequests", None),
+            getattr(gcs_exceptions, "ResourceExhausted", None),
+        )
+        if cls is not None
+    )
+
+    if isinstance(exc, getattr(gcs_exceptions, "NotFound", ())):
+        return "MEDIA_OBJECT_NOT_FOUND", "Uploaded media object was not found."
+    if permission_errors and isinstance(exc, permission_errors):
+        return (
+            "UPLOAD_GCS_PERMISSION_DENIED",
+            "Storage permission denied while preparing or validating the upload.",
+        )
+    if timeout_errors and isinstance(exc, timeout_errors):
+        return "UPLOAD_GCS_TIMEOUT", "Storage timed out while preparing or validating the upload."
+    if rate_limit_errors and isinstance(exc, rate_limit_errors):
+        return "UPLOAD_GCS_RATE_LIMITED", "Storage is temporarily busy. Please try again shortly."
+
+    return default_code, default_message

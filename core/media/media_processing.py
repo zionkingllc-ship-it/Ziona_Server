@@ -62,10 +62,135 @@ def _optimize_image_file(
 
 
 def _optimize_video_file(input_path: Path, output_path: Path) -> None:
-    """Normalize video into a cost-conscious MP4 delivery profile."""
+    """Normalize video into a cost-conscious MP4 delivery profile.
+
+    Fast path: many Android/iOS uploads are already H.264/AAC and under the
+    delivery dimension cap after client-side compression. For those, remuxing
+    preserves the exact streams and only rewrites the MP4 container with
+    ``+faststart``. That is dramatically cheaper than a full transcode and
+    keeps the existing output contract unchanged: a playable MP4 at
+    ``output_path``.
+    """
     import imageio_ffmpeg
 
     ffmpeg_bin = imageio_ffmpeg.get_ffmpeg_exe()
+    profile = _probe_video_delivery_profile(ffmpeg_bin, input_path)
+    if _video_can_remux(profile):
+        try:
+            _remux_video_file(ffmpeg_bin, input_path, output_path)
+            logger.info(
+                "video_remux_fast_path_used",
+                extra={
+                    "width": profile.get("width"),
+                    "height": profile.get("height"),
+                    "duration": profile.get("duration"),
+                    "video_codec": profile.get("video_codec"),
+                    "audio_codec": profile.get("audio_codec"),
+                },
+            )
+            return
+        except Exception:
+            logger.warning("video_remux_fast_path_failed", exc_info=True)
+
+    _transcode_video_file(ffmpeg_bin, input_path, output_path)
+
+
+def _probe_video_delivery_profile(ffmpeg_bin: str, input_path: Path) -> dict:
+    """Best-effort stream probe using FFmpeg's input banner."""
+    result = subprocess.run(
+        [ffmpeg_bin, "-hide_banner", "-i", str(input_path)],  # noqa: S603
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+    text = f"{getattr(result, 'stderr', '') or ''}\n{getattr(result, 'stdout', '') or ''}"
+    width = height = None
+    duration = None
+    video_codec = ""
+    audio_codec = ""
+
+    duration_match = re.search(r"Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)", text)
+    if duration_match:
+        hours = int(duration_match.group(1))
+        minutes = int(duration_match.group(2))
+        seconds = float(duration_match.group(3))
+        duration = round((hours * 3600) + (minutes * 60) + seconds, 3)
+
+    for line in text.splitlines():
+        lowered = line.lower()
+        if "video:" in lowered and not video_codec:
+            codec_match = re.search(r"Video:\s*([^,\s]+)", line, flags=re.IGNORECASE)
+            if codec_match:
+                video_codec = codec_match.group(1).lower()
+            dimensions_match = re.search(r"(\d{2,5})x(\d{2,5})", line)
+            if dimensions_match:
+                width = int(dimensions_match.group(1))
+                height = int(dimensions_match.group(2))
+        elif "audio:" in lowered and not audio_codec:
+            codec_match = re.search(r"Audio:\s*([^,\s]+)", line, flags=re.IGNORECASE)
+            if codec_match:
+                audio_codec = codec_match.group(1).lower()
+
+    return {
+        "width": width,
+        "height": height,
+        "duration": duration,
+        "video_codec": video_codec,
+        "audio_codec": audio_codec,
+    }
+
+
+def _video_can_remux(profile: dict) -> bool:
+    width = profile.get("width")
+    height = profile.get("height")
+    duration = profile.get("duration")
+    video_codec = str(profile.get("video_codec") or "").lower()
+    audio_codec = str(profile.get("audio_codec") or "").lower()
+
+    if not width or not height:
+        return False
+    if max(width, height) > settings.MEDIA_VIDEO_MAX_DIMENSION:
+        return False
+    duration_limits = [
+        int(getattr(settings, "MEDIA_VIDEO_MAX_DURATION_SECONDS", 90)),
+        int(getattr(settings, "MEDIA_CIRCLE_VIDEO_MAX_DURATION_SECONDS", 120)),
+    ]
+    if duration is not None and duration > max(duration_limits):
+        return False
+    if video_codec not in {"h264", "avc1"}:
+        return False
+    return not audio_codec or audio_codec in {"aac", "mp4a"}
+
+
+def _remux_video_file(ffmpeg_bin: str, input_path: Path, output_path: Path) -> None:
+    cmd = [
+        ffmpeg_bin,
+        "-y",
+        "-i",
+        str(input_path),
+        "-map_metadata",
+        "-1",
+        "-c",
+        "copy",
+        "-movflags",
+        "+faststart",
+        str(output_path),
+    ]
+    result = subprocess.run(
+        cmd,  # noqa: S603
+        capture_output=True,
+        timeout=settings.MEDIA_VIDEO_OPTIMIZE_TIMEOUT_SECONDS,
+        check=False,
+    )
+    if result.returncode != 0:
+        stderr = result.stderr.decode("utf-8", errors="replace")
+        raise RuntimeError(f"FFmpeg video remux failed: {stderr[:500]}")
+    if not output_path.exists() or output_path.stat().st_size == 0:
+        raise RuntimeError("FFmpeg produced an empty remuxed video")
+
+
+def _transcode_video_file(ffmpeg_bin: str, input_path: Path, output_path: Path) -> None:
     scale_filter = (
         "scale="
         f"if(gt(iw\\,ih)\\,min({settings.MEDIA_VIDEO_MAX_DIMENSION}\\,iw)\\,-2):"
@@ -107,6 +232,8 @@ def _optimize_video_file(input_path: Path, output_path: Path) -> None:
     if result.returncode != 0:
         stderr = result.stderr.decode("utf-8", errors="replace")
         raise RuntimeError(f"FFmpeg video optimization failed: {stderr[:500]}")
+    if not output_path.exists() or output_path.stat().st_size == 0:
+        raise RuntimeError("FFmpeg produced an empty optimized video")
 
 
 def _extract_video_metadata(video_path: Path) -> tuple[int | None, int | None, float | None]:
@@ -264,6 +391,15 @@ def _classify_processing_failure(media_file: MediaFile, exc: Exception) -> tuple
             f"{media_kind} processing timed out. Please try a shorter or lower-resolution file.",
         )
 
+    gcs_code = _classify_processing_gcs_failure(exc)
+    if gcs_code:
+        messages = {
+            "MEDIA_GCS_PERMISSION_DENIED": "Media storage permission was denied. Please try again later.",
+            "MEDIA_GCS_TIMEOUT": "Media storage timed out. Please try again.",
+            "MEDIA_GCS_RATE_LIMITED": "Media storage is temporarily busy. Please try again shortly.",
+        }
+        return gcs_code, messages[gcs_code]
+
     if media_file.media_type == MediaType.VIDEO and (
         "code -11" in lowered_error
         or "sigsegv" in lowered_error
@@ -292,3 +428,45 @@ def _classify_processing_failure(media_file: MediaFile, exc: Exception) -> tuple
         "MEDIA_PROCESSING_FAILED",
         f"{media_kind} processing failed. Please try another file.",
     )
+
+
+def _classify_processing_gcs_failure(exc: Exception) -> str:
+    try:
+        from google.api_core import exceptions as gcs_exceptions
+    except Exception:  # noqa: BLE001
+        return ""
+
+    permission_errors = tuple(
+        cls
+        for cls in (
+            getattr(gcs_exceptions, "Forbidden", None),
+            getattr(gcs_exceptions, "PermissionDenied", None),
+            getattr(gcs_exceptions, "Unauthorized", None),
+        )
+        if cls is not None
+    )
+    timeout_errors = tuple(
+        cls
+        for cls in (
+            getattr(gcs_exceptions, "DeadlineExceeded", None),
+            getattr(gcs_exceptions, "ServiceUnavailable", None),
+            getattr(gcs_exceptions, "RetryError", None),
+        )
+        if cls is not None
+    )
+    rate_limit_errors = tuple(
+        cls
+        for cls in (
+            getattr(gcs_exceptions, "TooManyRequests", None),
+            getattr(gcs_exceptions, "ResourceExhausted", None),
+        )
+        if cls is not None
+    )
+
+    if permission_errors and isinstance(exc, permission_errors):
+        return "MEDIA_GCS_PERMISSION_DENIED"
+    if timeout_errors and isinstance(exc, timeout_errors):
+        return "MEDIA_GCS_TIMEOUT"
+    if rate_limit_errors and isinstance(exc, rate_limit_errors):
+        return "MEDIA_GCS_RATE_LIMITED"
+    return ""

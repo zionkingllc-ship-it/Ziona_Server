@@ -14,7 +14,7 @@ regenerate the fixture:
     from graphql import build_schema
     from graphql.utilities import lexicographic_sort_schema, print_schema
     from config.graphql_schema import schema
-    open('tests/graphql/schema_contract.graphql', 'w').write(
+    open('tests/graphql/schema_contract.graphql', 'w', encoding='utf-8').write(
         print_schema(lexicographic_sort_schema(build_schema(schema.as_str()))))
     "
 
@@ -38,7 +38,7 @@ def _current_sorted_sdl() -> str:
 
 
 def test_graphql_schema_matches_contract_snapshot():
-    assert _current_sorted_sdl() == FIXTURE.read_text(), (
+    assert _current_sorted_sdl() == FIXTURE.read_text(encoding="utf-8"), (
         "The GraphQL schema no longer matches tests/graphql/schema_contract.graphql. "
         "If the change is intentional and ADDITIVE, regenerate the fixture (see module "
         "docstring). If a field was removed or renamed, this is a BREAKING change for "

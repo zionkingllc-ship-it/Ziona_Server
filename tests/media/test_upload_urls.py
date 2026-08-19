@@ -156,6 +156,31 @@ def test_generate_upload_url_signing_failure_does_not_create_orphan_media(
 
 
 @pytest.mark.django_db
+def test_generate_upload_url_classifies_gcs_permission_failure(
+    settings, authenticated_user, monkeypatch
+):
+    from google.api_core import exceptions as gcs_exceptions
+
+    settings.GCP_STORAGE_BUCKET = "ziona-media-test"
+
+    def fail_signing(**kwargs):
+        raise gcs_exceptions.Forbidden("permission denied")
+
+    monkeypatch.setattr("core.media.services._generate_gcp_signed_url", fail_signing)
+
+    with pytest.raises(MediaError) as exc:
+        MediaService.generate_upload_url(
+            user_id=str(authenticated_user["user"].id),
+            file_name="circle-cover.jpg",
+            file_type="image/jpeg",
+            file_size=2048,
+        )
+
+    assert exc.value.code == "UPLOAD_GCS_PERMISSION_DENIED"
+    assert MediaFile.objects.count() == 0
+
+
+@pytest.mark.django_db
 def test_upload_media_graphql_returns_media_url(settings, authenticated_user, monkeypatch):
     settings.GCP_STORAGE_BUCKET = "ziona-media-test"
     monkeypatch.setattr(

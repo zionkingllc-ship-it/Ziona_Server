@@ -25,7 +25,7 @@ WHY WE DO NOT CHECK THE BLACKLIST ON EVERY REQUEST:
 import json
 import logging
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import jwt
 from django.conf import settings
@@ -163,7 +163,7 @@ class TokenService:
             redis_conn = get_redis_connection("default")
             redis_key = f"refresh:{user_id}:{jti}"
             ttl = int(settings.JWT_REFRESH_TOKEN_LIFETIME.total_seconds())
-            redis_conn.setex(redis_key, ttl, "valid")
+            redis_conn.setex(redis_key, ttl, _encode_refresh_token_state(now))
             logger.info(
                 "Refresh token stored in Redis",
                 extra={"user_id": str(user_id), "jti": jti},
@@ -249,8 +249,22 @@ class TokenService:
             jti = payload["jti"]
             redis_key = f"refresh:{user_id}:{jti}"
 
-            if not redis_conn.exists(redis_key):
+            existing_value = redis_conn.get(redis_key)
+            if not existing_value:
+                logger.warning(
+                    "refresh_token_rejected_missing_state",
+                    extra={"user_id": str(user_id), "jti": str(jti)},
+                )
+                _handle_refresh_token_reuse(user_id=str(user_id), jti=str(jti))
                 raise TokenError("Refresh token has been revoked")
+            state = _decode_refresh_token_state(existing_value)
+            if _refresh_token_state_is_inactive(state):
+                redis_conn.delete(redis_key)
+                logger.warning(
+                    "refresh_token_rejected_inactive",
+                    extra={"user_id": str(user_id), "jti": str(jti)},
+                )
+                raise TokenError("Refresh token has been inactive too long")
         except TokenError:
             raise
         except Exception as e:
@@ -261,6 +275,45 @@ class TokenService:
             )
 
         return payload
+
+    @staticmethod
+    def cleanup_inactive_refresh_tokens() -> int:
+        """Delete refresh-token Redis keys whose stored activity is too old.
+
+        Older deployments stored the literal string ``valid``. Those keys remain
+        valid and are skipped here because they do not contain enough metadata to
+        prove inactivity. They naturally expire at the refresh-token TTL.
+        """
+        cutoff = datetime.now(timezone.utc) - timedelta(
+            days=int(settings.AUTH_REFRESH_TOKEN_INACTIVITY_DAYS)
+        )
+        revoked = 0
+        scanned = 0
+
+        try:
+            from django_redis import get_redis_connection
+
+            redis_conn = get_redis_connection("default")
+            for key in _scan_redis_keys(redis_conn, "refresh:*:*"):
+                scanned += 1
+                raw_value = redis_conn.get(key)
+                state = _decode_refresh_token_state(raw_value)
+                last_seen = _parse_refresh_state_datetime(state.get("last_seen_at"))
+                if last_seen and last_seen < cutoff:
+                    redis_conn.delete(key)
+                    revoked += 1
+        except Exception as e:
+            _handle_auth_redis_failure(
+                "Failed to clean up inactive refresh tokens",
+                e,
+                raise_message="Unable to clean up inactive sessions right now.",
+            )
+
+        logger.info(
+            "inactive_refresh_token_cleanup_complete",
+            extra={"scanned": scanned, "revoked": revoked},
+        )
+        return revoked
 
     @staticmethod
     def rotate_refresh_token(old_token: str, role: str) -> dict:
@@ -519,6 +572,73 @@ def _decode_rotation_value(value) -> dict | None:
             "refresh_token": data["refresh_token"],
         }
     return None
+
+
+def _encode_refresh_token_state(now: datetime) -> str:
+    timestamp = now.isoformat()
+    return json.dumps(
+        {
+            "status": "valid",
+            "created_at": timestamp,
+            "last_seen_at": timestamp,
+        }
+    )
+
+
+def _decode_refresh_token_state(value) -> dict:
+    if not value:
+        return {}
+    if isinstance(value, bytes):
+        value = value.decode("utf-8")
+    if value == "valid":
+        return {"status": "valid"}
+    try:
+        data = json.loads(value)
+    except (TypeError, ValueError):
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    if data.get("access_token") and data.get("refresh_token"):
+        return {"status": "rotation_grace"}
+    return data
+
+
+def _parse_refresh_state_datetime(value) -> datetime | None:
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(str(value))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _refresh_token_state_is_inactive(state: dict) -> bool:
+    last_seen = _parse_refresh_state_datetime(state.get("last_seen_at"))
+    if last_seen is None:
+        return False
+    cutoff = datetime.now(timezone.utc) - timedelta(
+        days=int(settings.AUTH_REFRESH_TOKEN_INACTIVITY_DAYS)
+    )
+    return last_seen < cutoff
+
+
+def _handle_refresh_token_reuse(*, user_id: str, jti: str) -> None:
+    """Handle a valid refresh JWT whose Redis state is already gone.
+
+    This often means an old rotated token was replayed after the brief mobile
+    grace window. Revoking all sessions is available behind a setting so rollout
+    can remain non-breaking until the client refresh flow is confirmed.
+    """
+    if not getattr(settings, "AUTH_REVOKE_ON_REFRESH_TOKEN_REUSE", False):
+        return
+    logger.warning(
+        "refresh_token_reuse_revoking_all_sessions",
+        extra={"user_id": user_id, "jti": jti},
+    )
+    TokenService.revoke_all_user_tokens(user_id)
 
 
 def _scan_redis_keys(redis_conn, pattern: str):

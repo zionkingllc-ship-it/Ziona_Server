@@ -217,6 +217,8 @@ JWT_REFRESH_ROTATION_GRACE_SECONDS = env.int("JWT_REFRESH_ROTATION_GRACE_SECONDS
 JWT_ALGORITHM = "HS256"
 JWT_LEEWAY_SECONDS = env.int("JWT_LEEWAY_SECONDS", default=30)
 AUTH_STRICT_REDIS = env.bool("AUTH_STRICT_REDIS", default=not DEBUG)
+AUTH_REFRESH_TOKEN_INACTIVITY_DAYS = env.int("AUTH_REFRESH_TOKEN_INACTIVITY_DAYS", default=30)
+AUTH_REVOKE_ON_REFRESH_TOKEN_REUSE = env.bool("AUTH_REVOKE_ON_REFRESH_TOKEN_REUSE", default=False)
 ACCOUNT_RECOVERY_TOKEN_LIFETIME = timedelta(
     minutes=env.int("ACCOUNT_RECOVERY_TOKEN_LIFETIME_MINUTES", default=15)
 )
@@ -293,6 +295,10 @@ CELERY_TASK_ROUTES = {
         "priority": CELERY_CRON_TASK_PRIORITY,
     },
     "core.notifications.tasks.cleanup_old_notifications": {
+        "queue": CELERY_QUEUE_CRON,
+        "priority": CELERY_CRON_TASK_PRIORITY,
+    },
+    "core.authentication.tasks.cleanup_inactive_refresh_tokens": {
         "queue": CELERY_QUEUE_CRON,
         "priority": CELERY_CRON_TASK_PRIORITY,
     },
@@ -399,6 +405,7 @@ MEDIA_IMAGE_MAX_DIMENSION = env.int("MEDIA_IMAGE_MAX_DIMENSION", default=1600)
 # ~1600px image as a "thumbnail". Generated alongside the optimized image.
 MEDIA_IMAGE_THUMBNAIL_MAX_DIMENSION = env.int("MEDIA_IMAGE_THUMBNAIL_MAX_DIMENSION", default=400)
 MEDIA_IMAGE_JPEG_QUALITY = env.int("MEDIA_IMAGE_JPEG_QUALITY", default=82)
+MEDIA_VIDEO_MAX_UPLOAD_MB = env.int("MEDIA_VIDEO_MAX_UPLOAD_MB", default=100)
 MEDIA_VIDEO_MAX_DIMENSION = env.int("MEDIA_VIDEO_MAX_DIMENSION", default=1280)
 # CRF 23 (was 28): visibly better quality; the phone already compressed once, so
 # re-encoding at 28 compounded the loss. ~2x larger files, bounded by the 90s/100MB cap.
@@ -424,8 +431,12 @@ MEDIA_IMAGE_TASK_SOFT_TIME_LIMIT_SECONDS = env.int(
 MEDIA_VIDEO_TASK_SOFT_TIME_LIMIT_SECONDS = env.int(
     "MEDIA_VIDEO_TASK_SOFT_TIME_LIMIT_SECONDS", default=270
 )
+MEDIA_VIDEO_TASK_TIME_LIMIT_SECONDS = env.int("MEDIA_VIDEO_TASK_TIME_LIMIT_SECONDS", default=300)
 MEDIA_THUMBNAIL_TASK_SOFT_TIME_LIMIT_SECONDS = env.int(
     "MEDIA_THUMBNAIL_TASK_SOFT_TIME_LIMIT_SECONDS", default=100
+)
+MEDIA_THUMBNAIL_TASK_TIME_LIMIT_SECONDS = env.int(
+    "MEDIA_THUMBNAIL_TASK_TIME_LIMIT_SECONDS", default=120
 )
 MEDIA_FINALIZE_TASK_SOFT_TIME_LIMIT_SECONDS = env.int(
     "MEDIA_FINALIZE_TASK_SOFT_TIME_LIMIT_SECONDS", default=45

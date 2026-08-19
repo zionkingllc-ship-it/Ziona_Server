@@ -17,6 +17,11 @@ SCHEDULED_TASKS = {
         "attr": "cleanup_old_notifications",
         "lock_timeout": 2 * 60 * 60,
     },
+    "cleanup-inactive-refresh-tokens": {
+        "module": "core.authentication.tasks",
+        "attr": "cleanup_inactive_refresh_tokens",
+        "lock_timeout": 2 * 60 * 60,
+    },
     "send-daily-notification-digest": {
         "module": "core.notifications.tasks",
         "attr": "send_daily_notification_digest",
