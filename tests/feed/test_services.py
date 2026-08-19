@@ -25,6 +25,63 @@ def make_post(user, caption, *, age_hours=1):
     return post
 
 
+def make_category(category_id, label, slug, order=1):
+    from core.categories.models import Category
+
+    category = Category.objects.filter(slug=slug).first()
+    if category:
+        Category.objects.filter(id=category.id).update(
+            label=label,
+            icon=f"https://example.com/{slug}.png",
+            bg_color="#ffffff",
+            bd_color="#111111",
+            order=order,
+        )
+        category.refresh_from_db()
+        return category
+
+    return Category.objects.create(
+        id=category_id,
+        label=label,
+        slug=slug,
+        icon=f"https://example.com/{slug}.png",
+        bg_color="#ffffff",
+        bd_color="#111111",
+        order=order,
+    )
+
+
+def make_discover_post(user, caption, *, post_type, category, age_hours=1):
+    from core.media.models import MediaFile, MediaStatus
+    from core.posts.models import Post, PostMediaThrough
+
+    post = Post.objects.create(
+        user=user,
+        post_type=post_type,
+        caption=caption,
+        category=category,
+        media_count=0 if post_type == "text" else 1,
+    )
+    if post_type in {"image", "video"}:
+        media = MediaFile.objects.create(
+            user=user,
+            file_name=f"{post_type}.{'mp4' if post_type == 'video' else 'jpg'}",
+            file_type="video/mp4" if post_type == "video" else "image/jpeg",
+            file_size=1024,
+            media_type=post_type,
+            storage_path=f"tests/{post.id}/{post_type}",
+            thumbnail_path=f"tests/{post.id}/thumb.jpg" if post_type == "video" else "",
+            status=MediaStatus.READY,
+            width=720,
+            height=1280,
+            duration=12 if post_type == "video" else None,
+        )
+        PostMediaThrough.objects.create(post=post, mediafile=media, position=0)
+    Post.objects.filter(id=post.id).update(created_at=timezone.now() - timedelta(hours=age_hours))
+    post.refresh_from_db()
+    return post
+
+
 def make_users(create_user, prefix, count):
     return [
         create_user(email=f"{prefix}{i}@test.com", username=f"{prefix}{i}") for i in range(count)
@@ -275,3 +332,50 @@ class TestDiscoverFeed:
         assert first_page.next_cursor
         assert FeedCursor.decode(first_page.next_cursor)["score"] is not None
         assert first_ids.isdisjoint(second_ids)
+
+    def test_discover_filters_video_posts_by_category_label_or_slug(self, create_user):
+        author = create_user(email="discover-filter@test.com", username="discover_filter")
+        love = make_category("love", "Love", "love", order=1)
+        trust = make_category("trust", "Trust", "trust", order=2)
+
+        love_video = make_discover_post(
+            author, "Love video", post_type="video", category=love, age_hours=1
+        )
+        make_discover_post(author, "Love text", post_type="text", category=love, age_hours=2)
+        make_discover_post(author, "Trust video", post_type="video", category=trust, age_hours=3)
+
+        by_label = FeedService.get_discover_feed(category="Love", media_type="VIDEO", limit=10)
+        by_slug = FeedService.get_discover_feed(category="love", media_type="video", limit=10)
+
+        assert [post.id for post in by_label.posts] == [str(love_video.id)]
+        assert [post.id for post in by_slug.posts] == [str(love_video.id)]
+
+    def test_discover_all_category_filters_video_posts_across_categories(self, create_user):
+        author = create_user(email="discover-all@test.com", username="discover_all")
+        love = make_category("love-all", "Love", "love-all", order=1)
+        trust = make_category("trust-all", "Trust", "trust-all", order=2)
+
+        love_video = make_discover_post(
+            author, "Love video", post_type="video", category=love, age_hours=1
+        )
+        trust_video = make_discover_post(
+            author, "Trust video", post_type="video", category=trust, age_hours=2
+        )
+        make_discover_post(author, "Love text", post_type="text", category=love, age_hours=3)
+
+        result = FeedService.get_discover_feed(category="All", media_type="VIDEO", limit=10)
+
+        assert {post.id for post in result.posts} == {str(love_video.id), str(trust_video.id)}
+
+    def test_discover_filters_text_posts_by_category(self, create_user):
+        author = create_user(email="discover-text@test.com", username="discover_text")
+        love = make_category("love-text", "Love", "love-text", order=1)
+
+        text_post = make_discover_post(
+            author, "Love text", post_type="text", category=love, age_hours=1
+        )
+        make_discover_post(author, "Love video", post_type="video", category=love, age_hours=2)
+
+        result = FeedService.get_discover_feed(category="Love", media_type="TEXT", limit=10)
+
+        assert [post.id for post in result.posts] == [str(text_post.id)]

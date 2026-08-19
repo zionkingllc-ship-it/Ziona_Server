@@ -607,7 +607,11 @@ class FeedQueries:
         user_id = _get_authenticated_user_id(info)
 
         result = FeedService.get_discover_feed(
-            user_id=user_id, category=category, cursor=cursor, limit=limit
+            user_id=user_id,
+            category=category,
+            media_type=media_type,
+            cursor=cursor,
+            limit=limit,
         )
 
         return FeedResponse(

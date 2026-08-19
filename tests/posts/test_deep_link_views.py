@@ -23,6 +23,23 @@ def test_android_assetlinks_reflects_settings(client, settings):
 
 
 @pytest.mark.django_db
+def test_android_assetlinks_default_matches_release_fingerprints(client):
+    resp = client.get("/.well-known/assetlinks.json")
+
+    assert resp.status_code == 200
+    entry = resp.json()[0]
+    assert entry["target"]["package_name"] == "com.zionking.ziona"
+    assert entry["target"]["sha256_cert_fingerprints"] == [
+        "B6:A8:22:F3:C7:E0:71:56:6B:24:93:C4:57:6A:85:D9:81:01:65:3D:BD:CB:70:D2:0E:34:23:4B:5D:45:6B:52",
+        "53:5B:CE:7A:2F:80:80:F4:2C:66:77:6E:9E:C7:E9:15:72:79:D5:52:73:1A:58:B1:81:6A:B7:26:23:1C:72:68",
+    ]
+    assert entry["relation"] == [
+        "delegate_permission/common.handle_all_urls",
+        "delegate_permission/common.get_login_creds",
+    ]
+
+
+@pytest.mark.django_db
 def test_apple_app_site_association_builds_appid_from_team_id(client, settings):
     settings.APPLE_TEAM_ID = "ABCDE12345"
     settings.APPLE_DEFAULT_CLIENT_IDS = ["com.zionking.ziona"]

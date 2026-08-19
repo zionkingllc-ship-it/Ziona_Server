@@ -5,6 +5,7 @@ Split from the former core/feed/services.py (no behavior change).
 
 import logging
 
+from django.db.models import Q
 from django.utils import timezone
 
 from core.follows.selectors import FollowSelector
@@ -154,6 +155,7 @@ class FeedService:
     def get_discover_feed(
         user_id: str | None = None,
         category: str | None = None,
+        media_type: str | None = None,
         cursor: str | None = None,
         limit: int = DEFAULT_FEED_LIMIT,
     ) -> FeedResponseDTO:
@@ -161,7 +163,8 @@ class FeedService:
 
         Args:
             user_id: UUID of the requesting user.
-            category: Optional PostCategory filter.
+            category: Optional category slug or label filter.
+            media_type: Optional media filter (image, video, text).
             cursor: Opaque cursor string for pagination.
             limit: Page size.
 
@@ -172,8 +175,18 @@ class FeedService:
 
         qs = FeedService._ranked_queryset()
 
-        if category:
-            qs = qs.filter(category__slug=category)
+        category_filter = _normalize_discover_category(category)
+        if category_filter:
+            qs = qs.filter(
+                Q(category__slug__iexact=category_filter)
+                | Q(category__label__iexact=category_filter)
+            )
+
+        media_filter = _normalize_discover_media_type(media_type)
+        if media_filter:
+            qs = qs.filter(post_type=media_filter)
+        elif media_type and str(media_type).strip():
+            qs = qs.none()
 
         qs = FeedService._exclude_hidden_posts(qs, user_id)
 
@@ -237,3 +250,28 @@ class FeedService:
     _blend_discovery_and_followed = staticmethod(strategies._blend_discovery_and_followed)
     _apply_creator_diversity = staticmethod(strategies._apply_creator_diversity)
     _public_discovery_feed = staticmethod(strategies._public_discovery_feed)
+
+
+def _normalize_discover_category(category: str | None) -> str:
+    value = (category or "").strip()
+    if not value or value.lower() == "all":
+        return ""
+    return value
+
+
+def _normalize_discover_media_type(media_type: str | None) -> str:
+    value = (media_type or "").strip().lower()
+    if not value or value == "all":
+        return ""
+
+    aliases = {
+        "image": "image",
+        "images": "image",
+        "photo": "image",
+        "photos": "image",
+        "video": "video",
+        "videos": "video",
+        "text": "text",
+        "texts": "text",
+    }
+    return aliases.get(value, "")

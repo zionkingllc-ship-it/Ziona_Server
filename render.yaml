@@ -53,6 +53,10 @@ services:
       # Apple Team ID for iOS Universal Links (well-known/apple-app-site-association).
       - key: APPLE_TEAM_ID
         value: RLL2NX9J5Z
+      - key: ANDROID_APP_PACKAGE_NAME
+        value: com.zionking.ziona
+      - key: ANDROID_SHA256_CERT_FINGERPRINTS
+        value: B6:A8:22:F3:C7:E0:71:56:6B:24:93:C4:57:6A:85:D9:81:01:65:3D:BD:CB:70:D2:0E:34:23:4B:5D:45:6B:52,53:5B:CE:7A:2F:80:80:F4:2C:66:77:6E:9E:C7:E9:15:72:79:D5:52:73:1A:58:B1:81:6A:B7:26:23:1C:72:68
       - key: ENSEND_API_KEY
         sync: false
       - key: ENSEND_API_URL
@@ -248,6 +252,10 @@ services:
       # Apple Team ID for iOS Universal Links (well-known/apple-app-site-association).
       - key: APPLE_TEAM_ID
         value: RLL2NX9J5Z
+      - key: ANDROID_APP_PACKAGE_NAME
+        value: com.zionking.ziona
+      - key: ANDROID_SHA256_CERT_FINGERPRINTS
+        value: B6:A8:22:F3:C7:E0:71:56:6B:24:93:C4:57:6A:85:D9:81:01:65:3D:BD:CB:70:D2:0E:34:23:4B:5D:45:6B:52,53:5B:CE:7A:2F:80:80:F4:2C:66:77:6E:9E:C7:E9:15:72:79:D5:52:73:1A:58:B1:81:6A:B7:26:23:1C:72:68
       - key: ENSEND_API_KEY
         sync: false
       - key: ENSEND_API_URL
