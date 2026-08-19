@@ -27,10 +27,14 @@ class MediaUploadPayload:
 
     success: bool
     upload_url: str | None = None  # For signed URL approach
+    resumable_upload_url: str | None = None  # For GCS resumable upload sessions
     media_id: str | None = None
     media_url: str | None = None
     status: str | None = None
     expires_in: int | None = None
+    upload_mode: str | None = None
+    max_file_size: int | None = None
+    recommended_chunk_size: int | None = None
     error: ErrorType | None = None
 
 
@@ -202,6 +206,71 @@ class MediaMutations:
             return MediaUploadPayload(
                 success=False,
                 error=ErrorType(code=code, message=message, field=field, details=details),
+            )
+
+    @strawberry.mutation(
+        description="Create a staging-gated GCS resumable upload session for large media"
+    )
+    def create_resumable_upload_session(
+        self,
+        info: strawberry.types.Info,
+        file_name: str,
+        file_type: str,
+        file_size: int,
+    ) -> MediaUploadPayload:
+        """Create a resumable GCS upload session without changing existing upload flows."""
+        from core.media.services import MediaError, MediaService
+        from core.users.schema import _get_authenticated_user_id
+
+        user_id = _get_authenticated_user_id(info)
+        if not user_id:
+            return MediaUploadPayload(
+                success=False,
+                error=ErrorType(code="UNAUTHORIZED", message="Authentication required"),
+            )
+
+        logger.info(
+            "create_resumable_upload_session user_id=%s file=%s size=%d",
+            user_id,
+            file_name,
+            file_size,
+        )
+        try:
+            result = MediaService.create_resumable_upload_session(
+                user_id=user_id,
+                file_name=file_name,
+                file_type=file_type,
+                file_size=file_size,
+            )
+            return MediaUploadPayload(
+                success=True,
+                upload_url=result["upload_url"],
+                resumable_upload_url=result["resumable_upload_url"],
+                media_id=result["media_id"],
+                media_url=result["media_url"],
+                status="pending",
+                expires_in=result["expires_in"],
+                upload_mode=result["upload_mode"],
+                max_file_size=result["max_file_size"],
+                recommended_chunk_size=result["recommended_chunk_size"],
+            )
+        except MediaError as e:
+            code = getattr(e, "code", "VALIDATION_ERROR")
+            message = getattr(e, "message", str(e))
+            logger.warning(
+                "create_resumable_upload_session_failed user_id=%s code=%s file=%s",
+                user_id,
+                code,
+                file_name,
+            )
+            return MediaUploadPayload(
+                success=False,
+                error=ErrorType(
+                    code=code,
+                    message=message,
+                    field=getattr(e, "field", None),
+                    details=getattr(e, "details", None),
+                ),
             )
 
     @strawberry.mutation(description="Confirm direct-to-GCS media upload and start processing")

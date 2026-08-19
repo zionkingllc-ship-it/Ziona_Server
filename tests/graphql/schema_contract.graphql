@@ -1321,10 +1321,14 @@ enum MediaType {
 type MediaUploadPayload {
   error: ErrorType
   expiresIn: Int
+  maxFileSize: Int
   mediaId: String
   mediaUrl: String
+  recommendedChunkSize: Int
+  resumableUploadUrl: String
   status: String
   success: Boolean!
+  uploadMode: String
   uploadUrl: String
 }
 
@@ -1476,6 +1480,9 @@ type Mutation {
     thumbnailUrl: String = null
     width: Int = null
   ): CreatePostPayload!
+
+  """Create a staging-gated GCS resumable upload session for large media"""
+  createResumableUploadSession(fileName: String!, fileSize: Int!, fileType: String!): MediaUploadPayload!
   debugSendPush(includeInactive: Boolean! = false, targetUserId: ID = null): DebugSendPushPayload!
 
   """Delete a bookmark folder"""

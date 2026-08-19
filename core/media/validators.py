@@ -230,6 +230,7 @@ def build_media_validation_details(
     *,
     allowed_types: list[str] | None = None,
     max_size: int | None = None,
+    max_video_size_bytes: int | None = None,
     received_size: int | None = None,
     received_duration_seconds: float | int | None = None,
     received_videos_count: int | None = None,
@@ -237,7 +238,7 @@ def build_media_validation_details(
     """Build a consistent validation details payload for upload/post media errors."""
     details: dict[str, Any] = {
         "allowedTypes": allowed_types or list(ALLOWED_UPLOAD_TYPES),
-        "maxVideoSizeBytes": VIDEO_MAX_UPLOAD_BYTES,
+        "maxVideoSizeBytes": max_video_size_bytes or VIDEO_MAX_UPLOAD_BYTES,
         "maxVideoDurationSeconds": getattr(
             settings, "MEDIA_VIDEO_MAX_DURATION_SECONDS", MAX_VIDEO_DURATION_SECONDS
         ),

@@ -29,6 +29,9 @@ def test_render_blueprint_uses_cron_jobs_not_prod_beat(settings):
     assert 'schedule: "*/10 * * * *"' in blueprint
     assert "MEDIA_STALE_UPLOAD_MINUTES" in blueprint
     assert "MEDIA_VIDEO_MAX_DURATION_SECONDS" in blueprint
+    assert "MEDIA_RESUMABLE_UPLOADS_ENABLED" in blueprint
+    assert "MEDIA_RESUMABLE_VIDEO_MAX_UPLOAD_MB" in blueprint
+    assert 'value: "500"' in blueprint
 
 
 def test_render_cron_task_allowlist_covers_expected_schedules():

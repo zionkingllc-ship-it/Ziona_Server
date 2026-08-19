@@ -71,33 +71,11 @@ class MediaService:
         Raises:
             MediaError: If validation fails or the signed URL cannot be generated.
         """
-        if file_type not in ALLOWED_TYPES:
-            raise MediaError(
-                f"File type '{file_type}' not allowed. Accepted: JPEG, PNG, WEBP, MP4, MOV",
-                code="INVALID_MEDIA_TYPE",
-                field="fileType",
-                details=build_media_validation_details(),
-            )
-
-        type_config = ALLOWED_TYPES[file_type]
-
-        if file_size > type_config["max_size"]:
-            max_mb = type_config["max_size"] / (1024 * 1024)
-            raise MediaError(
-                f"File size exceeds maximum of {max_mb:.0f} MB",
-                code="MEDIA_TOO_LARGE",
-                field="fileSize",
-                details=build_media_validation_details(
-                    max_size=type_config["max_size"],
-                    received_size=file_size,
-                ),
-            )
-
-        if file_size <= 0:
-            raise MediaError(
-                "File size must be greater than 0",
-                code="INVALID_FILE_SIZE",
-            )
+        type_config = _validate_upload_metadata(
+            file_type=file_type,
+            file_size=file_size,
+            too_large_code="MEDIA_TOO_LARGE",
+        )
 
         media_id = str(uuid.uuid4())
         ext = type_config["ext"]
@@ -162,6 +140,114 @@ class MediaService:
             "media_id": str(media_file.id),
             "media_url": media_url,
             "expires_in": expiry,
+        }
+
+    @staticmethod
+    def create_resumable_upload_session(
+        user_id: str,
+        file_name: str,
+        file_type: str,
+        file_size: int,
+    ) -> dict[str, Any]:
+        """Create a GCS resumable upload session for large mobile uploads.
+
+        The returned session URL is used directly by the mobile client. Once the
+        client completes the upload to GCS, it calls confirmMediaUpload with the
+        returned mediaId; the existing processing pipeline then takes over.
+        """
+        if not getattr(settings, "MEDIA_RESUMABLE_UPLOADS_ENABLED", False):
+            raise MediaError(
+                "Resumable uploads are not enabled for this environment.",
+                code="RESUMABLE_UPLOADS_DISABLED",
+            )
+
+        type_config = _validate_upload_metadata(
+            file_type=file_type,
+            file_size=file_size,
+            video_max_size=_resumable_video_max_upload_bytes(),
+            too_large_code="VIDEO_TOO_LARGE",
+        )
+
+        media_id = str(uuid.uuid4())
+        ext = type_config["ext"]
+        media_type = type_config["media_type"]
+        if media_type == MediaType.VIDEO:
+            storage_path = f"uploads/{user_id}/videos/{media_id}.{ext}"
+        else:
+            storage_path = f"uploads/{user_id}/images/{media_id}.{ext}"
+
+        try:
+            blob = _get_gcs_bucket().blob(storage_path)
+            session_url = blob.create_resumable_upload_session(
+                content_type=file_type,
+                size=file_size,
+                timeout=getattr(settings, "MEDIA_RESUMABLE_UPLOAD_SESSION_TIMEOUT_SECONDS", 60),
+                if_generation_match=0,
+            )
+        except Exception as e:
+            code, message = _classify_gcs_exception(
+                e,
+                default_code="UPLOAD_SESSION_CREATION_FAILED",
+                default_message="Could not prepare a resumable upload session. Please try again.",
+            )
+            logger.error(
+                "resumable_upload_session_creation_failed",
+                extra={
+                    "user_id": str(user_id),
+                    "storage_path": storage_path,
+                    "file_type": file_type,
+                    "file_size": file_size,
+                    "upload_mode": "resumable",
+                    "code": code,
+                    "stage": "resumable_session_create",
+                },
+                exc_info=True,
+            )
+            raise MediaError(message, code=code) from e
+
+        media_file = MediaFile.objects.create(
+            id=media_id,
+            user_id=user_id,
+            file_name=file_name,
+            file_type=file_type,
+            file_size=file_size,
+            media_type=media_type,
+            storage_path=storage_path,
+            status=MediaStatus.PENDING,
+        )
+        media_url = normalize_url(
+            f"https://storage.googleapis.com/{settings.GCP_STORAGE_BUCKET}/{storage_path}"
+        )
+        max_file_size = (
+            _resumable_video_max_upload_bytes()
+            if media_type == MediaType.VIDEO
+            else type_config["max_size"]
+        )
+        recommended_chunk_size = (
+            int(getattr(settings, "MEDIA_RESUMABLE_UPLOAD_RECOMMENDED_CHUNK_MB", 8)) * MEGABYTE
+        )
+
+        logger.info(
+            "resumable_upload_session_created",
+            extra={
+                "user_id": str(user_id),
+                "media_id": str(media_file.id),
+                "file_type": file_type,
+                "file_size": file_size,
+                "upload_mode": "resumable",
+                "stage": "resumable_session_create",
+            },
+        )
+
+        return {
+            "upload_url": session_url,
+            "resumable_upload_url": session_url,
+            "media_id": str(media_file.id),
+            "media_url": media_url,
+            "expires_in": None,
+            "upload_mode": "resumable",
+            "max_file_size": max_file_size,
+            "recommended_chunk_size": recommended_chunk_size,
         }
 
     @staticmethod
@@ -358,6 +444,55 @@ class MediaService:
             return normalize_url(
                 f"https://storage.googleapis.com/{settings.GCP_STORAGE_BUCKET}/{media_file.storage_path}"
             )
+
+
+def _validate_upload_metadata(
+    *,
+    file_type: str,
+    file_size: int,
+    video_max_size: int | None = None,
+    too_large_code: str = "MEDIA_TOO_LARGE",
+) -> dict[str, Any]:
+    """Validate declared upload metadata and return the MIME type config."""
+    if file_type not in ALLOWED_TYPES:
+        raise MediaError(
+            f"File type '{file_type}' not allowed. Accepted: JPEG, PNG, WEBP, MP4, MOV",
+            code="INVALID_MEDIA_TYPE",
+            field="fileType",
+            details=build_media_validation_details(),
+        )
+
+    type_config = ALLOWED_TYPES[file_type]
+    max_size = type_config["max_size"]
+    if type_config["media_type"] == MediaType.VIDEO and video_max_size is not None:
+        max_size = video_max_size
+
+    if file_size > max_size:
+        max_mb = max_size / MEGABYTE
+        raise MediaError(
+            f"File size exceeds maximum of {max_mb:.0f} MB",
+            code=too_large_code,
+            field="fileSize",
+            details=build_media_validation_details(
+                max_size=max_size,
+                max_video_size_bytes=max_size
+                if type_config["media_type"] == MediaType.VIDEO
+                else None,
+                received_size=file_size,
+            ),
+        )
+
+    if file_size <= 0:
+        raise MediaError(
+            "File size must be greater than 0",
+            code="INVALID_FILE_SIZE",
+        )
+
+    return type_config
+
+
+def _resumable_video_max_upload_bytes() -> int:
+    return int(getattr(settings, "MEDIA_RESUMABLE_VIDEO_MAX_UPLOAD_MB", 500)) * MEGABYTE
 
 
 def _queue_media_processing(media_file: MediaFile) -> None:

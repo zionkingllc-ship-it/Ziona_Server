@@ -101,7 +101,15 @@ services:
       - key: MEDIA_STALE_UPLOAD_MINUTES
         value: "15"
       - key: MEDIA_VIDEO_MAX_UPLOAD_MB
-        value: "100"
+        value: "500"
+      - key: MEDIA_RESUMABLE_UPLOADS_ENABLED
+        value: "true"
+      - key: MEDIA_RESUMABLE_VIDEO_MAX_UPLOAD_MB
+        value: "500"
+      - key: MEDIA_RESUMABLE_UPLOAD_RECOMMENDED_CHUNK_MB
+        value: "8"
+      - key: MEDIA_RESUMABLE_UPLOAD_SESSION_TIMEOUT_SECONDS
+        value: "60"
       - key: MEDIA_VIDEO_MAX_DURATION_SECONDS
         value: "150"
       - key: MEDIA_CIRCLE_VIDEO_MAX_DURATION_SECONDS
@@ -179,6 +187,14 @@ services:
         value: "15"
       - key: MEDIA_VIDEO_MAX_UPLOAD_MB
         value: "100"
+      - key: MEDIA_RESUMABLE_UPLOADS_ENABLED
+        value: "false"
+      - key: MEDIA_RESUMABLE_VIDEO_MAX_UPLOAD_MB
+        value: "500"
+      - key: MEDIA_RESUMABLE_UPLOAD_RECOMMENDED_CHUNK_MB
+        value: "8"
+      - key: MEDIA_RESUMABLE_UPLOAD_SESSION_TIMEOUT_SECONDS
+        value: "60"
       - key: MEDIA_VIDEO_MAX_DURATION_SECONDS
         value: "150"
       - key: MEDIA_CIRCLE_VIDEO_MAX_DURATION_SECONDS

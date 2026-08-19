@@ -23,10 +23,15 @@ class _FakeBlob:
         self._head = head
         self._missing = missing
         self.deleted = False
+        self.session_requests = []
 
     def reload(self):
         if self._missing:
             raise RuntimeError("not found")
+
+    def create_resumable_upload_session(self, **kwargs):
+        self.session_requests.append(kwargs)
+        return "https://storage.googleapis.com/resumable-session-url"
 
     def download_as_bytes(self, start=None, end=None):  # noqa: ARG002
         return self._head
@@ -174,6 +179,102 @@ def test_generate_upload_url_classifies_gcs_permission_failure(
             file_name="circle-cover.jpg",
             file_type="image/jpeg",
             file_size=2048,
+        )
+
+    assert exc.value.code == "UPLOAD_GCS_PERMISSION_DENIED"
+    assert MediaFile.objects.count() == 0
+
+
+@pytest.mark.django_db
+def test_resumable_upload_session_is_disabled_by_default(authenticated_user):
+    with pytest.raises(MediaError) as exc:
+        MediaService.create_resumable_upload_session(
+            user_id=str(authenticated_user["user"].id),
+            file_name="clip.mp4",
+            file_type="video/mp4",
+            file_size=20 * 1024 * 1024,
+        )
+
+    assert exc.value.code == "RESUMABLE_UPLOADS_DISABLED"
+    assert MediaFile.objects.count() == 0
+
+
+@pytest.mark.django_db
+def test_create_resumable_upload_session_returns_mobile_contract(
+    settings, authenticated_user, monkeypatch
+):
+    settings.MEDIA_RESUMABLE_UPLOADS_ENABLED = True
+    settings.MEDIA_RESUMABLE_VIDEO_MAX_UPLOAD_MB = 500
+    settings.MEDIA_RESUMABLE_UPLOAD_RECOMMENDED_CHUNK_MB = 8
+    settings.GCP_STORAGE_BUCKET = "ziona-media-test"
+    blob = _FakeBlob(size=500 * 1024 * 1024, content_type="video/mp4")
+    monkeypatch.setattr("core.media.services._get_gcs_bucket", lambda: _FakeBucket(blob))
+
+    result = MediaService.create_resumable_upload_session(
+        user_id=str(authenticated_user["user"].id),
+        file_name="long-testimony.mp4",
+        file_type="video/mp4",
+        file_size=500 * 1024 * 1024,
+    )
+
+    media = MediaFile.objects.get(id=result["media_id"])
+    assert result["upload_url"] == "https://storage.googleapis.com/resumable-session-url"
+    assert result["resumable_upload_url"] == result["upload_url"]
+    assert result["upload_mode"] == "resumable"
+    assert result["max_file_size"] == 500 * 1024 * 1024
+    assert result["recommended_chunk_size"] == 8 * 1024 * 1024
+    assert result["expires_in"] is None
+    assert result["media_url"] == (
+        f"https://storage.googleapis.com/ziona-media-test/{media.storage_path}"
+    )
+    assert media.status == "pending"
+    assert media.media_type == "video"
+    assert blob.session_requests[0]["content_type"] == "video/mp4"
+    assert blob.session_requests[0]["size"] == 500 * 1024 * 1024
+    assert blob.session_requests[0]["if_generation_match"] == 0
+
+
+@pytest.mark.django_db
+def test_resumable_upload_session_rejects_video_above_configured_limit(
+    settings, authenticated_user
+):
+    settings.MEDIA_RESUMABLE_UPLOADS_ENABLED = True
+    settings.MEDIA_RESUMABLE_VIDEO_MAX_UPLOAD_MB = 500
+
+    with pytest.raises(MediaError) as exc:
+        MediaService.create_resumable_upload_session(
+            user_id=str(authenticated_user["user"].id),
+            file_name="too-large.mp4",
+            file_type="video/mp4",
+            file_size=(500 * 1024 * 1024) + 1,
+        )
+
+    assert exc.value.code == "VIDEO_TOO_LARGE"
+    assert exc.value.details["maxSize"] == 500 * 1024 * 1024
+    assert exc.value.details["maxVideoSizeBytes"] == 500 * 1024 * 1024
+    assert exc.value.details["receivedSize"] == (500 * 1024 * 1024) + 1
+    assert MediaFile.objects.count() == 0
+
+
+@pytest.mark.django_db
+def test_resumable_upload_session_classifies_gcs_failure(settings, authenticated_user, monkeypatch):
+    from google.api_core import exceptions as gcs_exceptions
+
+    settings.MEDIA_RESUMABLE_UPLOADS_ENABLED = True
+    settings.MEDIA_RESUMABLE_VIDEO_MAX_UPLOAD_MB = 500
+
+    class FailingBlob:
+        def create_resumable_upload_session(self, **kwargs):  # noqa: ARG002
+            raise gcs_exceptions.Forbidden("permission denied")
+
+    monkeypatch.setattr("core.media.services._get_gcs_bucket", lambda: _FakeBucket(FailingBlob()))
+
+    with pytest.raises(MediaError) as exc:
+        MediaService.create_resumable_upload_session(
+            user_id=str(authenticated_user["user"].id),
+            file_name="clip.mp4",
+            file_type="video/mp4",
+            file_size=20 * 1024 * 1024,
         )
 
     assert exc.value.code == "UPLOAD_GCS_PERMISSION_DENIED"
@@ -565,6 +666,75 @@ def test_upload_media_graphql_returns_signing_error(settings, authenticated_user
     assert payload["mediaUrl"] is None
     assert payload["error"]["code"] == "UPLOAD_URL_GENERATION_FAILED"
     assert MediaFile.objects.count() == 0
+
+
+@pytest.mark.django_db
+def test_create_resumable_upload_session_graphql_returns_contract(
+    settings, authenticated_user, monkeypatch
+):
+    settings.MEDIA_RESUMABLE_UPLOADS_ENABLED = True
+    settings.MEDIA_RESUMABLE_VIDEO_MAX_UPLOAD_MB = 500
+    settings.GCP_STORAGE_BUCKET = "ziona-media-test"
+    monkeypatch.setattr(
+        "core.media.services._get_gcs_bucket",
+        lambda: _FakeBucket(_FakeBlob(size=300 * 1024 * 1024, content_type="video/mp4")),
+    )
+    client = Client()
+    client.defaults["HTTP_AUTHORIZATION"] = f"Bearer {authenticated_user['access_token']}"
+
+    response = client.post(
+        "/graphql/",
+        data=json.dumps(
+            {
+                "query": """
+                mutation CreateResumableUploadSession(
+                  $fileName: String!
+                  $fileType: String!
+                  $fileSize: Int!
+                ) {
+                  createResumableUploadSession(
+                    fileName: $fileName
+                    fileType: $fileType
+                    fileSize: $fileSize
+                  ) {
+                    success
+                    uploadUrl
+                    resumableUploadUrl
+                    mediaId
+                    mediaUrl
+                    status
+                    expiresIn
+                    uploadMode
+                    maxFileSize
+                    recommendedChunkSize
+                    error { code message field details }
+                  }
+                }
+                """,
+                "variables": {
+                    "fileName": "staging-large-video.mp4",
+                    "fileType": "video/mp4",
+                    "fileSize": 300 * 1024 * 1024,
+                },
+            }
+        ),
+        content_type="application/json",
+    )
+
+    content = json.loads(response.content)
+    assert "errors" not in content
+    payload = content["data"]["createResumableUploadSession"]
+    assert payload["success"] is True
+    assert payload["uploadUrl"] == "https://storage.googleapis.com/resumable-session-url"
+    assert payload["resumableUploadUrl"] == payload["uploadUrl"]
+    assert payload["mediaId"]
+    assert payload["mediaUrl"].startswith("https://storage.googleapis.com/ziona-media-test/")
+    assert payload["status"] == "pending"
+    assert payload["expiresIn"] is None
+    assert payload["uploadMode"] == "resumable"
+    assert payload["maxFileSize"] == 500 * 1024 * 1024
+    assert payload["recommendedChunkSize"] == 8 * 1024 * 1024
+    assert payload["error"] is None
 
 
 def test_configure_gcs_cors_dry_run_outputs_policy(settings):
