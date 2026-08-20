@@ -5,27 +5,92 @@
     "admin_announcement.html": [
       "brandLogo"
     ],
-    "notification_digest.html": [
-      "brandLogo"
-    ],
-    "support_donation.html": [
-      "brandLogo"
-    ],
     "email_verification.html": [
-      "brandLogo"
+      "brandLogo",
+      "linkedinIcon",
+      "instagramIcon",
+      "tiktokIcon",
+      "facebookIcon"
     ],
-    "welcome.html": [
-      "brandLogo"
+    "moderation_notice.html": [
+      "brandLogo",
+      "linkedinIcon",
+      "instagramIcon",
+      "tiktokIcon",
+      "facebookIcon"
+    ],
+    "notification_digest.html": [
+      "brandLogo",
+      "linkedinIcon",
+      "instagramIcon",
+      "tiktokIcon",
+      "facebookIcon"
     ],
     "password_reset.html": [
-      "brandLogo"
+      "brandLogo",
+      "linkedinIcon",
+      "instagramIcon",
+      "tiktokIcon",
+      "facebookIcon"
+    ],
+    "support_donation.html": [
+      "brandLogo",
+      "supportHero",
+      "linkedinIcon",
+      "instagramIcon",
+      "tiktokIcon",
+      "facebookIcon"
+    ],
+    "welcome.html": [
+      "brandLogo",
+      "linkedinIcon",
+      "instagramIcon",
+      "tiktokIcon",
+      "facebookIcon"
     ]
   },
   "assets": {
     "brandLogo": {
       "outputPath": "assets/brand-logo.png",
       "publicUrl": "{{ asset_base_url }}/assets/brand-logo.png",
-      "alt": "Ziona logo"
+      "width": 132,
+      "height": 50,
+      "alt": "Ziona"
+    },
+    "linkedinIcon": {
+      "outputPath": "assets/social-linkedin.png",
+      "publicUrl": "{{ asset_base_url }}/assets/social-linkedin.png",
+      "width": 37,
+      "height": 37,
+      "alt": "LinkedIn"
+    },
+    "instagramIcon": {
+      "outputPath": "assets/social-instagram.png",
+      "publicUrl": "{{ asset_base_url }}/assets/social-instagram.png",
+      "width": 40,
+      "height": 40,
+      "alt": "Instagram"
+    },
+    "tiktokIcon": {
+      "outputPath": "assets/social-tiktok.png",
+      "publicUrl": "{{ asset_base_url }}/assets/social-tiktok.png",
+      "width": 38,
+      "height": 40,
+      "alt": "TikTok"
+    },
+    "facebookIcon": {
+      "outputPath": "assets/social-facebook.png",
+      "publicUrl": "{{ asset_base_url }}/assets/social-facebook.png",
+      "width": 43,
+      "height": 37,
+      "alt": "Facebook"
+    },
+    "supportHero": {
+      "outputPath": "assets/support-hero.png",
+      "publicUrl": "{{ asset_base_url }}/assets/support-hero.png",
+      "width": 420,
+      "height": 140,
+      "alt": "Support hero"
     }
   }
 }

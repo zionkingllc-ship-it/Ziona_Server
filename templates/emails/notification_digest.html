@@ -5,48 +5,85 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Notification Digest</title>
 </head>
-<body style="margin:0;padding:0">
-<div style="margin:0;padding:32px 16px;background-color:#F5F2F8;font-family:Arial,Helvetica,sans-serif;color:#1C1820">
-  <div style="width:100%;max-width:600px;margin:0 auto;background-color:#FFFFFF;border-radius:28px;overflow:hidden;border:1px solid #E9DDF0">
-    <div style="padding:40px 32px 16px">
-      <img src="{{ asset_base_url }}/assets/brand-logo.png" alt="Ziona logo" width="132" style="display:block;width:132px;height:auto;margin-bottom:32px" />
-      <p style="margin:0 0 12px;font-size:16px;line-height:24px;color:#1C1820">Hi {{ username }},</p>
-      <h1 style="margin:0 0 16px;font-size:28px;line-height:34px;font-weight:700;color:#1C1820">Stay up to date</h1>
-      <div style="margin:0 0 24px;padding:20px 16px;border-radius:20px;background-color:#F7F2FA;border:1px solid #EEE6F3">
-        <p style="margin:0 0 16px;font-size:13px;line-height:19px;font-weight:700;color:#1C1820">Today&#39;s Activity</p>
-        {% for item in notification_items %}
-          <div style="margin:0 0 12px;padding:14px 12px;border-radius:16px;background-color:#FFFFFF;border:1px solid #E9DDF0">
-            <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
-              <tr>
-                <td style="vertical-align:top;padding-right:12px">
-                  <div style="width:10px;height:10px;border-radius:999px;background-color:#742092;margin-top:7px"></div>
-                </td>
-                <td style="vertical-align:top">
-                  <p style="margin:0 0 4px;font-size:13px;line-height:19px;font-weight:700;color:#1C1820">{{ item.title }}</p>
-                  <p style="margin:0;font-size:12px;line-height:18px;color:#4E4252">{{ item.description }}</p>
-                </td>
-                <td style="vertical-align:top;text-align:right;white-space:nowrap;padding-left:12px">
-                  <span style="display:inline-block;border-radius:999px;background-color:#EDE7F6;padding:6px 10px;font-size:10px;line-height:15px;font-weight:700;color:#742092">{{ item.time }}</span>
-                </td>
-              </tr>
-            </table>
-          </div>
-        {% endfor %}
-      </div>
-      <div style="padding:0 0 24px;text-align:center">
-        <a href="{{ notification_link }}" style="display:inline-block;border-radius:999px;background-color:#742092;padding:12px 28px;font-size:14px;font-weight:700;line-height:20px;color:#FFFFFF;text-decoration:none">See more</a>
-      </div>
-    </div>
-    <div style="padding:24px 32px 32px;text-align:center;border-top:1px solid #F0E8F4">
-      <p style="margin:0 0 6px;font-size:12px;line-height:18px;color:#7A717F">Copyright {{ year }}. All Rights Reserved</p>
-      <p style="margin:0 0 20px;font-size:11px;line-height:17px;font-weight:700;color:#1C1820">ZionKingLLC</p>
-      <p style="margin:0;font-size:11px;line-height:17px;color:#7A717F">
-        If you no longer want to receive mails like this, use this link to
-        <a href="{{ unsubscribe_link }}" style="color:#7A717F;text-decoration:underline">unsubscribe</a>
-        from all our emails.
-      </p>
-    </div>
-  </div>
-</div>
+<body style="margin:0;padding:0;background:#F5F2F8;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#F5F2F8" style="width:100%;background:#F5F2F8;border-collapse:collapse;">
+    <tr>
+      <td align="center" style="padding:40px 16px;">
+        <table role="presentation" width="393" cellpadding="0" cellspacing="0" border="0" align="center" bgcolor="#FFFFFF" style="width:393px;max-width:393px;margin:0 auto;background:#FFFFFF;border-radius:30px;border-collapse:separate;overflow:hidden;">
+          <tr>
+            <td style="padding:42px 18px 27px;">
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;border-collapse:collapse;">
+                {% include "emails/partials/logo_row.html" %}
+                <tr><td height="44" style="height:44px;font-size:0;line-height:44px;">&nbsp;</td></tr>
+                <tr>
+                  <td align="left" style="padding:0;color:#181419;font-family:'Mona Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:16px;font-weight:600;line-height:24px;">
+                    Hi {{ username }},
+                  </td>
+                </tr>
+                <tr><td height="18" style="height:18px;font-size:0;line-height:18px;">&nbsp;</td></tr>
+                <tr>
+                  <td align="center" style="padding:0;color:#181419;font-family:'Mona Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:16px;font-weight:600;line-height:24px;">
+                    Stay up to date
+                  </td>
+                </tr>
+                <tr><td height="34" style="height:34px;font-size:0;line-height:34px;">&nbsp;</td></tr>
+                <tr>
+                  <td align="left" style="padding:0;color:#181419;font-family:'Mona Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:13px;font-weight:700;line-height:19px;">
+                    Today's Activity
+                  </td>
+                </tr>
+                <tr><td height="16" style="height:16px;font-size:0;line-height:16px;">&nbsp;</td></tr>
+                {% for item in notification_items %}
+                  <tr>
+                    <td bgcolor="#F6EAFA" style="padding:12px;background:#F6EAFA;border-radius:8px;">
+                      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;border-collapse:collapse;">
+                        <tr>
+                          <td width="44" valign="top" style="width:44px;padding:0 12px 0 0;">
+                            <table role="presentation" width="44" height="44" cellpadding="0" cellspacing="0" border="0" bgcolor="#742092" style="width:44px;height:44px;background:#742092;border-radius:50%;border-collapse:separate;">
+                              <tr>
+                                <td align="center" valign="middle" style="color:#FFFFFF;font-family:'Mona Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:13px;font-weight:700;line-height:44px;letter-spacing:0.26px;">
+                                  {{ item.actor_initials }}
+                                </td>
+                              </tr>
+                            </table>
+                          </td>
+                          <td valign="top" style="padding:0;">
+                            <div style="color:#181419;font-family:'Mona Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:13px;font-weight:400;line-height:19px;">
+                              <strong style="font-weight:700;">{{ item.actor_name }}</strong> {{ item.action }}
+                            </div>
+                            {% if item.message %}
+                              <div style="padding-top:4px;color:#4E4252;font-family:'Mona Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:12px;font-weight:400;line-height:18px;">
+                                {{ item.message }}
+                              </div>
+                            {% endif %}
+                            {% if item.time %}
+                              <div style="padding-top:2px;color:#836F8B;font-family:'Mona Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:11px;font-weight:500;line-height:16px;">
+                                {{ item.time }}
+                              </div>
+                            {% endif %}
+                          </td>
+                        </tr>
+                      </table>
+                    </td>
+                  </tr>
+                  {% if not forloop.last %}
+                    <tr><td height="12" style="height:12px;font-size:0;line-height:12px;">&nbsp;</td></tr>
+                  {% endif %}
+                {% endfor %}
+                <tr><td height="28" style="height:28px;font-size:0;line-height:28px;">&nbsp;</td></tr>
+                <tr>
+                  <td align="center" style="padding:0;">
+                    {% include "emails/partials/cta_button.html" with cta_href=notification_link cta_label="See more" %}
+                  </td>
+                </tr>
+                <tr><td height="88" style="height:88px;font-size:0;line-height:88px;">&nbsp;</td></tr>
+                {% include "emails/partials/social_footer.html" %}
+              </table>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
 </body>
 </html>

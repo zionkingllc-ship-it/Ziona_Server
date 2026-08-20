@@ -52,13 +52,21 @@ def _display_name(user_name: str | None) -> str:
 
 
 def _base_context(**overrides) -> dict:
+    asset_base_url = settings.EMAIL_ASSET_BASE_URL.rstrip("/")
     context = {
-        "asset_base_url": settings.EMAIL_ASSET_BASE_URL.rstrip("/"),
+        "asset_base_url": asset_base_url,
         "app_link": settings.EMAIL_APP_BASE_URL,
         "verify_link": settings.EMAIL_VERIFY_URL,
         "reset_link": settings.EMAIL_PASSWORD_RESET_URL,
         "notification_link": settings.EMAIL_APP_BASE_URL,
         "unsubscribe_link": settings.EMAIL_UNSUBSCRIBE_URL,
+        "support_email": settings.ZIONA_SUPPORT_EMAIL,
+        "logo_url": f"{asset_base_url}/assets/brand-logo.png",
+        "linkedin_icon_url": f"{asset_base_url}/assets/social-linkedin.png",
+        "instagram_icon_url": f"{asset_base_url}/assets/social-instagram.png",
+        "tiktok_icon_url": f"{asset_base_url}/assets/social-tiktok.png",
+        "facebook_icon_url": f"{asset_base_url}/assets/social-facebook.png",
+        "support_hero_url": f"{asset_base_url}/assets/support-hero.png",
         "year": timezone.now().year,
     }
     context.update(overrides)
@@ -268,11 +276,17 @@ def render_notification_digest(
     for index, act in enumerate(safe_activities[:3], start=1):
         actor = act.get("actor_name") or "Someone"
         content = act.get("content") or ""
+        title = act.get("title") or f"{actor} updated you"
+        description = act.get("description") or content
         notification_items.append(
             {
-                "title": act.get("title") or f"{actor} updated you",
-                "description": act.get("description") or content,
+                "actor_name": actor,
+                "actor_initials": _initials(actor),
+                "action": act.get("action") or description or title,
+                "message": act.get("message") or description,
                 "time": act.get("timestamp") or act.get("time") or f"Item {index}",
+                "title": title,
+                "description": description,
             }
         )
 
@@ -331,6 +345,12 @@ def _reason_box(reason: str) -> str:
 </div>"""
 
 
+def _initials(name: str) -> str:
+    parts = [part for part in name.split() if part]
+    initials = "".join(part[0].upper() for part in parts[:2])
+    return initials or "Z"
+
+
 def render_moderation_notice(
     user_name: str | None,
     action_type: str,
@@ -344,22 +364,21 @@ def render_moderation_notice(
     """
     name = _display_name(user_name)
     b = _brand(brand)
-    support = "support@ziona.app"
+    support = settings.ZIONA_SUPPORT_EMAIL
 
     if action_type == "warned":
         subject = "Community Warning"
-        inner = (
-            _h2("Community Warning")
-            + _p(
-                "We noticed activity on your account that may violate our community "
-                "guidelines. This warning does not restrict your account access at this time."
-            )
-            + (_reason_box(reason) if reason else "")
-            + _p(
-                "Please review our community guidelines and avoid repeated violations to "
-                "keep Ziona a safe and faith-aligned space for everyone."
-            )
+        heading = "Account Warning"
+        intro = "We noticed activity on your account that may violate Ziona's community guidelines."
+        access_note = "This warning does not restrict your account access at this time."
+        closing_note = (
+            "Please review our community guidelines and avoid repeated violations to maintain a "
+            "safe and faith-aligned environment for everyone."
         )
+        reason_label = "Reason for warning:"
+        reason_variant = "default"
+        cta_label = ""
+        cta_link = ""
         plain = (
             f"Hello {name},\n\n"
             "We noticed activity on your account that may violate our community "
@@ -372,15 +391,20 @@ def render_moderation_notice(
         )
     elif action_type == "suspended":
         subject = "Your Ziona Account Has Been Suspended"
-        inner = (
-            _h2("Account Suspended")
-            + _p(
-                "Your Ziona account has been suspended due to a violation of our community "
-                "guidelines. While suspended, you cannot post, comment, or access your account."
-            )
-            + (_reason_box(reason) if reason else "")
-            + _p(f"If you believe this was a mistake or want to appeal, contact {support}.")
+        heading = "Account Suspended"
+        intro = (
+            "Your Ziona account has been suspended due to a violation of our community "
+            "guidelines."
         )
+        access_note = (
+            "While suspended, you will not be able to interact with content, post, comment, "
+            "or access your account."
+        )
+        closing_note = "If you believe this action was taken in error or would like to appeal, please contact:"
+        reason_label = "Reason for suspension:"
+        reason_variant = "warning"
+        cta_label = ""
+        cta_link = ""
         plain = (
             f"Hello {name},\n\n"
             "Your Ziona account has been suspended due to a violation of our community "
@@ -394,14 +418,17 @@ def render_moderation_notice(
         )
     elif action_type == "reactivated":
         subject = "Your Ziona Account Has Been Reactivated"
-        inner = (
-            _h2("Account Reactivated")
-            + _p("Your Ziona account has been reactivated and you can log in again.")
-            + _p(
-                "Please continue to follow our community guidelines to help keep Ziona a "
-                "safe and respectful space for everyone."
-            )
+        heading = "Account Reactivated"
+        intro = "Your Ziona account has been reactivated and you can now log in again."
+        access_note = ""
+        closing_note = (
+            "Please continue to follow our community guidelines to help maintain a safe "
+            "and respectful environment for everyone."
         )
+        reason_label = ""
+        reason_variant = "default"
+        cta_label = "Log In Now"
+        cta_link = settings.EMAIL_APP_BASE_URL
         plain = (
             f"Hello {name},\n\n"
             "Your Ziona account has been reactivated and you can now log in again.\n\n"
@@ -410,10 +437,31 @@ def render_moderation_notice(
         )
     else:
         subject = "Ziona Account Update"
-        inner = _h2("Account Update") + _p(reason or "There is an update on your account.")
+        heading = "Account Update"
+        intro = reason or "There is an update on your account."
+        access_note = ""
+        closing_note = ""
+        reason_label = ""
+        reason_variant = "default"
+        cta_label = ""
+        cta_link = ""
         plain = f"Hello {name},\n\n{reason}\n\n- The {b['name']} Team"
 
-    html = _wrap_layout(brand, inner)
+    html = render_to_string(
+        "emails/moderation_notice.html",
+        _base_context(
+            username=name,
+            moderation_heading=heading,
+            moderation_intro=intro,
+            moderation_access_note=access_note,
+            moderation_closing_note=closing_note,
+            moderation_reason=reason,
+            moderation_reason_label=reason_label,
+            moderation_reason_variant=reason_variant,
+            moderation_cta_label=cta_label,
+            moderation_cta_link=cta_link,
+        ),
+    )
     return subject, plain, html
 
 
