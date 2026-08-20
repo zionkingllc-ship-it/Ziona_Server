@@ -185,6 +185,7 @@ class SharePayload:
 
     success: bool
     share_id: str | None = None
+    share_type: str | None = None
     share_url: str | None = None
     stats: PostStats | None = None
     error: ErrorType | None = None

@@ -89,6 +89,12 @@ def build_post_share_url(base_url: str, post_id: str) -> str:
     return f"{normalized_base}/post/{quote(str(post_id), safe='')}"
 
 
+def build_profile_share_url(base_url: str, user_id: str) -> str:
+    """Build the canonical public share URL for a user profile."""
+    normalized_base = (base_url or "https://ziona.app").rstrip("/")
+    return f"{normalized_base}/profile/{quote(str(user_id), safe='')}"
+
+
 def format_count(count: int) -> str:
     """Format large numbers for display.
 

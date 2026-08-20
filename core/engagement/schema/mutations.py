@@ -514,7 +514,12 @@ class EngagementMutations:
                 shares_count=p.stats.shares_count,
                 saves_count=p.stats.saves_count,
             )
-            return SharePayload(success=True, share_id=result.share_id, stats=stats)
+            return SharePayload(
+                success=True,
+                share_id=result.share_id,
+                share_type=result.share_type,
+                stats=stats,
+            )
         except ShareError as e:
             return SharePayload(
                 success=False,
@@ -551,6 +556,7 @@ class EngagementMutations:
             return SharePayload(
                 success=True,
                 share_id=result.share_id,
+                share_type=result.share_type,
                 share_url=result.share_url,
                 stats=stats,
             )

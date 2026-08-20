@@ -1,9 +1,12 @@
 """GraphQL types, queries, and mutations for the profiles domain."""
 
 import strawberry
+from django.conf import settings
 
+from core.engagement.schema.types import SharePayload
 from core.feed.schema import FeedPost, _dto_to_feed_post
 from core.shared.types import ErrorType
+from core.shared.utils import build_profile_share_url
 from core.users.schema import _get_authenticated_user_id
 
 
@@ -55,6 +58,7 @@ class UserProfileType:
     avatar_url: str | None = None
     location: str
     hide_like_count: bool = False
+    share_url: str = strawberry.field(name="shareUrl")
     stats: ProfileStatsType
     viewer_state: ProfileViewerState | None = None
     recent_posts: list[FeedPost]
@@ -104,6 +108,7 @@ def _dto_to_profile(dto) -> UserProfileType:
         avatar_url=dto.avatar_url,
         location=dto.location,
         hide_like_count=getattr(dto, "hide_like_count", False),
+        share_url=build_profile_share_url(settings.APP_SHARE_BASE_URL, dto.id),
         stats=ProfileStatsType(
             _followers=dto.stats.followers_count,
             _following=dto.stats.following_count,
@@ -240,6 +245,47 @@ class ProfileQueries:
 @strawberry.type
 class ProfileMutations:
     """Profile domain GraphQL mutations."""
+
+    @strawberry.mutation(description="Generate a public share link for a user profile.")
+    def share_profile_external(self, info: strawberry.types.Info, user_id: str) -> SharePayload:
+        """Return the canonical profile deep link without changing post share analytics."""
+        from core.shared.exceptions import ErrorCode
+        from core.users.models import User
+
+        current_user_id = _get_authenticated_user_id(info)
+        if not current_user_id:
+            return SharePayload(
+                success=False,
+                message="Authentication required",
+                error_code="UNAUTHORIZED",
+                error=ErrorType(code="UNAUTHORIZED", message="Authentication required"),
+            )
+
+        from core.shared.utils import parse_uuid
+
+        if parse_uuid(user_id) is None:
+            return SharePayload(
+                success=False,
+                message="User not found.",
+                error_code=ErrorCode.USER_NOT_FOUND,
+                error=ErrorType(code=ErrorCode.USER_NOT_FOUND, message="User not found."),
+            )
+
+        user_exists = User.objects.filter(id=user_id, deleted_at__isnull=True).exists()
+        if not user_exists:
+            return SharePayload(
+                success=False,
+                message="User not found.",
+                error_code=ErrorCode.USER_NOT_FOUND,
+                error=ErrorType(code=ErrorCode.USER_NOT_FOUND, message="User not found."),
+            )
+
+        return SharePayload(
+            success=True,
+            share_id=None,
+            share_type="profile_external",
+            share_url=build_profile_share_url(settings.APP_SHARE_BASE_URL, user_id),
+        )
 
     @strawberry.mutation(description="Update the authenticated user's public profile information.")
     def update_profile(

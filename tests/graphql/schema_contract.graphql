@@ -995,6 +995,31 @@ type DeleteFolderPayload {
   success: Boolean!
 }
 
+type DiscoverCreatorResult {
+  avatarUrl: String
+  bio: String
+  id: String!
+  isFollowing: Boolean!
+  stats: DiscoverCreatorStats
+  username: String!
+}
+
+type DiscoverCreatorStats {
+  followersCount: String!
+  followingCount: String!
+  postsCount: String!
+}
+
+type DiscoverSearchResponse {
+  creatorCount: Int!
+  creators: [DiscoverCreatorResult!]!
+  emptyState: EmptyState
+  hasMore: Boolean!
+  nextCursor: String
+  postCount: Int!
+  posts: [FeedPost!]!
+}
+
 type DonationConfirmationType {
   amount: String!
   createdAt: String!
@@ -1616,6 +1641,9 @@ type Mutation {
   """Share a post externally (generate link)"""
   sharePostExternal(postId: String!): SharePayload!
 
+  """Generate a public share link for a user profile."""
+  shareProfileExternal(userId: String!): SharePayload!
+
   """Submit a contact form message for ZIONA or ZIONKING."""
   submitContact(brand: ContactBrand!, email: String!, honeypot: String! = "", message: String!, name: String!): ContactPayload!
 
@@ -1689,8 +1717,18 @@ type NotificationConnection {
   nextCursor: String
 }
 
+type NotificationDestinationType {
+  deepLink: String
+  entityId: ID
+  entityType: String!
+  route: String!
+  secondaryEntityId: ID
+}
+
 type NotificationItem {
   createdAt: String!
+  deepLink: String
+  destination: NotificationDestinationType!
   id: ID!
   isRead: Boolean!
   message: String!
@@ -2005,6 +2043,9 @@ type Query {
   """Get the Discover feed by category"""
   discoverFeed(category: String = null, cursor: String = null, limit: Int! = 20, mediaType: String = null): FeedResponse!
 
+  """Search creators and content from the Discover screen."""
+  discoverSearch(category: String = null, cursor: String = null, limit: Int! = 20, mediaType: String = null, query: String!): DiscoverSearchResponse!
+
   """Retrieve donation confirmation by transaction ID."""
   donationConfirmation(transactionId: String!): DonationConfirmationType
 
@@ -2287,6 +2328,7 @@ type SharePayload {
   errorCode: String
   message: String
   shareId: String
+  shareType: String
   shareUrl: String
   stats: PostStats
   success: Boolean!
@@ -2347,6 +2389,7 @@ type UserProfileType {
   id: String!
   location: String!
   recentPosts: [FeedPost!]!
+  shareUrl: String!
   stats: ProfileStatsType!
   username: String!
   viewerState: ProfileViewerState

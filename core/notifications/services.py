@@ -3,7 +3,9 @@ import re
 import uuid
 from datetime import timedelta
 from typing import Any
+from urllib.parse import quote
 
+from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.cache import cache
 from django.db import transaction
@@ -21,6 +23,7 @@ from core.notifications.models import (
     NotificationStatus,
     NotificationType,
 )
+from core.shared.utils import build_post_share_url, build_profile_share_url
 
 logger = logging.getLogger(__name__)
 User = get_user_model()
@@ -85,6 +88,121 @@ def queue_push_notification(user_id, title: str, body: str, data: dict[str, Any]
     transaction.on_commit(_dispatch)
 
 
+def build_notification_destination(
+    notification_type: str,
+    reference_type: str,
+    reference_id: uuid.UUID | str | None,
+    *,
+    notification_id: uuid.UUID | str | None = None,
+) -> dict[str, str]:
+    """Build mobile navigation metadata from an existing notification reference."""
+    notif_type = (notification_type or "").strip().lower()
+    ref_type = (reference_type or "").strip().lower()
+    ref_id = str(reference_id) if reference_id else ""
+    fallback_id = str(notification_id) if notification_id else ref_id
+    fallback = {
+        "route": "notification_detail",
+        "entityType": "notification",
+        "entityId": fallback_id,
+        "secondaryEntityId": "",
+        "deepLink": "",
+    }
+    if not ref_id:
+        return fallback
+
+    if notif_type == NotificationType.NEW_ANCHOR and ref_type == "anchor":
+        return {
+            "route": "anchor_detail",
+            "entityType": "anchor",
+            "entityId": ref_id,
+            "secondaryEntityId": "",
+            "deepLink": "",
+        }
+
+    if ref_type == "post":
+        return {
+            "route": "post_detail",
+            "entityType": "post",
+            "entityId": ref_id,
+            "secondaryEntityId": "",
+            "deepLink": build_post_share_url(settings.APP_SHARE_BASE_URL, ref_id),
+        }
+
+    if ref_type in {"profile", "user"}:
+        return {
+            "route": "profile",
+            "entityType": "user",
+            "entityId": ref_id,
+            "secondaryEntityId": "",
+            "deepLink": build_profile_share_url(settings.APP_SHARE_BASE_URL, ref_id),
+        }
+
+    if ref_type == "comment":
+        from core.engagement.models import Comment
+
+        comment = Comment.objects.filter(id=ref_id, deleted_at__isnull=True).first()
+        if not comment:
+            return {**fallback, "entityType": "comment", "entityId": ref_id}
+        post_id = str(comment.post_id)
+        return {
+            "route": "comment_thread",
+            "entityType": "comment",
+            "entityId": ref_id,
+            "secondaryEntityId": post_id,
+            "deepLink": (
+                f"{build_post_share_url(settings.APP_SHARE_BASE_URL, post_id)}"
+                f"?commentId={quote(ref_id, safe='')}"
+            ),
+        }
+
+    if ref_type == "circle_post":
+        from core.circles.models import CirclePost
+
+        post = CirclePost.objects.filter(id=ref_id, deleted_at__isnull=True).first()
+        return {
+            "route": "circle_post_detail",
+            "entityType": "circle_post",
+            "entityId": ref_id,
+            "secondaryEntityId": str(post.circle_id) if post else "",
+            "deepLink": "",
+        }
+
+    if ref_type == "circle_post_comment":
+        from core.circles.models import CirclePostComment
+
+        comment = CirclePostComment.objects.filter(id=ref_id, deleted_at__isnull=True).first()
+        return {
+            "route": "circle_post_comment_thread",
+            "entityType": "circle_post_comment",
+            "entityId": ref_id,
+            "secondaryEntityId": str(comment.post_id) if comment else "",
+            "deepLink": "",
+        }
+
+    if ref_type == "anchor":
+        return {
+            "route": "anchor_detail",
+            "entityType": "anchor",
+            "entityId": ref_id,
+            "secondaryEntityId": "",
+            "deepLink": "",
+        }
+
+    if ref_type == "anchor_response":
+        from core.circles.models import AnchorResponse
+
+        response = AnchorResponse.objects.filter(id=ref_id, deleted_at__isnull=True).first()
+        return {
+            "route": "anchor_response",
+            "entityType": "anchor_response",
+            "entityId": ref_id,
+            "secondaryEntityId": str(response.anchor_id) if response else "",
+            "deepLink": "",
+        }
+
+    return fallback
+
+
 def create_notification(
     user_id: int,
     type_str: str,
@@ -141,11 +259,22 @@ def create_notification(
     # Keys are camelCase to match the app-wide mobile contract (CLAUDE.md §5.1)
     # and the GraphQL notification fields — the mobile tap-handler reads
     # data.referenceType / data.referenceId.
+    destination = build_notification_destination(
+        notification_type=type_str,
+        reference_type=reference_type,
+        reference_id=reference_id,
+        notification_id=notification.id,
+    )
     notification_data = {
         "type": type_str,
         "referenceId": str(reference_id) if reference_id else "",
         "referenceType": reference_type,
         "screen": "NotificationDetail",
+        "destinationRoute": destination["route"],
+        "destinationEntityType": destination["entityType"],
+        "destinationEntityId": destination["entityId"],
+        "destinationSecondaryEntityId": destination["secondaryEntityId"],
+        "deepLink": destination["deepLink"],
     }
     if push_data:
         notification_data.update({key: str(value) for key, value in push_data.items()})

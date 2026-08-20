@@ -159,3 +159,140 @@ def test_discover_feed_graphql_filters_category_label_and_media_type(create_user
     assert posts[0]["mediaType"] == "video"
     assert posts[0]["category"]["label"] == "Love"
     assert str(love_text.id) not in {post["id"] for post in posts}
+
+
+@pytest.mark.django_db
+def test_discover_search_graphql_returns_creators_and_posts(create_user):
+    creator = create_user(email="creator-search@test.com", username="grace_creator")
+    author = create_user(email="author-search@test.com", username="author_search")
+    love = make_category("search-love", "Love", "search-love", order=1)
+    post = Post.objects.create(
+        user=author,
+        post_type="text",
+        caption="Grace testimony from today",
+        category=love,
+    )
+
+    response = Client().post(
+        "/graphql/",
+        data=json.dumps(
+            {
+                "query": """
+                query Search($query: String!) {
+                  discoverSearch(query: $query, limit: 10) {
+                    creatorCount
+                    postCount
+                    creators { id username }
+                    posts { id textMessage category { label } }
+                    emptyState { message }
+                  }
+                }
+                """,
+                "variables": {"query": "grace"},
+            }
+        ),
+        content_type="application/json",
+    )
+
+    content = json.loads(response.content)
+    assert response.status_code == 200, content
+    assert "errors" not in content, content.get("errors")
+
+    payload = content["data"]["discoverSearch"]
+    assert str(creator.id) in {item["id"] for item in payload["creators"]}
+    assert [item["id"] for item in payload["posts"]] == [str(post.id)]
+    assert payload["posts"][0]["category"]["label"] == "Love"
+    assert payload["emptyState"] is None
+
+
+@pytest.mark.django_db
+def test_discover_search_graphql_respects_category_slug_and_media_alias(create_user):
+    author = create_user(email="media-search@test.com", username="media_search")
+    love = make_category("search-love-media", "Love", "search-love-media", order=1)
+    trust = make_category("search-trust-media", "Trust", "search-trust-media", order=2)
+    image_post = Post.objects.create(
+        user=author,
+        post_type="image",
+        caption="Grace image",
+        category=love,
+        media_count=1,
+    )
+    attach_ready_media(image_post, author, "image")
+    Post.objects.create(
+        user=author,
+        post_type="text",
+        caption="Grace text",
+        category=love,
+    )
+    Post.objects.create(
+        user=author,
+        post_type="image",
+        caption="Grace image outside category",
+        category=trust,
+        media_count=1,
+    )
+
+    response = Client().post(
+        "/graphql/",
+        data=json.dumps(
+            {
+                "query": """
+                query Search($query: String!, $category: String, $mediaType: String) {
+                  discoverSearch(
+                    query: $query
+                    category: $category
+                    mediaType: $mediaType
+                    limit: 10
+                  ) {
+                    posts { id mediaType category { slug } }
+                  }
+                }
+                """,
+                "variables": {
+                    "query": "Grace",
+                    "category": "search-love-media",
+                    "mediaType": "Images",
+                },
+            }
+        ),
+        content_type="application/json",
+    )
+
+    content = json.loads(response.content)
+    assert response.status_code == 200, content
+    assert "errors" not in content, content.get("errors")
+
+    posts = content["data"]["discoverSearch"]["posts"]
+    assert [item["id"] for item in posts] == [str(image_post.id)]
+    assert posts[0]["mediaType"] == "image"
+
+
+@pytest.mark.django_db
+def test_discover_search_graphql_returns_empty_state_for_blank_query():
+    response = Client().post(
+        "/graphql/",
+        data=json.dumps(
+            {
+                "query": """
+                query Search($query: String!) {
+                  discoverSearch(query: $query, limit: 10) {
+                    creators { id }
+                    posts { id }
+                    emptyState { message }
+                  }
+                }
+                """,
+                "variables": {"query": ""},
+            }
+        ),
+        content_type="application/json",
+    )
+
+    content = json.loads(response.content)
+    assert response.status_code == 200, content
+    assert "errors" not in content, content.get("errors")
+
+    payload = content["data"]["discoverSearch"]
+    assert payload["creators"] == []
+    assert payload["posts"] == []
+    assert payload["emptyState"]["message"] == "No matching content found."

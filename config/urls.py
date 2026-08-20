@@ -14,6 +14,7 @@ from core.donations.webhooks import stripe_webhook
 from core.posts.views import (
     android_asset_links,
     apple_app_site_association,
+    profile_share_preview,
     share_preview,
 )
 
@@ -45,6 +46,7 @@ def build_urlpatterns():
             name="android-asset-links",
         ),
         path("post/<str:post_id>/", share_preview, name="share-preview"),
+        path("profile/<str:user_id>/", profile_share_preview, name="profile-share-preview"),
         path("api/webhooks/stripe/", stripe_webhook, name="stripe-webhook"),
     ]
 

@@ -283,6 +283,64 @@ class EmptyState:
 
 
 @strawberry.type
+class DiscoverCreatorStats:
+    """Creator stats returned by the unified Discover search."""
+
+    _followers: strawberry.Private[int] = 0
+    _following: strawberry.Private[int] = 0
+    _posts: strawberry.Private[int] = 0
+
+    @strawberry.field
+    def followers_count(self) -> str:
+        from core.shared.utils import format_count
+
+        return format_count(self._followers)
+
+    @strawberry.field
+    def following_count(self) -> str:
+        from core.shared.utils import format_count
+
+        return format_count(self._following)
+
+    @strawberry.field
+    def posts_count(self) -> str:
+        from core.shared.utils import format_count
+
+        return format_count(self._posts)
+
+
+@strawberry.type
+class DiscoverCreatorResult:
+    """Creator result inside the unified Discover search response."""
+
+    id: str
+    username: str
+    avatar_url: str | None = None
+    bio: str | None = None
+    stats: DiscoverCreatorStats | None = None
+    is_following: bool = False
+
+
+@strawberry.type
+class DiscoverSearchResponse:
+    """Unified Discover search response for creators and content."""
+
+    creators: list[DiscoverCreatorResult]
+    posts: list[FeedPost]
+    next_cursor: str | None = None
+    has_more: bool = False
+    empty_state: EmptyState | None = None
+
+    @strawberry.field(name="creatorCount")
+    def creator_count(self) -> int:
+        return len(self.creators)
+
+    @strawberry.field(name="postCount")
+    def post_count(self) -> int:
+        return len(self.posts)
+
+
+@strawberry.type
 class FeedResponse:
     """
     Paginated feed array with injected algorithmic empty states.
@@ -635,4 +693,74 @@ class FeedQueries:
                 if result.empty_state
                 else None
             ),
+        )
+
+    @strawberry.field(description="Search creators and content from the Discover screen.")
+    def discover_search(
+        self,
+        info: strawberry.types.Info,
+        query: str,
+        category: str | None = None,
+        media_type: str | None = None,
+        cursor: str | None = None,
+        limit: int = 20,
+    ) -> DiscoverSearchResponse:
+        """Return creator and post matches without changing existing feed/search queries."""
+        from core.feed.services import FeedService
+        from core.follows.services import FollowService
+
+        user_id = _get_authenticated_user_id(info)
+        result = FeedService.search_discover_content(
+            query=query,
+            user_id=user_id,
+            category=category,
+            media_type=media_type,
+            cursor=cursor,
+            limit=limit,
+        )
+        creator_result = FollowService.search_creators(
+            query=query,
+            viewer_id=user_id,
+            page=1,
+            page_size=limit,
+        )
+
+        creators = [
+            DiscoverCreatorResult(
+                id=c["user"].id,
+                username=c["user"].username,
+                avatar_url=c["user"].avatar_url,
+                bio=c.get("bio"),
+                stats=DiscoverCreatorStats(
+                    _followers=c.get("followers_count", 0),
+                    _following=c.get("following_count", 0),
+                    _posts=c.get("posts_count", 0),
+                ),
+                is_following=c.get("is_following", False),
+            )
+            for c in creator_result["creators"]
+        ]
+
+        empty_state = None
+        if not creators and not result.posts and result.empty_state:
+            empty_state = EmptyState(
+                message=result.empty_state.message,
+                suggestions=[
+                    UserSuggestion(
+                        id=s.id,
+                        username=s.username,
+                        avatar_url=s.avatar_url,
+                        bio=s.bio,
+                        followers_count=s.followers_count,
+                    )
+                    for s in result.empty_state.suggestions
+                ],
+            )
+
+        return DiscoverSearchResponse(
+            creators=creators,
+            posts=[_dto_to_feed_post(p) for p in result.posts],
+            next_cursor=result.next_cursor,
+            has_more=result.has_more,
+            empty_state=empty_state,
         )

@@ -227,6 +227,82 @@ class FeedService:
             has_more=has_more,
         )
 
+    @staticmethod
+    def search_discover_content(
+        query: str,
+        user_id: str | None = None,
+        category: str | None = None,
+        media_type: str | None = None,
+        cursor: str | None = None,
+        limit: int = DEFAULT_FEED_LIMIT,
+    ) -> FeedResponseDTO:
+        """Search Discover posts by text, author, and category without changing feeds."""
+        limit = min(limit, 50)
+        search_term = (query or "").strip()
+        if len(search_term) < 2:
+            suggestions = FeedService._get_empty_state_suggestions(user_id) if user_id else []
+            return FeedResponseDTO(
+                posts=[],
+                has_more=False,
+                empty_state=EmptyStateDTO(message="No matching content found.", suggestions=suggestions),
+            )
+
+        qs = FeedService._ranked_queryset().filter(
+            Q(caption__icontains=search_term)
+            | Q(user__username__icontains=search_term)
+            | Q(user__full_name__icontains=search_term)
+            | Q(category__label__icontains=search_term)
+            | Q(category__slug__icontains=search_term)
+        )
+
+        category_filter = _normalize_discover_category(category)
+        if category_filter:
+            qs = qs.filter(
+                Q(category__slug__iexact=category_filter)
+                | Q(category__label__iexact=category_filter)
+            )
+
+        media_filter = _normalize_discover_media_type(media_type)
+        if media_filter:
+            qs = qs.filter(post_type=media_filter)
+        elif media_type and str(media_type).strip():
+            qs = qs.none()
+
+        qs = FeedService._exclude_hidden_posts(qs, user_id)
+
+        if cursor:
+            cursor_data = FeedCursor.decode(cursor)
+            qs = FeedService._apply_ranked_cursor(qs, cursor_data, cursor)
+
+        candidate_limit = max(limit * 3, limit + 10)
+        candidates = list(qs[: candidate_limit + 1])
+        posts = FeedService._apply_creator_diversity(candidates, limit)
+        has_more = len(candidates) > len(posts)
+
+        suggestions = []
+        if not posts and user_id:
+            suggestions = FeedService._get_empty_state_suggestions(user_id)
+
+        next_cursor = None
+        if has_more and posts:
+            next_cursor = FeedCursor.encode(
+                post_id=str(posts[-1].id),
+                algo="discover_search",
+                created_at=posts[-1].created_at,
+                score=getattr(posts[-1], "final_score", 0),
+            )
+
+        return FeedResponseDTO(
+            posts=FeedService._bulk_build_post_dtos(posts, user_id),
+            next_cursor=next_cursor,
+            has_more=has_more,
+            empty_state=(
+                EmptyStateDTO(message="No matching content found.", suggestions=suggestions)
+                if not posts
+                else None
+            ),
+        )
+
     # Implementations split into sibling modules; the class surface is unchanged
     # (profiles/engagement/tests use these as FeedService attributes).
     _exclude_hidden_posts = staticmethod(ranking._exclude_hidden_posts)

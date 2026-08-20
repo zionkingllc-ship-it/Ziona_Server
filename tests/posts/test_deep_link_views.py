@@ -50,7 +50,7 @@ def test_apple_app_site_association_builds_appid_from_team_id(client, settings):
     assert resp["Content-Type"] == "application/json"
     detail = resp.json()["applinks"]["details"][0]
     assert detail["appID"] == "ABCDE12345.com.zionking.ziona"
-    assert detail["paths"] == ["/post/*"]
+    assert detail["paths"] == ["/post/*", "/profile/*"]
 
 
 @pytest.mark.django_db
@@ -87,6 +87,32 @@ def test_share_preview_includes_store_fallback_and_deep_link(client, settings):
     assert "play.google.com/store/apps/details?id=com.zionking.ziona" in body
     # …and the primary CTA points at the post deep link (not a bare root URL).
     assert f"https://ziona.app/post/{post.id}" in body
+
+
+@pytest.mark.django_db
+def test_profile_share_preview_includes_store_fallback_and_deep_link(client, settings):
+    settings.IOS_APP_STORE_URL = "https://apps.apple.com/app/id123456789"
+    settings.ANDROID_PLAY_STORE_URL = (
+        "https://play.google.com/store/apps/details?id=com.zionking.ziona"
+    )
+    settings.APP_SHARE_BASE_URL = "https://ziona.app"
+
+    user = User.objects.create_user(
+        email="profile-share@example.com",
+        username="profileshare",
+        password="Pass123!",  # pragma: allowlist secret
+        full_name="Profile Share",
+        bio="Sharing faith stories.",
+    )
+
+    resp = client.get(f"/profile/{user.id}/")
+
+    assert resp.status_code == 200
+    body = resp.content.decode()
+    assert "https://apps.apple.com/app/id123456789" in body
+    assert "play.google.com/store/apps/details?id=com.zionking.ziona" in body
+    assert f"https://ziona.app/profile/{user.id}" in body
+    assert "Sharing faith stories." in body
 
 
 def test_share_base_url_defaults_to_the_serving_host_not_a_redirecting_one(settings):

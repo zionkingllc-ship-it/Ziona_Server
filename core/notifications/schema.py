@@ -7,6 +7,7 @@ from strawberry.types import Info
 from core.admin_dashboard.permissions import admin_required
 from core.notifications.models import Notification, NotificationPreference, NotificationStatus
 from core.notifications.services import (
+    build_notification_destination,
     create_admin_announcement,
     get_notifications,
     get_unread_count,
@@ -36,6 +37,19 @@ class UserMiniType:
 class SuccessResponse:
     success: bool
     error: str | None = None
+
+
+@strawberry.type
+class NotificationDestinationType:
+    """Stable mobile navigation target for a notification."""
+
+    route: str
+    entity_type: str = strawberry.field(name="entityType")
+    entity_id: strawberry.ID | None = strawberry.field(name="entityId", default=None)
+    secondary_entity_id: strawberry.ID | None = strawberry.field(
+        name="secondaryEntityId", default=None
+    )
+    deep_link: str | None = strawberry.field(name="deepLink", default=None)
 
 
 @strawberry.enum
@@ -90,6 +104,30 @@ class NotificationItem:
     reference_type: str
     is_read: bool
     created_at: str
+
+    @strawberry.field(name="deepLink")
+    def deep_link(self) -> str | None:
+        return self.destination().deep_link
+
+    @strawberry.field
+    def destination(self) -> NotificationDestinationType:
+        destination = build_notification_destination(
+            notification_type=self.type,
+            reference_type=self.reference_type,
+            reference_id=str(self.reference_id) if self.reference_id else None,
+            notification_id=str(self.id),
+        )
+        return NotificationDestinationType(
+            route=destination["route"],
+            entity_type=destination["entityType"],
+            entity_id=strawberry.ID(destination["entityId"]) if destination["entityId"] else None,
+            secondary_entity_id=(
+                strawberry.ID(destination["secondaryEntityId"])
+                if destination["secondaryEntityId"]
+                else None
+            ),
+            deep_link=destination["deepLink"] or None,
+        )
 
     @strawberry.field
     def user(self) -> "UserMiniType | None":

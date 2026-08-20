@@ -11,6 +11,7 @@ from core.notifications.models import (
 )
 from core.notifications.services import (
     batch_like_notifications,
+    build_notification_destination,
     create_admin_announcement,
     create_notification,
     get_unread_count,
@@ -307,13 +308,15 @@ def test_send_push_notification_logs_provider_summary(db, user, monkeypatch):
 
 @pytest.mark.django_db
 def test_create_notification_push_payload_uses_camelcase_keys(
-    user, monkeypatch, django_capture_on_commit_callbacks
+    user, monkeypatch, django_capture_on_commit_callbacks, settings
 ):
     """The FCM push payload must use camelCase keys the mobile tap-handler reads.
 
     Push is now queued to Celery after commit, so the on-commit callback is
     executed here and the task's payload is what we assert on.
     """
+    from core.posts.models import Post
+
     captured = {}
 
     def fake_apply_async(*args, **kwargs):
@@ -323,7 +326,9 @@ def test_create_notification_push_payload_uses_camelcase_keys(
         "core.notifications.tasks.send_push_notification_task.apply_async", fake_apply_async
     )
 
-    ref = uuid.uuid4()
+    settings.APP_SHARE_BASE_URL = "https://share.ziona.test"
+    post = Post.objects.create(user=user, post_type="text", caption="Push target")
+    ref = post.id
     with django_capture_on_commit_callbacks(execute=True):
         create_notification(
             user_id=user.id,
@@ -340,9 +345,32 @@ def test_create_notification_push_payload_uses_camelcase_keys(
     assert data["referenceId"] == str(ref)
     assert data["type"] == NotificationType.LIKE_POST
     assert data["screen"] == "NotificationDetail"
+    assert data["destinationRoute"] == "post_detail"
+    assert data["destinationEntityType"] == "post"
+    assert data["destinationEntityId"] == str(ref)
+    assert data["destinationSecondaryEntityId"] == ""
+    assert data["deepLink"] == f"https://share.ziona.test/post/{ref}"
     # Old snake_case keys must be gone (they broke mobile deep-linking).
     assert "reference_type" not in data
     assert "reference_id" not in data
+
+
+@pytest.mark.django_db
+def test_notification_destination_falls_back_for_missing_reference(settings):
+    settings.APP_SHARE_BASE_URL = "https://share.ziona.test"
+    missing_ref = uuid.uuid4()
+
+    destination = build_notification_destination(
+        notification_type=NotificationType.REPLY_POST,
+        reference_type="comment",
+        reference_id=missing_ref,
+        notification_id=uuid.uuid4(),
+    )
+
+    assert destination["route"] == "notification_detail"
+    assert destination["entityType"] == "comment"
+    assert destination["entityId"] == str(missing_ref)
+    assert destination["deepLink"] == ""
 
 
 @pytest.mark.django_db

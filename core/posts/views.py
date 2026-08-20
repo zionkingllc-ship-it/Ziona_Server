@@ -5,6 +5,7 @@ Handles:
 - /.well-known/apple-app-site-association (iOS Universal Links)
 - /.well-known/assetlinks.json (Android App Links)
 - /post/<post_id>/ (Share preview with OG meta tags)
+- /profile/<user_id>/ (Profile share preview with OG meta tags)
 """
 
 from django.conf import settings
@@ -18,7 +19,7 @@ from core.media.ordering import (
     ordered_post_media_prefetch,
 )
 from core.posts.models import Post
-from core.shared.utils import build_post_share_url, parse_uuid
+from core.shared.utils import build_post_share_url, build_profile_share_url, parse_uuid
 
 
 def _ios_app_id() -> str:
@@ -45,7 +46,7 @@ def apple_app_site_association(request: HttpRequest) -> JsonResponse:
             "details": [
                 {
                     "appID": _ios_app_id(),
-                    "paths": ["/post/*"],
+                    "paths": ["/post/*", "/profile/*"],
                 }
             ],
         },
@@ -123,3 +124,30 @@ def share_preview(request: HttpRequest, post_id: str) -> HttpResponse:
     }
 
     return render(request, "share_preview.html", context)
+
+
+def profile_share_preview(request: HttpRequest, user_id: str) -> HttpResponse:
+    """Render a public preview page for a shared Ziona profile."""
+    if parse_uuid(user_id) is None:
+        return HttpResponse("Profile not found", status=404)
+
+    from core.users.models import User
+
+    user = User.objects.filter(id=user_id, deleted_at__isnull=True).first()
+    if not user:
+        return HttpResponse("Profile not found", status=404)
+
+    display_name = user.full_name or user.username or "Ziona creator"
+    description = user.bio or f"View {display_name}'s profile on Ziona."
+    context = {
+        "profile_user": user,
+        "display_name": display_name,
+        "description": description,
+        "profile_url": build_profile_share_url(settings.APP_SHARE_BASE_URL, user_id),
+        "preview_image": user.avatar_url or None,
+        "app_name": "Ziona",
+        "ios_app_store_url": settings.IOS_APP_STORE_URL,
+        "android_play_store_url": settings.ANDROID_PLAY_STORE_URL,
+    }
+
+    return render(request, "profile_share_preview.html", context)
