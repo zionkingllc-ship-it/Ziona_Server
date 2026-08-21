@@ -406,8 +406,31 @@ class AuthService:
         access_token: str,
         refresh_token: str | None = None,
         user_id: str | None = None,
+        all_devices: bool = False,
     ) -> bool:
         """Log out a user by revoking their tokens."""
+        if all_devices:
+            try:
+                payload = TokenService.validate_access_token(
+                    access_token,
+                    enforce_revocation=True,
+                )
+            except TokenInfrastructureError as exc:
+                raise AuthenticationError(
+                    "Authentication service is temporarily unavailable. Please try again.",
+                    code="AUTH_SERVICE_UNAVAILABLE",
+                ) from exc
+            except TokenError as exc:
+                raise AuthenticationError(
+                    "Invalid or expired token",
+                    code="INVALID_TOKEN",
+                ) from exc
+
+            user_id = str(payload["user_id"])
+            TokenService.revoke_all_user_tokens(user_id)
+            log_security_event("auth.logout_all_devices", user_id=user_id)
+            return True
+
         TokenService.blacklist_access_token(access_token)
 
         if refresh_token:

@@ -202,6 +202,17 @@ class TestLogoutEndpoint:
         assert response.status_code == 200
         assert response.json()["success"] is True
 
+    def test_logout_all_devices_is_additive(self, api_client: Client, authenticated_user):
+        response = api_client.post(
+            "/api/auth/logout",
+            data=json.dumps({"allDevices": True}),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {authenticated_user['access_token']}",
+        )
+
+        assert response.status_code == 200
+        assert response.json()["data"]["message"] == "Logged out from all devices successfully"
+
 
 class TestChangePasswordEndpoint:
     """Test POST /api/auth/change-password."""
@@ -223,7 +234,7 @@ class TestChangePasswordEndpoint:
         body = response.json()
         assert body["success"] is True
         assert body["data"]["message"] == "Password changed successfully."
-        assert body["data"]["signedOutDevices"] == 0
+        assert body["data"]["signedOutDevices"] >= 1
 
         login_response = api_client.post(
             "/api/auth/login",

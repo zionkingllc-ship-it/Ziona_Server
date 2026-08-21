@@ -465,7 +465,12 @@ def test_confirm_upload_marks_media_failed_when_uploaded_object_is_missing(
 
     media = MediaFile.objects.get(id=generated["media_id"])
     assert exc.value.code == "MEDIA_OBJECT_NOT_FOUND"
+    assert exc.value.details == {
+        "canonicalCode": "UPLOAD_OBJECT_NOT_FOUND",
+        "legacyCode": "MEDIA_OBJECT_NOT_FOUND",
+    }
     assert media.status == "failed"
+    assert media.processing_error_code == "MEDIA_OBJECT_NOT_FOUND"
     assert missing_blob.deleted is True
 
 

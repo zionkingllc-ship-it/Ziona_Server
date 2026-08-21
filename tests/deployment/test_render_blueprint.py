@@ -32,6 +32,12 @@ def test_render_blueprint_uses_cron_jobs_not_prod_beat(settings):
     assert "MEDIA_RESUMABLE_UPLOADS_ENABLED" in blueprint
     assert "MEDIA_RESUMABLE_VIDEO_MAX_UPLOAD_MB" in blueprint
     assert 'value: "500"' in blueprint
+    staging_api = blueprint.split("name: ziona-api-staging", 1)[1].split(
+        "name: ziona-worker-staging", 1
+    )[0]
+    assert 'key: MEDIA_VIDEO_MAX_UPLOAD_MB\n        value: "100"' in staging_api
+    assert 'key: MEDIA_RESUMABLE_VIDEO_MAX_UPLOAD_MB\n        value: "100"' in staging_api
+    assert 'key: AUTH_REVOKE_ON_REFRESH_TOKEN_REUSE\n        value: "true"' in staging_api
 
 
 def test_render_cron_task_allowlist_covers_expected_schedules():

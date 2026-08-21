@@ -122,6 +122,8 @@ def test_admin_announcement_template_renders(settings):
     assert "Faith, Work &amp; Purpose" in html
     assert "announcement-hero.png" not in html
     assert "Open Ziona" in html
+    assert "Email Template Preview" not in html
+    assert "dashboard-only authentication" not in html
     _assert_card_width(html, 600)
     _assert_shipped_email_html(html)
 

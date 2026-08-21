@@ -103,8 +103,8 @@ class TestChangePassword:
 
     @patch("core.authentication.password_service.TokenService")
     def test_sign_out_other_devices(self, mock_token_service, email_user):
-        """Signing out other devices calls revoke_all_user_tokens_except."""
-        mock_token_service.revoke_all_user_tokens_except.return_value = 3
+        """Password changes revoke every pre-change session."""
+        mock_token_service.revoke_all_user_tokens.return_value = 3
 
         result = PasswordService.change_password(
             user_id=str(email_user.id),
@@ -114,22 +114,20 @@ class TestChangePassword:
             current_jti="keep-this-jti",
         )
         assert result["signed_out_devices"] == 3
-        mock_token_service.revoke_all_user_tokens_except.assert_called_once_with(
-            user_id=str(email_user.id),
-            keep_jti="keep-this-jti",
-        )
+        mock_token_service.revoke_all_user_tokens.assert_called_once_with(str(email_user.id))
 
     @patch("core.authentication.password_service.TokenService")
-    def test_signout_false_keeps_sessions(self, mock_token_service, email_user):
-        """Without sign_out_other_devices, no tokens are revoked."""
+    def test_signout_false_still_revokes_sessions(self, mock_token_service, email_user):
+        """The compatibility flag cannot weaken password-change security."""
+        mock_token_service.revoke_all_user_tokens.return_value = 2
         result = PasswordService.change_password(
             user_id=str(email_user.id),
             current_password="OldPass123!",
             new_password="NewPass456!",
             sign_out_other_devices=False,
         )
-        assert result["signed_out_devices"] == 0
-        mock_token_service.revoke_all_user_tokens_except.assert_not_called()
+        assert result["signed_out_devices"] == 2
+        mock_token_service.revoke_all_user_tokens.assert_called_once_with(str(email_user.id))
 
     @patch("core.authentication.password_service.log_security_event")
     def test_password_change_logs_event(self, mock_log, email_user):
@@ -140,7 +138,7 @@ class TestChangePassword:
             new_password="NewPass456!",
         )
         mock_log.assert_called_once()
-        assert mock_log.call_args[0][0] == "auth.password_changed"
+        assert mock_log.call_args[0][0] == "auth.password_changed_sessions_revoked"
 
 
 class TestOAuthToPasswordFlow:

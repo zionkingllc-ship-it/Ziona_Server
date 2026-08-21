@@ -15,6 +15,7 @@ from django.utils import timezone
 from google.api_core import exceptions as gcs_exceptions
 from PIL import UnidentifiedImageError
 
+from core.media.error_codes import UPLOAD_URL_EXPIRED
 from core.media.models import MediaFile, MediaStatus, MediaType
 from core.shared.utils import normalize_url
 
@@ -364,11 +365,14 @@ def cleanup_stale_media_uploads(self) -> int:
                         "stale_media_blob_delete_failed",
                         extra={"media_id": str(media_file.id), "error": str(exc)},
                     )
-            _mark_media_failed(
-                media_file,
-                stage="stale_cleanup",
-                exc=subprocess.TimeoutExpired("media processing", stale_minutes * 60),
-            )
+            if media_file.status == MediaStatus.PENDING:
+                _mark_stale_upload_expired(media_file)
+            else:
+                _mark_media_failed(
+                    media_file,
+                    stage="stale_cleanup",
+                    exc=subprocess.TimeoutExpired("media processing", stale_minutes * 60),
+                )
     except Exception as exc:  # noqa: BLE001
         logger.error("stale_media_cleanup_failed", exc_info=True)
         raise self.retry(exc=exc) from exc
@@ -581,4 +585,34 @@ def _mark_media_failed(media_file: MediaFile, *, stage: str, exc: Exception) -> 
             "error": str(exc),
         },
         exc_info=True,
+    )
+
+
+def _mark_stale_upload_expired(media_file: MediaFile) -> None:
+    """Expose an abandoned pending upload as an expired client upload URL."""
+    media_file.status = MediaStatus.FAILED
+    media_file.processing_error_code = UPLOAD_URL_EXPIRED
+    media_file.processing_error_message = (
+        "The upload session expired before the file was confirmed. Please start the upload again."
+    )
+    media_file.processing_failed_stage = "upload_wait"
+    media_file.save(
+        update_fields=[
+            "status",
+            "processing_error_code",
+            "processing_error_message",
+            "processing_failed_stage",
+            "updated_at",
+        ]
+    )
+    logger.warning(
+        "stale_upload_expired",
+        extra={
+            "media_id": str(media_file.id),
+            "user_id": str(media_file.user_id),
+            "stage": "upload_wait",
+            "code": UPLOAD_URL_EXPIRED,
+            "file_size": media_file.file_size,
+            "content_type": media_file.file_type,
+        },
     )

@@ -64,11 +64,13 @@ class TokenService:
             Encoded JWT access token string.
         """
         now = datetime.now(timezone.utc)
+        issued_at_us = TokenService._issued_at_us_after_user_cutoff(user_id, now)
         payload = {
             "user_id": str(user_id),
             "role": role,
             "type": "access",
             "iat": now,
+            "iat_us": issued_at_us,
             "exp": now + settings.JWT_ACCESS_TOKEN_LIFETIME,
             "jti": str(uuid.uuid4()),
         }
@@ -143,11 +145,13 @@ class TokenService:
             Tuple of (encoded refresh token, jti).
         """
         now = datetime.now(timezone.utc)
+        issued_at_us = TokenService._issued_at_us_after_user_cutoff(user_id, now)
         jti = str(uuid.uuid4())
         payload = {
             "user_id": str(user_id),
             "type": "refresh",
             "iat": now,
+            "iat_us": issued_at_us,
             "exp": now + settings.JWT_REFRESH_TOKEN_LIFETIME,
             "jti": jti,
         }
@@ -274,6 +278,14 @@ class TokenService:
                 raise_message="Unable to validate your session right now. Please try again.",
             )
 
+        from core.users.models import User
+
+        try:
+            user = User.all_objects.only("id", "token_invalid_before").get(id=payload["user_id"])
+        except User.DoesNotExist:
+            raise TokenError("User not found") from None
+        TokenService.enforce_user_token_cutoff(payload, user)
+
         return payload
 
     @staticmethod
@@ -393,11 +405,15 @@ class TokenService:
         }
 
     @staticmethod
-    def revoke_all_user_tokens(user_id: str) -> None:
+    def revoke_all_user_tokens(user_id: str) -> int:
         """Revoke all refresh tokens for a user (e.g., on password change).
 
         Args:
             user_id: UUID of the user whose tokens to revoke.
+
+        Returns:
+            Number of refresh-token records removed. Access tokens issued before
+            this call are invalidated through the user's database-backed cutoff.
         """
         invalid_before = datetime.now(timezone.utc)
         TokenService.invalidate_user_access_tokens(user_id, invalid_before=invalid_before)
@@ -414,8 +430,10 @@ class TokenService:
                 "All tokens revoked",
                 extra={"user_id": str(user_id), "count": len(keys)},
             )
+            return len(keys)
         except Exception as e:
             logger.warning(f"Failed to revoke all tokens for user {user_id}: {e}")
+            return 0
 
     @staticmethod
     def invalidate_user_access_tokens(
@@ -537,21 +555,67 @@ class TokenService:
         except User.DoesNotExist:
             raise TokenError("User not found") from None
 
+        TokenService.enforce_user_token_cutoff(payload, user)
+
+    @staticmethod
+    def enforce_user_token_cutoff(payload: dict, user) -> None:
+        """Reject a token issued on or before the user's revocation cutoff.
+
+        Callers that already loaded the user can use this method without an
+        additional database or Redis lookup. It applies equally to access and
+        refresh JWTs because both carry an ``iat`` timestamp.
+        """
         invalid_before = getattr(user, "token_invalid_before", None)
         if invalid_before is None:
             return
 
         token_iat = payload.get("iat")
+        token_iat_us = payload.get("iat_us")
         if token_iat is None:
             raise TokenError("Invalid token payload")
 
-        if isinstance(token_iat, datetime):
-            token_issued_at = token_iat
-        else:
-            token_issued_at = datetime.fromtimestamp(token_iat, tz=timezone.utc)
+        try:
+            if token_iat_us is not None:
+                if int(token_iat_us) <= int(invalid_before.timestamp() * 1_000_000):
+                    raise TokenError("Token has been invalidated")
+                return
+            if isinstance(token_iat, datetime):
+                token_issued_at = token_iat
+            else:
+                token_issued_at = datetime.fromtimestamp(token_iat, tz=timezone.utc)
+                # Legacy JWTs only have second-resolution ``iat``. Avoid
+                # rejecting a fresh login issued later in the cutoff second.
+                token_issued_at += timedelta(seconds=1)
+        except TokenError:
+            raise
+        except (TypeError, ValueError, OSError, OverflowError):
+            raise TokenError("Invalid token payload") from None
 
         if token_issued_at <= invalid_before:
-            raise TokenError("Access token has been invalidated")
+            raise TokenError("Token has been invalidated")
+
+    @staticmethod
+    def _issued_at_us_after_user_cutoff(user_id: str, now: datetime) -> int:
+        """Produce a precise issuance marker newer than the user's cutoff.
+
+        Windows and some virtualized clocks can return the same timestamp for
+        consecutive calls. Moving only this private claim one microsecond past
+        the cutoff prevents a fresh login from inheriting the revoked epoch.
+        """
+        from core.users.models import User
+
+        issued_at_us = int(now.timestamp() * 1_000_000)
+        invalid_before = (
+            User.all_objects.filter(id=user_id)
+            .values_list("token_invalid_before", flat=True)
+            .first()
+        )
+        if invalid_before is None:
+            return issued_at_us
+        return max(
+            issued_at_us,
+            int(invalid_before.timestamp() * 1_000_000) + 1,
+        )
 
 
 def _decode_rotation_value(value) -> dict | None:

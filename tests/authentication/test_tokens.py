@@ -148,6 +148,32 @@ class TestSensitiveAccessTokenValidation:
         with pytest.raises(TokenError, match="invalidated"):
             TokenService.validate_access_token(token, enforce_revocation=True)
 
+    def test_refresh_validation_rejects_token_issued_before_cutoff(self, create_user):
+        user = create_user()
+        refresh_token, _ = TokenService.generate_refresh_token(str(user.id))
+
+        TokenService.invalidate_user_access_tokens(str(user.id))
+
+        with pytest.raises(TokenError, match="invalidated"):
+            TokenService.validate_refresh_token(refresh_token)
+
+    def test_new_token_issued_after_cutoff_is_valid_immediately(self, create_user):
+        user = create_user()
+        TokenService.invalidate_user_access_tokens(str(user.id))
+        access_token = TokenService.generate_access_token(str(user.id), user.role)
+        decoded = jwt.decode(
+            access_token,
+            settings.JWT_SECRET_KEY,
+            algorithms=[settings.JWT_ALGORITHM],
+        )
+        user.refresh_from_db()
+
+        assert decoded["iat_us"] > int(user.token_invalid_before.timestamp() * 1_000_000)
+
+        payload = TokenService.validate_access_token(access_token, enforce_revocation=True)
+
+        assert payload["user_id"] == str(user.id)
+
 
 class TestTokenBlacklist:
     """Test token blacklisting (logout)."""

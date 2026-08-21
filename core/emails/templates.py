@@ -400,7 +400,9 @@ def render_moderation_notice(
             "While suspended, you will not be able to interact with content, post, comment, "
             "or access your account."
         )
-        closing_note = "If you believe this action was taken in error or would like to appeal, please contact:"
+        closing_note = (
+            "If you believe this action was taken in error or would like to appeal, please contact:"
+        )
         reason_label = "Reason for suspension:"
         reason_variant = "warning"
         cta_label = ""

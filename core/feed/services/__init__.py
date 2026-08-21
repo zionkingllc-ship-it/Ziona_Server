@@ -244,7 +244,9 @@ class FeedService:
             return FeedResponseDTO(
                 posts=[],
                 has_more=False,
-                empty_state=EmptyStateDTO(message="No matching content found.", suggestions=suggestions),
+                empty_state=EmptyStateDTO(
+                    message="No matching content found.", suggestions=suggestions
+                ),
             )
 
         qs = FeedService._ranked_queryset().filter(

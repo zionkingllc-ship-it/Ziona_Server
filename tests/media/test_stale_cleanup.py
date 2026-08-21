@@ -120,7 +120,8 @@ def test_unreferenced_stale_is_deleted_and_failed(create_user, fake_bucket):
     media.refresh_from_db()
     assert media.storage_path in fake_bucket  # blob deleted
     assert media.status == "failed"
-    assert media.processing_failed_stage == "stale_cleanup"
+    assert media.processing_error_code == "UPLOAD_URL_EXPIRED"
+    assert media.processing_failed_stage == "upload_wait"
 
 
 @pytest.mark.django_db

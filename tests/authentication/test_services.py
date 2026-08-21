@@ -3,6 +3,7 @@ from unittest.mock import patch
 import pytest
 
 from core.authentication.services import AuthenticationError, AuthService
+from core.authentication.tokens import TokenError, TokenService
 
 
 class TestRegistration:
@@ -199,6 +200,16 @@ class TestLogout:
             user_id=str(authenticated_user["user"].id),
         )
         assert result is True
+
+    def test_logout_all_devices_invalidates_refresh_token(self, authenticated_user):
+        result = AuthService.logout(
+            access_token=authenticated_user["access_token"],
+            all_devices=True,
+        )
+
+        assert result is True
+        with pytest.raises(TokenError, match="revoked|invalidated"):
+            TokenService.validate_refresh_token(authenticated_user["refresh_token"])
 
 
 class TestPasswordValidation:

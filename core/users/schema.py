@@ -207,6 +207,7 @@ def _get_authenticated_user_id(info: strawberry.types.Info) -> str | None:
         user_id = payload["user_id"]
         user = User.all_objects.get(id=user_id)
         ensure_account_can_authenticate(user)
+        TokenService.enforce_user_token_cutoff(payload, user)
         return user_id
     except Exception:
         logger.debug("Token validation failed in GraphQL", exc_info=True)

@@ -104,12 +104,14 @@ services:
         value: "3600"
       - key: MEDIA_STALE_UPLOAD_MINUTES
         value: "15"
+      # Keep staging capped until a dedicated Standard media worker is provisioned.
+      # The resumable endpoint remains available for mobile integration testing.
       - key: MEDIA_VIDEO_MAX_UPLOAD_MB
-        value: "500"
+        value: "100"
       - key: MEDIA_RESUMABLE_UPLOADS_ENABLED
         value: "true"
       - key: MEDIA_RESUMABLE_VIDEO_MAX_UPLOAD_MB
-        value: "500"
+        value: "100"
       - key: MEDIA_RESUMABLE_UPLOAD_RECOMMENDED_CHUNK_MB
         value: "8"
       - key: MEDIA_RESUMABLE_UPLOAD_SESSION_TIMEOUT_SECONDS
@@ -131,7 +133,7 @@ services:
       - key: AUTH_REFRESH_TOKEN_INACTIVITY_DAYS
         value: "30"
       - key: AUTH_REVOKE_ON_REFRESH_TOKEN_REUSE
-        value: "false"
+        value: "true"
       - key: GCP_CREDENTIALS_FILE
         value: /etc/secrets/gcp-credentials.json
       - key: FIREBASE_CREDENTIALS_FILE

@@ -81,14 +81,14 @@ class PasswordMutations:
         """
         Change password for an authenticated user.
 
-        Validates the current password and sets a new one. Optionally allows the user
-        to forcibly sign out of all other active sessions across different devices.
+        Validates the current password, sets a new one, and invalidates all sessions.
+        The signOutOtherDevices argument remains accepted for client compatibility.
 
         **Authentication:** Required
         **Parameters:**
         - current_password (String, required) - The user's current password
         - new_password (String, required) - The new password
-        - sign_out_other_devices (Boolean, optional, default: false) - Invalidate other sessions
+        - sign_out_other_devices (Boolean, optional) - Deprecated compatibility flag
         **Returns:** ChangePasswordPayload with success status and count of devices signed out
         **Example:**
         ```graphql

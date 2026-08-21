@@ -46,6 +46,22 @@ REQUIRED_ENV_NAMES = {
 }
 
 
+def _service_block(text: str, service: str) -> str:
+    match = re.search(
+        rf"(?ms)^  - type: [^\n]+\n    name: {re.escape(service)}\n.*?(?=^  - type: |\Z)",
+        text,
+    )
+    return match.group(0) if match else ""
+
+
+def _env_int(service_block: str, name: str) -> int | None:
+    match = re.search(
+        rf'(?m)^      - key: {re.escape(name)}\n        value: "?(\d+)"?$',
+        service_block,
+    )
+    return int(match.group(1)) if match else None
+
+
 class Command(BaseCommand):
     """Validate the fields we rely on before deploy."""
 
@@ -90,5 +106,25 @@ class Command(BaseCommand):
             for command in ("setup_test_admin", "seed_circle_sample_data", "import_bible")
         ):
             raise CommandError("render.yaml still contains staging/test seed commands")
+
+        if not _service_block(text, "ziona-media-worker-staging"):
+            staging_api = _service_block(text, "ziona-api-staging")
+            staging_limits = {
+                name: _env_int(staging_api, name)
+                for name in (
+                    "MEDIA_VIDEO_MAX_UPLOAD_MB",
+                    "MEDIA_RESUMABLE_VIDEO_MAX_UPLOAD_MB",
+                )
+            }
+            unsafe_limits = {
+                name: value
+                for name, value in staging_limits.items()
+                if value is None or value > 100
+            }
+            if unsafe_limits:
+                raise CommandError(
+                    "staging video uploads above 100 MB require a dedicated media worker: "
+                    + ", ".join(f"{name}={value}" for name, value in unsafe_limits.items())
+                )
 
         self.stdout.write(self.style.SUCCESS("render.yaml production blueprint checks passed"))

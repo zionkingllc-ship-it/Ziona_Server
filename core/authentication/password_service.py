@@ -301,14 +301,16 @@ class PasswordService:
     ) -> dict[str, Any]:
         """Change password for an authenticated user.
 
-        Optionally sign out all other devices by revoking their tokens.
+        Revoke all sessions after changing the password. The legacy
+        ``sign_out_other_devices`` argument remains accepted for API compatibility.
 
         Args:
             user_id: UUID of the authenticated user.
             current_password: Current password for verification.
             new_password: New password (8-20 chars, complexity enforced).
-            sign_out_other_devices: If True, invalidate all other sessions.
-            current_jti: JTI of the current refresh token to keep alive.
+            sign_out_other_devices: Deprecated compatibility flag. Password
+                changes always invalidate all existing sessions.
+            current_jti: Deprecated compatibility value; no session is retained.
             ip_address: Client IP for audit logging.
 
         Returns:
@@ -336,22 +338,18 @@ class PasswordService:
         user.set_password(new_password)
         user.save(update_fields=["password", "updated_at"])
 
-        signed_out_devices = 0
-
-        if sign_out_other_devices and current_jti:
-            signed_out_devices = TokenService.revoke_all_user_tokens_except(
-                user_id=str(user.id),
-                keep_jti=current_jti,
-            )
-            event_name = "auth.password_changed_with_device_signout"
-        else:
-            event_name = "auth.password_changed"
+        signed_out_devices = TokenService.revoke_all_user_tokens(str(user.id))
+        event_name = "auth.password_changed_sessions_revoked"
 
         log_security_event(
             event_name,
             user_id=str(user.id),
             ip_address=ip_address,
-            metadata={"signed_out_devices": signed_out_devices},
+            metadata={
+                "signed_out_devices": signed_out_devices,
+                "sign_out_other_devices_requested": sign_out_other_devices,
+                "current_session_was_present": bool(current_jti),
+            },
         )
 
         return {

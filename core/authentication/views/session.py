@@ -225,7 +225,7 @@ class LogoutView(BaseAuthView):
 
     POST /api/auth/logout
     Headers: Authorization: Bearer <access_token>
-    Body: { refresh_token? }
+    Body: { refresh_token?, allDevices? }
     """
 
     def post(self, request: HttpRequest) -> JsonResponse:
@@ -236,6 +236,7 @@ class LogoutView(BaseAuthView):
 
         data = _parse_json_body(request)
         refresh_token = data.get("refresh_token")
+        all_devices = bool(data.get("allDevices") or data.get("all_devices"))
 
         if not access_token:
             return error_response(
@@ -244,10 +245,17 @@ class LogoutView(BaseAuthView):
                 status=401,
             )
 
-        AuthService.logout(
-            access_token=access_token,
-            refresh_token=refresh_token,
-        )
+        try:
+            AuthService.logout(
+                access_token=access_token,
+                refresh_token=refresh_token,
+                all_devices=all_devices,
+            )
+        except AuthenticationError as e:
+            return _auth_error_response(e)
 
-        logger.info("User logged out")
-        return success_response(data={"message": "Logged out successfully"})
+        logger.info("User logged out", extra={"all_devices": all_devices})
+        message = (
+            "Logged out from all devices successfully" if all_devices else "Logged out successfully"
+        )
+        return success_response(data={"message": message})

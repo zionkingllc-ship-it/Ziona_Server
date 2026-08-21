@@ -85,4 +85,6 @@ class Command(BaseCommand):
         for filename, html in previews.items():
             (output_dir / filename).write_text(html, encoding="utf-8")
 
-        self.stdout.write(self.style.SUCCESS(f"Rendered {len(previews)} email previews to {output_dir}"))
+        self.stdout.write(
+            self.style.SUCCESS(f"Rendered {len(previews)} email previews to {output_dir}")
+        )

@@ -64,6 +64,8 @@ class IsAuthenticated(BasePermission):
                     )
                     return False
 
+                TokenService.enforce_user_token_cutoff(payload, user)
+
                 info.context.user = user
                 info.context.user_id = str(user.id)
                 info.context.user_role = payload.get("role", "user")
