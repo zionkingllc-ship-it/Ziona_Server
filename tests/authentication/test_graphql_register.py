@@ -620,3 +620,81 @@ def test_graphql_change_password_uses_auth_service_flow():
 
     user.refresh_from_db()
     assert user.check_password("NewSecureP@ss2") is True
+
+
+@pytest.mark.django_db
+@patch("core.shared.tasks.email_tasks.queue_email_delivery")
+def test_graphql_request_password_change_otp_requires_auth(mock_email):
+    client = Client()
+
+    response = client.post(
+        "/graphql/",
+        data=json.dumps(
+            {
+                "query": """
+                    mutation {
+                      requestPasswordChangeOtp {
+                        success
+                        message
+                        errorCode
+                      }
+                    }
+                """,
+            }
+        ),
+        content_type="application/json",
+    )
+
+    payload = response.json()
+
+    assert "errors" not in payload
+    result = payload["data"]["requestPasswordChangeOtp"]
+    assert result["success"] is False
+    assert result["errorCode"] == "UNAUTHENTICATED"
+    mock_email.assert_not_called()
+
+
+@pytest.mark.django_db
+@patch("core.shared.tasks.email_tasks.queue_email_delivery")
+def test_graphql_request_password_change_otp_sends_code(mock_email):
+    user = User.objects.create_user(
+        email="graphql-change-otp@example.com",
+        username="graphqlchangeotp",
+        password="OldSecureP@ss1",  # pragma: allowlist secret
+        is_email_verified=True,
+    )
+    access_token = TokenService.generate_access_token(str(user.id), user.role)
+    client = Client()
+
+    response = client.post(
+        "/graphql/",
+        data=json.dumps(
+            {
+                "query": """
+                    mutation {
+                      requestPasswordChangeOtp {
+                        success
+                        message
+                        expiresIn
+                        resendAfter
+                        purpose
+                        errorCode
+                      }
+                    }
+                """,
+            }
+        ),
+        content_type="application/json",
+        HTTP_AUTHORIZATION=f"Bearer {access_token}",
+    )
+
+    payload = response.json()
+
+    assert "errors" not in payload
+    result = payload["data"]["requestPasswordChangeOtp"]
+    assert result["success"] is True
+    assert result["purpose"] == "password_change"
+    assert result["expiresIn"] == 600
+    assert result["resendAfter"] == 30
+    assert result["errorCode"] is None
+    mock_email.assert_called_once()

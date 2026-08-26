@@ -83,6 +83,20 @@ class TestChangePassword:
         email_user.refresh_from_db()
         assert email_user.check_password("NewPass456!") is True
 
+    def test_optional_otp_is_ignored_when_flag_disabled(self, settings, email_user):
+        settings.AUTH_CHANGE_PASSWORD_REQUIRES_OTP = False
+
+        result = PasswordService.change_password(
+            user_id=str(email_user.id),
+            current_password="OldPass123!",
+            new_password="NewPass456!",
+            otp_code="000000",
+        )
+
+        assert result["message"] == "Password changed successfully."
+        email_user.refresh_from_db()
+        assert email_user.check_password("NewPass456!") is True
+
     def test_wrong_current_password_fails(self, email_user):
         with pytest.raises(AuthenticationError) as exc_info:
             PasswordService.change_password(
@@ -139,6 +153,107 @@ class TestChangePassword:
         )
         mock_log.assert_called_once()
         assert mock_log.call_args[0][0] == "auth.password_changed_sessions_revoked"
+
+    @patch("core.shared.tasks.email_tasks.queue_email_delivery")
+    def test_request_password_change_otp_sends_authenticated_code(self, mock_queue, email_user):
+        result = PasswordService.request_password_change_otp(str(email_user.id))
+
+        assert result["purpose"] == "password_change"
+        assert result["expires_in"] == 600
+        assert result["resend_after"] == 30
+        mock_queue.assert_called_once()
+        assert mock_queue.call_args.kwargs["email_kind"] == "otp_password_change"
+
+    def test_password_change_requires_otp_when_flag_enabled(self, settings, email_user):
+        settings.AUTH_CHANGE_PASSWORD_REQUIRES_OTP = True
+
+        with pytest.raises(AuthenticationError) as exc_info:
+            PasswordService.change_password(
+                user_id=str(email_user.id),
+                current_password="OldPass123!",
+                new_password="NewPass456!",
+            )
+
+        assert exc_info.value.code == "OTP_REQUIRED"
+
+    @patch("core.shared.tasks.email_tasks.queue_email_delivery")
+    def test_password_change_consumes_valid_otp_when_flag_enabled(
+        self, mock_queue, settings, email_user
+    ):
+        from django_redis import get_redis_connection
+
+        settings.AUTH_CHANGE_PASSWORD_REQUIRES_OTP = True
+        PasswordService.request_password_change_otp(str(email_user.id))
+        redis_conn = get_redis_connection("default")
+        otp = redis_conn.get(f"otp:password_change:{email_user.id}").decode()
+
+        result = PasswordService.change_password(
+            user_id=str(email_user.id),
+            current_password="OldPass123!",
+            new_password="NewPass456!",
+            otp_code=otp,
+        )
+
+        assert result["message"] == "Password changed successfully."
+        assert redis_conn.get(f"otp:password_change:{email_user.id}") is None
+        email_user.refresh_from_db()
+        assert email_user.check_password("NewPass456!") is True
+
+    @patch("core.shared.tasks.email_tasks.queue_email_delivery")
+    def test_weak_password_does_not_consume_password_change_otp(
+        self, mock_queue, settings, email_user
+    ):
+        from django_redis import get_redis_connection
+
+        settings.AUTH_CHANGE_PASSWORD_REQUIRES_OTP = True
+        PasswordService.request_password_change_otp(str(email_user.id))
+        redis_conn = get_redis_connection("default")
+        redis_key = f"otp:password_change:{email_user.id}"
+        otp = redis_conn.get(redis_key).decode()
+
+        with pytest.raises(AuthenticationError) as exc_info:
+            PasswordService.change_password(
+                user_id=str(email_user.id),
+                current_password="OldPass123!",
+                new_password="weak",
+                otp_code=otp,
+            )
+
+        assert exc_info.value.code == "PASSWORD_LENGTH_INVALID"
+        assert redis_conn.get(redis_key).decode() == otp
+
+    @patch("core.shared.tasks.email_tasks.queue_email_delivery")
+    def test_wrong_current_password_fails_even_with_valid_otp(
+        self, mock_queue, settings, email_user
+    ):
+        from django_redis import get_redis_connection
+
+        settings.AUTH_CHANGE_PASSWORD_REQUIRES_OTP = True
+        PasswordService.request_password_change_otp(str(email_user.id))
+        otp = get_redis_connection("default").get(f"otp:password_change:{email_user.id}").decode()
+
+        with pytest.raises(AuthenticationError) as exc_info:
+            PasswordService.change_password(
+                user_id=str(email_user.id),
+                current_password="WrongPass!",
+                new_password="NewPass456!",
+                otp_code=otp,
+            )
+
+        assert exc_info.value.code == "CURRENT_PASSWORD_INCORRECT"
+
+    def test_password_change_rejects_invalid_otp_when_flag_enabled(self, settings, email_user):
+        settings.AUTH_CHANGE_PASSWORD_REQUIRES_OTP = True
+
+        with pytest.raises(AuthenticationError) as exc_info:
+            PasswordService.change_password(
+                user_id=str(email_user.id),
+                current_password="OldPass123!",
+                new_password="NewPass456!",
+                otp_code="000000",
+            )
+
+        assert exc_info.value.code == "OTP_EXPIRED"
 
 
 class TestOAuthToPasswordFlow:

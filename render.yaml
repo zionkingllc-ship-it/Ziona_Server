@@ -134,6 +134,8 @@ services:
         value: "30"
       - key: AUTH_REVOKE_ON_REFRESH_TOKEN_REUSE
         value: "true"
+      - key: AUTH_CHANGE_PASSWORD_REQUIRES_OTP
+        value: "false"
       - key: GCP_CREDENTIALS_FILE
         value: /etc/secrets/gcp-credentials.json
       - key: FIREBASE_CREDENTIALS_FILE
@@ -218,6 +220,8 @@ services:
       - key: AUTH_REFRESH_TOKEN_INACTIVITY_DAYS
         value: "30"
       - key: AUTH_REVOKE_ON_REFRESH_TOKEN_REUSE
+        value: "false"
+      - key: AUTH_CHANGE_PASSWORD_REQUIRES_OTP
         value: "false"
       - key: GCP_CREDENTIALS_FILE
         value: /etc/secrets/gcp-credentials.json

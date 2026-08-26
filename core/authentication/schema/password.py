@@ -77,6 +77,7 @@ class PasswordMutations:
         current_password: str,
         new_password: str,
         sign_out_other_devices: bool = False,
+        otp_code: str | None = None,
     ) -> ChangePasswordPayload:
         """
         Change password for an authenticated user.
@@ -149,6 +150,7 @@ class PasswordMutations:
                 sign_out_other_devices=sign_out_other_devices,
                 current_jti=current_jti,
                 ip_address=get_client_ip(request),
+                otp_code=otp_code,
             )
             return ChangePasswordPayload(
                 success=True,
@@ -157,6 +159,46 @@ class PasswordMutations:
             )
         except AuthenticationError as e:
             return ChangePasswordPayload(
+                success=False,
+                message=e.message,
+                error_code=e.code,
+            )
+
+    @strawberry.mutation(
+        description="Request a one-time code for the authenticated change-password flow."
+    )
+    def request_password_change_otp(
+        self,
+        info: strawberry.types.Info,
+    ) -> OTPPayload:
+        """Send a password-change OTP to the authenticated user's verified email."""
+        from core.authentication.services import AuthService
+        from core.authentication.validators import AuthenticationError
+        from core.users.schema import _get_authenticated_user_id
+
+        user_id = _get_authenticated_user_id(info)
+        if not user_id:
+            return OTPPayload(
+                success=False,
+                message="Authentication required",
+                error_code="UNAUTHENTICATED",
+            )
+
+        request = info.context.request
+        try:
+            result = AuthService.request_password_change_otp(
+                user_id=user_id,
+                ip_address=get_client_ip(request),
+            )
+            return OTPPayload(
+                success=True,
+                message=result["message"],
+                expires_in=result["expires_in"],
+                resend_after=result["resend_after"],
+                purpose=result["purpose"],
+            )
+        except AuthenticationError as e:
+            return OTPPayload(
                 success=False,
                 message=e.message,
                 error_code=e.code,

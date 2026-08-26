@@ -493,6 +493,7 @@ class AuthService:
         sign_out_other_devices: bool = False,
         current_jti: str | None = None,
         ip_address: str | None = None,
+        otp_code: str | None = None,
     ) -> dict[str, Any]:
         """Change a user's password through the shared authentication service."""
         from core.authentication.password_service import PasswordService
@@ -504,7 +505,15 @@ class AuthService:
             sign_out_other_devices=sign_out_other_devices,
             current_jti=current_jti,
             ip_address=ip_address,
+            otp_code=otp_code,
         )
+
+    @staticmethod
+    def request_password_change_otp(user_id: str, ip_address: str | None = None) -> dict[str, Any]:
+        """Send an OTP for authenticated password changes."""
+        from core.authentication.password_service import PasswordService
+
+        return PasswordService.request_password_change_otp(user_id=user_id, ip_address=ip_address)
 
     send_verification_otp = staticmethod(OTPService.send_verification_otp)
     verify_email_otp = staticmethod(OTPService.verify_email_otp)

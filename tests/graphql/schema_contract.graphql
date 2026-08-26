@@ -1447,7 +1447,7 @@ type Mutation {
   """
   Change password for authenticated user. Requires current password. Can optionally sign out all other devices.
   """
-  changePassword(currentPassword: String!, newPassword: String!, signOutOtherDevices: Boolean! = false): ChangePasswordPayload!
+  changePassword(currentPassword: String!, newPassword: String!, otpCode: String = null, signOutOtherDevices: Boolean! = false): ChangePasswordPayload!
 
   """Check if a username is available"""
   checkUsernameAvailability(username: String!): UsernameCheckResult!
@@ -1602,6 +1602,9 @@ type Mutation {
 
   """File a Community Guidelines violation against an active node."""
   reportContent(commentId: String = null, description: String = null, postId: String = null, reason: String!): ReportPayload!
+
+  """Request a one-time code for the authenticated change-password flow."""
+  requestPasswordChangeOtp: OTPPayload!
 
   """
   Resend the verification OTP for an unverified password account. Returns timing metadata for resend countdown UI.

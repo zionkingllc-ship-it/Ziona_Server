@@ -27,6 +27,7 @@ logger = logging.getLogger("core.authentication")
 class OTPService:
     """Service handling all OTP operations."""
 
+    PASSWORD_CHANGE_PURPOSE = "password_change"  # pragma: allowlist secret
     ACCOUNT_ACTION_PURPOSES = ("account_deactivation", "account_deletion")
     VALID_OTP_PURPOSES = (
         "registration",
@@ -159,6 +160,79 @@ class OTPService:
             "purpose": purpose,
             "resend_after": resend_after,
         }
+
+    @staticmethod
+    def send_password_change_otp(user: User, ip_address: str | None = None) -> dict[str, Any]:
+        """Send an authenticated password-change OTP to the account email."""
+        ensure_account_can_authenticate(user)
+        if not user.email:
+            raise AuthenticationError(
+                "No email address is available for this account.",
+                code="EMAIL_REQUIRED",
+            )
+        if not user.is_email_verified:
+            raise AuthenticationError(
+                "Please verify your email before changing your password.",
+                code="EMAIL_NOT_VERIFIED",
+            )
+
+        email = user.email.lower().strip()
+        purpose = OTPService.PASSWORD_CHANGE_PURPOSE
+        resend_after = OTPService._prepare_progressive_resend(email=email, purpose=purpose)
+        OTPService._send_otp(email, str(user.id), purpose=purpose)
+
+        log_security_event(
+            "auth.otp.send.password_change",
+            user_id=str(user.id),
+            ip_address=ip_address,
+            metadata={"email": mask_email(email), "purpose": purpose},
+        )
+
+        return {
+            "message": "Verification code sent to your email.",
+            "expires_in": 600,
+            "purpose": purpose,
+            "resend_after": resend_after,
+        }
+
+    @staticmethod
+    def verify_password_change_otp(user: User, code: str) -> bool:
+        """Verify and consume a password-change OTP for an authenticated user."""
+        email = user.email.lower().strip()
+        purpose = OTPService.PASSWORD_CHANGE_PURPOSE
+        OTPService._check_otp_attempts(email, purpose=purpose, max_attempts=5)
+
+        try:
+            from django_redis import get_redis_connection
+
+            redis_conn = get_redis_connection("default")
+            redis_key = f"otp:{purpose}:{user.id}"
+            stored_otp = redis_conn.get(redis_key)
+
+            if stored_otp is None:
+                raise AuthenticationError(
+                    "Verification code has expired. Please request a new one.",
+                    code="OTP_EXPIRED",
+                )
+
+            if stored_otp.decode() != code.strip():
+                OTPService._increment_otp_attempts(email, purpose=purpose)
+                raise AuthenticationError(
+                    "Invalid verification code.",
+                    code="INVALID_OTP",
+                )
+
+            redis_conn.delete(redis_key)
+            return True
+
+        except AuthenticationError:
+            raise
+        except Exception as e:
+            logger.error("Password-change OTP validation failed: %s", e, exc_info=True)
+            raise AuthenticationError(
+                "Failed to validate verification code. Please try again.",
+                code="OTP_VALIDATION_FAILED",
+            ) from e
 
     @staticmethod
     def unified_verify_otp(
@@ -327,6 +401,60 @@ class OTPService:
             }
 
         raise AuthenticationError("Unexpected purpose.", code="INVALID_PURPOSE")
+
+    @staticmethod
+    def _prepare_progressive_resend(email: str, purpose: str) -> int:
+        """Apply the unified OTP progressive resend policy and return resendAfter."""
+        resend_after = 0
+        try:
+            from django_redis import get_redis_connection
+
+            redis_conn = get_redis_connection("default")
+            resend_key = f"otp:resend:{purpose}:{email}"
+            count_raw = redis_conn.get(resend_key)
+            send_count = int(count_raw) if count_raw else 0
+
+            if send_count >= OTPService.MAX_RESENDS_PER_PURPOSE:
+                raise AuthenticationError(
+                    "Too many requests. Please wait before requesting another code.",
+                    code="RATE_LIMIT_EXCEEDED",
+                    details={"retryAfter": 600},
+                )
+
+            if send_count > 0 and send_count <= len(OTPService.RESEND_DELAYS):
+                cooldown_key = f"otp:cooldown:{purpose}:{email}"
+                ttl = redis_conn.ttl(cooldown_key)
+                if ttl and ttl > 0:
+                    raise AuthenticationError(
+                        f"Please wait {ttl} seconds before resending.",
+                        code="RESEND_COOLDOWN",
+                        details={"resendAfter": ttl},
+                    )
+
+            next_delay = 0
+            next_index = send_count + 1
+            if next_index < len(OTPService.RESEND_DELAYS):
+                next_delay = OTPService.RESEND_DELAYS[next_index]
+            elif next_index == len(OTPService.RESEND_DELAYS):
+                next_delay = OTPService.RESEND_DELAYS[-1]
+
+            if next_delay > 0:
+                cooldown_key = f"otp:cooldown:{purpose}:{email}"
+                redis_conn.setex(cooldown_key, next_delay, "1")
+
+            resend_after = next_delay
+
+            pipe = redis_conn.pipeline()
+            pipe.incr(resend_key)
+            pipe.expire(resend_key, 600)
+            pipe.execute()
+            return resend_after
+
+        except AuthenticationError:
+            raise
+        except Exception as e:
+            _handle_otp_redis_failure("Failed to check resend limits", e)
+            return resend_after
 
     @staticmethod
     def verify_account_action_otp(

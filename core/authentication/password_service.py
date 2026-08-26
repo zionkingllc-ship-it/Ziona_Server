@@ -10,8 +10,11 @@ import secrets
 import string
 from typing import Any
 
+from django.conf import settings
+
 from core.authentication.account_status import ensure_account_can_authenticate
 from core.authentication.activity import record_successful_auth
+from core.authentication.otp_service import OTPService
 from core.authentication.tokens import TokenService
 from core.authentication.validators import AuthenticationError, validate_password
 from core.shared.logging import log_security_event, mask_email
@@ -298,6 +301,7 @@ class PasswordService:
         sign_out_other_devices: bool = False,
         current_jti: str | None = None,
         ip_address: str | None = None,
+        otp_code: str | None = None,
     ) -> dict[str, Any]:
         """Change password for an authenticated user.
 
@@ -312,6 +316,8 @@ class PasswordService:
                 changes always invalidate all existing sessions.
             current_jti: Deprecated compatibility value; no session is retained.
             ip_address: Client IP for audit logging.
+            otp_code: Optional OTP required when AUTH_CHANGE_PASSWORD_REQUIRES_OTP
+                is enabled.
 
         Returns:
             Dict with message and signed_out_devices count.
@@ -335,6 +341,16 @@ class PasswordService:
             )
 
         validate_password(new_password)
+
+        requires_otp = getattr(settings, "AUTH_CHANGE_PASSWORD_REQUIRES_OTP", False)
+        if requires_otp:
+            if not otp_code:
+                raise AuthenticationError(
+                    "Verification code is required to change your password.",
+                    code="OTP_REQUIRED",
+                )
+            OTPService.verify_password_change_otp(user, otp_code)
+
         user.set_password(new_password)
         user.save(update_fields=["password", "updated_at"])
 
@@ -356,3 +372,16 @@ class PasswordService:
             "message": "Password changed successfully.",
             "signed_out_devices": signed_out_devices,
         }
+
+    @staticmethod
+    def request_password_change_otp(user_id: str, ip_address: str | None = None) -> dict[str, Any]:
+        """Send an OTP for the authenticated change-password flow."""
+        try:
+            user = User.objects.get(id=user_id)
+        except User.DoesNotExist:
+            raise AuthenticationError(
+                "User not found.",
+                code="USER_NOT_FOUND",
+            ) from None
+
+        return OTPService.send_password_change_otp(user, ip_address=ip_address)
