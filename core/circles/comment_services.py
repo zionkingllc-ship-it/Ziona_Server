@@ -131,15 +131,39 @@ def create_circle_post_comment(
     try:
         from core.notifications.services import notify_mentions
 
-        notify_mentions(
+        mention_notifications = notify_mentions(
             text=text,
             actor=comment.user,
             reference_id=comment.id,
             reference_type="circle_post_comment",
             circle_id=str(post.circle_id),
         )
+        mentioned_user_ids = {str(notification.user_id) for notification in mention_notifications}
     except Exception:  # noqa: BLE001
         logger.warning("Failed to dispatch mention notifications for circle comment %s", comment.id)
+        mentioned_user_ids = set()
+
+    if post.user_id != comment.user_id and str(post.user_id) not in mentioned_user_ids:
+        try:
+            from core.notifications.models import NotificationType
+            from core.notifications.services import create_notification
+
+            create_notification(
+                user_id=post.user_id,
+                type_str=NotificationType.REPLY_POST,
+                reference_id=comment.id,
+                reference_type="circle_post_comment",
+                title="New Circle Comment",
+                message=f"{comment.user.username} commented on your circle post",
+                sender_id=comment.user_id,
+                push_data={"circleId": str(post.circle_id), "circlePostId": str(post.id)},
+            )
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "circle_post_comment_notification_failed",
+                extra={"comment_id": str(comment.id), "post_id": str(post.id)},
+                exc_info=True,
+            )
 
     return comment
 
@@ -217,6 +241,29 @@ def toggle_circle_post_comment_like(
         # Atomically increment likes_count.
         CirclePostComment.objects.filter(pk=comment.pk).update(likes_count=F("likes_count") + 1)
         comment.refresh_from_db(fields=["likes_count"])
+        if str(comment.user_id) != str(user_id):
+            try:
+                from django.contrib.auth import get_user_model
+
+                from core.notifications.models import NotificationType
+                from core.notifications.services import batch_like_notifications
+
+                actor = get_user_model().objects.only("id", "username", "full_name").get(id=user_id)
+                actor_username = actor.username or actor.full_name or "Someone"
+                batch_like_notifications(
+                    actor_username=actor_username,
+                    recipient_id=comment.user_id,
+                    reference_id=comment.id,
+                    reference_type="circle_post_comment",
+                    like_type=NotificationType.LIKE_COMMENT,
+                    actor_id=user_id,
+                )
+            except Exception:  # noqa: BLE001
+                logger.warning(
+                    "circle_post_comment_like_notification_failed",
+                    extra={"comment_id": str(comment.id), "actor_id": str(user_id)},
+                    exc_info=True,
+                )
         return True, comment.likes_count
 
     except IntegrityError:

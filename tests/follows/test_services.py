@@ -1,6 +1,9 @@
 """Tests for FollowService — follow, unfollow, suggestions."""
 
+from datetime import timedelta
+
 import pytest
+from django.utils import timezone
 
 from core.follows.services import FollowService
 from core.shared.exceptions import FollowError
@@ -29,6 +32,21 @@ class TestFollowUser:
         assert result.success is True
         assert result.following is True
 
+    def test_follow_creates_profile_notification(self, user_a, user_b):
+        from core.notifications.models import Notification, NotificationType
+
+        FollowService.follow_user(str(user_a.id), str(user_b.id))
+
+        notification = Notification.objects.get(
+            user=user_b,
+            sender=user_a,
+            notification_type=NotificationType.NEW_FOLLOWER,
+        )
+        assert notification.reference_type == "user"
+        assert notification.reference_id == user_a.id
+        assert notification.title == "New Follower"
+        assert notification.message == "user_a started following you"
+
     def test_self_follow_blocked(self, user_a):
         with pytest.raises(FollowError) as exc:
             FollowService.follow_user(str(user_a.id), str(user_a.id))
@@ -45,6 +63,61 @@ class TestFollowUser:
         result = FollowService.unfollow_user(str(user_a.id), str(user_b.id))
         assert result.success is True
         assert result.following is False
+
+    def test_refollow_within_24_hours_does_not_duplicate_notification(self, user_a, user_b):
+        from core.notifications.models import Notification, NotificationType
+
+        FollowService.follow_user(str(user_a.id), str(user_b.id))
+        FollowService.unfollow_user(str(user_a.id), str(user_b.id))
+        FollowService.follow_user(str(user_a.id), str(user_b.id))
+
+        assert (
+            Notification.objects.filter(
+                user=user_b,
+                sender=user_a,
+                notification_type=NotificationType.NEW_FOLLOWER,
+            ).count()
+            == 1
+        )
+
+    def test_refollow_after_24_hours_can_notify_again(self, user_a, user_b):
+        from core.notifications.models import Notification, NotificationType
+
+        FollowService.follow_user(str(user_a.id), str(user_b.id))
+        Notification.objects.filter(
+            user=user_b,
+            sender=user_a,
+            notification_type=NotificationType.NEW_FOLLOWER,
+        ).update(created_at=timezone.now() - timedelta(hours=25))
+
+        FollowService.unfollow_user(str(user_a.id), str(user_b.id))
+        FollowService.follow_user(str(user_a.id), str(user_b.id))
+
+        assert (
+            Notification.objects.filter(
+                user=user_b,
+                sender=user_a,
+                notification_type=NotificationType.NEW_FOLLOWER,
+            ).count()
+            == 2
+        )
+
+    def test_disabled_follow_preferences_suppress_notification(self, user_a, user_b):
+        from core.notifications.models import Notification, NotificationPreference, NotificationType
+
+        NotificationPreference.objects.create(
+            user=user_b,
+            in_app_new_followers=False,
+            interaction_new_follower=True,
+        )
+
+        FollowService.follow_user(str(user_a.id), str(user_b.id))
+
+        assert not Notification.objects.filter(
+            user=user_b,
+            sender=user_a,
+            notification_type=NotificationType.NEW_FOLLOWER,
+        ).exists()
 
 
 class TestGetFollowers:

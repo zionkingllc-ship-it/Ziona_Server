@@ -1,11 +1,14 @@
 import uuid
+from datetime import timedelta
 
 import pytest
 from django.contrib.auth import get_user_model
+from django.utils import timezone
 
 from core.notifications.models import (
     DeviceToken,
     Notification,
+    NotificationMutedUser,
     NotificationPreference,
     NotificationType,
 )
@@ -14,6 +17,7 @@ from core.notifications.services import (
     build_notification_destination,
     create_admin_announcement,
     create_notification,
+    get_notifications,
     get_unread_count,
     mark_as_read,
     register_device_token,
@@ -116,6 +120,207 @@ def test_get_unread_count(db, user):
     mark_as_read(n3.id, user.id)
 
     assert get_unread_count(user.id) == 2
+
+
+def test_muted_sender_is_excluded_from_list_unread_count_and_creation(db, user, other_user):
+    visible_sender = User.objects.create_user(
+        email="visible@example.com",
+        username="visible",
+        password="password123",
+    )
+    NotificationMutedUser.objects.create(user=user, muted_user=other_user)
+    Notification.objects.create(
+        user=user,
+        sender=other_user,
+        notification_type=NotificationType.LIKE_POST,
+        reference_id=uuid.uuid4(),
+        reference_type="post",
+        message="muted like",
+    )
+    visible_notification = Notification.objects.create(
+        user=user,
+        sender=visible_sender,
+        notification_type=NotificationType.LIKE_POST,
+        reference_id=uuid.uuid4(),
+        reference_type="post",
+        message="visible like",
+    )
+
+    assert list(get_notifications(user.id).values_list("id", flat=True)) == [
+        visible_notification.id
+    ]
+    assert get_unread_count(user.id) == 1
+
+    assert (
+        create_notification(
+            user_id=user.id,
+            sender_id=other_user.id,
+            type_str=NotificationType.MENTION,
+            reference_id=uuid.uuid4(),
+            reference_type="post",
+            message="muted mention",
+        )
+        is None
+    )
+    assert Notification.objects.filter(user=user).count() == 2
+
+
+def test_muted_sender_push_is_suppressed(db, user, other_user, monkeypatch):
+    DeviceToken.objects.create(user=user, token="fcm-token", platform="android")
+    NotificationMutedUser.objects.create(user=user, muted_user=other_user)
+    calls = []
+
+    monkeypatch.setattr(
+        "core.notifications.services.send_fcm_notification",
+        lambda tokens, title, body, data: calls.append(tokens) or {},
+    )
+
+    send_push_notification(
+        user_id=user.id,
+        title="Muted",
+        body="Muted body",
+        data={"type": NotificationType.LIKE_POST, "senderId": str(other_user.id)},
+    )
+
+    assert calls == []
+
+
+def test_notification_category_filtering(db, user, other_user):
+    interaction = Notification.objects.create(
+        user=user,
+        sender=other_user,
+        notification_type=NotificationType.LIKE_POST,
+        reference_id=uuid.uuid4(),
+        reference_type="post",
+        message="liked",
+    )
+    circle = Notification.objects.create(
+        user=user,
+        sender=other_user,
+        notification_type=NotificationType.NEW_CIRCLE_POST,
+        reference_id=uuid.uuid4(),
+        reference_type="circle_post",
+        message="circle",
+    )
+    update = Notification.objects.create(
+        user=user,
+        notification_type=NotificationType.ADMIN_ANNOUNCEMENT,
+        message="update",
+    )
+
+    assert [n.id for n in get_notifications(user.id, category="INTERACTIONS")] == [interaction.id]
+    assert [n.id for n in get_notifications(user.id, category="circles")] == [circle.id]
+    assert [n.id for n in get_notifications(user.id, category="updates")] == [update.id]
+    assert {n.id for n in get_notifications(user.id, category="all")} == {
+        update.id,
+        circle.id,
+        interaction.id,
+    }
+
+
+def test_notification_user_viewer_state_resolves_without_n_plus_one(
+    db, user, other_user, django_assert_num_queries
+):
+    from core.follows.models import Follow
+    from core.notifications.schema import NotificationItem
+
+    followed_by_sender = User.objects.create_user(
+        email="followed-by@example.com",
+        username="followedby",
+        password="password123",
+    )
+    Follow.objects.create(follower=user, following=other_user)
+    Follow.objects.create(follower=followed_by_sender, following=user)
+    Notification.objects.create(
+        user=user,
+        sender=other_user,
+        notification_type=NotificationType.LIKE_POST,
+        reference_id=uuid.uuid4(),
+        reference_type="post",
+        message="liked",
+    )
+    Notification.objects.create(
+        user=user,
+        sender=followed_by_sender,
+        notification_type=NotificationType.REPLY_POST,
+        reference_id=uuid.uuid4(),
+        reference_type="comment",
+        message="commented",
+    )
+
+    notifications = list(get_notifications(user.id))
+
+    with django_assert_num_queries(0):
+        states = {
+            NotificationItem.from_instance(notification).user().username: (
+                NotificationItem.from_instance(notification).user().viewer_state.is_following,
+                NotificationItem.from_instance(notification).user().viewer_state.is_followed_by,
+                NotificationItem.from_instance(notification).user().viewer_state.is_owner,
+            )
+            for notification in notifications
+        }
+
+    assert states["other"] == (True, False, False)
+    assert states["followedby"] == (False, True, False)
+
+
+def test_all_notification_types_produce_expected_destinations(db, user, other_user, settings):
+    from core.circles.models import Anchor, Circle, CirclePost
+    from core.engagement.models import Comment
+    from core.posts.models import Post
+
+    settings.APP_SHARE_BASE_URL = "https://share.ziona.test"
+    post = Post.objects.create(user=user, post_type="text", caption="Post")
+    comment = Comment.objects.create(post=post, user=other_user, text="Comment")
+    circle = Circle.objects.create(
+        name="Destination Circle",
+        description="Destination",
+        cover_image="https://example.com/cover.jpg",
+        created_by=user,
+    )
+    circle_post = CirclePost.objects.create(circle=circle, user=user, text="Circle post")
+    anchor = Anchor.objects.create(
+        circle=circle,
+        title="Anchor",
+        content="Anchor content",
+        anchor_type="text",
+        created_by=user,
+        published_at=timezone.now(),
+        expires_at=timezone.now() + timedelta(hours=24),
+    )
+
+    cases = [
+        (NotificationType.LIKE_POST, "post", post.id, "post_detail", "post"),
+        (NotificationType.REPLY_POST, "comment", comment.id, "comment_thread", "comment"),
+        (NotificationType.LIKE_COMMENT, "comment", comment.id, "comment_thread", "comment"),
+        (NotificationType.MENTION, "post", post.id, "post_detail", "post"),
+        (NotificationType.NEW_FOLLOWER, "user", other_user.id, "profile", "user"),
+        (
+            NotificationType.NEW_CIRCLE_POST,
+            "circle_post",
+            circle_post.id,
+            "circle_post_detail",
+            "circle_post",
+        ),
+        (NotificationType.NEW_ANCHOR, "anchor", anchor.id, "anchor_detail", "anchor"),
+        (
+            NotificationType.ADMIN_ANNOUNCEMENT,
+            "",
+            None,
+            "notification_detail",
+            "notification",
+        ),
+    ]
+
+    for notification_type, reference_type, reference_id, route, entity_type in cases:
+        destination = build_notification_destination(
+            notification_type=notification_type,
+            reference_type=reference_type,
+            reference_id=reference_id,
+            notification_id=uuid.uuid4(),
+        )
+        assert destination["route"] == route
+        assert destination["entityType"] == entity_type
 
 
 def test_register_device_token_limit(db, user):
@@ -265,6 +470,26 @@ def test_create_admin_announcement(db, user, other_user):
     assert Notification.objects.filter(
         user=other_user, notification_type=NotificationType.ADMIN_ANNOUNCEMENT
     ).exists()
+
+
+def test_create_admin_announcement_queues_bounded_push_batch(
+    db, user, other_user, monkeypatch, django_capture_on_commit_callbacks
+):
+    queued_batches = []
+
+    monkeypatch.setattr(
+        "core.notifications.tasks.send_admin_announcement_push_batch.apply_async",
+        lambda **kwargs: queued_batches.append(kwargs["kwargs"]),
+    )
+
+    with django_capture_on_commit_callbacks(execute=True):
+        create_admin_announcement(
+            admin_id=1, message="System Maintenance", target_users=[user.id, other_user.id]
+        )
+
+    assert len(queued_batches) == 1
+    assert set(queued_batches[0]["user_ids"]) == {str(user.id), str(other_user.id)}
+    assert queued_batches[0]["data"]["type"] == NotificationType.ADMIN_ANNOUNCEMENT
 
 
 def test_register_device_token_logs_without_full_token(db, user, monkeypatch):

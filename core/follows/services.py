@@ -6,9 +6,11 @@ and interest-based creator suggestions.
 """
 
 import logging
+from datetime import timedelta
 
 from django.db import IntegrityError
 from django.db.models import Case, Count, Exists, IntegerField, OuterRef, Q, Value, When
+from django.utils import timezone
 
 from core.follows.models import Follow
 from core.shared.decorators import rate_limit
@@ -70,6 +72,7 @@ class FollowService:
             )
 
             FollowService._invalidate_follow_cache(follower_id, following_id)
+            FollowService._notify_new_follower(follower_id, following_id)
 
             return FollowResponseDTO(success=True, following=True)
         except IntegrityError as e:
@@ -105,6 +108,47 @@ class FollowService:
             FollowService._invalidate_follow_cache(follower_id, following_id)
 
         return FollowResponseDTO(success=True, following=False)
+
+    @staticmethod
+    def _notify_new_follower(follower_id: str, following_id: str) -> None:
+        """Send one follower notification per follower/followed pair per day."""
+        try:
+            from core.notifications.constants import NOTIFICATION_TEMPLATES
+            from core.notifications.models import Notification, NotificationType
+            from core.notifications.services import create_notification
+            from core.users.models import User
+
+            since = timezone.now() - timedelta(hours=24)
+            recently_notified = Notification.objects.filter(
+                user_id=following_id,
+                sender_id=follower_id,
+                notification_type=NotificationType.NEW_FOLLOWER,
+                reference_type="user",
+                reference_id=follower_id,
+                created_at__gte=since,
+            ).exists()
+            if recently_notified:
+                return
+
+            follower = User.objects.only("id", "username", "full_name").get(id=follower_id)
+            actor_name = follower.username or follower.full_name or "Someone"
+            create_notification(
+                user_id=following_id,
+                type_str=NotificationType.NEW_FOLLOWER,
+                reference_id=follower.id,
+                reference_type="user",
+                title="New Follower",
+                message=NOTIFICATION_TEMPLATES[NotificationType.NEW_FOLLOWER].format(
+                    username=actor_name
+                ),
+                sender_id=follower.id,
+            )
+        except Exception:
+            logger.warning(
+                "new_follower_notification_failed",
+                extra={"follower_id": follower_id, "following_id": following_id},
+                exc_info=True,
+            )
 
     @staticmethod
     def get_followers(

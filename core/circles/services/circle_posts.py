@@ -9,6 +9,7 @@ import os
 from urllib.parse import urlparse
 
 from django.conf import settings
+from django.contrib.auth import get_user_model
 from django.db import transaction
 from django.db.models import Exists, F, OuterRef
 
@@ -55,6 +56,32 @@ def _infer_file_type(url: str, media_type: str) -> str:
     if guessed_type:
         return guessed_type
     return "video/mp4" if media_type == StoredMediaType.VIDEO else "image/jpeg"
+
+
+def _notify_circle_post_like(post: CirclePost, actor_id: str) -> None:
+    if str(post.user_id) == str(actor_id):
+        return
+
+    try:
+        from core.notifications.models import NotificationType
+        from core.notifications.services import batch_like_notifications
+
+        actor = get_user_model().objects.only("id", "username", "full_name").get(id=actor_id)
+        actor_username = actor.username or actor.full_name or "Someone"
+        batch_like_notifications(
+            actor_username=actor_username,
+            recipient_id=post.user_id,
+            reference_id=post.id,
+            reference_type="circle_post",
+            like_type=NotificationType.LIKE_POST,
+            actor_id=actor_id,
+        )
+    except Exception:  # noqa: BLE001
+        logger.warning(
+            "circle_post_like_notification_failed",
+            extra={"post_id": str(post.id), "actor_id": str(actor_id)},
+            exc_info=True,
+        )
 
 
 def _resolve_circle_post_media(
@@ -313,6 +340,7 @@ def like_circle_post(user_id: str, post_id: str) -> dict:
     if created:
         CirclePost.objects.filter(id=post_id).update(likes_count=F("likes_count") + 1)
         post.refresh_from_db(fields=["likes_count"])
+        _notify_circle_post_like(post, user_id)
         return {"liked": True, "likes_count": post.likes_count}
 
     engagement.delete()
@@ -344,6 +372,7 @@ def ensure_circle_post_liked(user_id: str, post_id: str) -> dict:
     if created:
         CirclePost.objects.filter(id=post_id).update(likes_count=F("likes_count") + 1)
         post.refresh_from_db(fields=["likes_count"])
+        _notify_circle_post_like(post, user_id)
 
     return {"liked": True, "likes_count": max(post.likes_count, 0)}
 
@@ -441,6 +470,13 @@ def create_circle_post(
         )
     except Exception:  # noqa: BLE001
         logger.warning("Failed to dispatch mention notifications for circle post %s", post.id)
+
+    try:
+        from core.notifications.tasks import enqueue_circle_post_fanout
+
+        transaction.on_commit(lambda: enqueue_circle_post_fanout.delay(post.id))
+    except Exception:  # noqa: BLE001
+        logger.warning("Failed to queue circle post fan-out for post %s", post.id)
 
     return full_post
 

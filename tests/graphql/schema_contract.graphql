@@ -1711,6 +1711,13 @@ type Mutation {
   warnUser(reason: String!, userId: String!): ModerationActionPayload!
 }
 
+enum NotificationCategory {
+  ALL
+  CIRCLES
+  INTERACTIONS
+  UPDATES
+}
+
 type NotificationConnection {
   hasMore: Boolean!
   items: [NotificationItem!]!
@@ -1752,6 +1759,7 @@ type NotificationPreferencesType {
   interactionLikes: Boolean!
   interactionNewFollower: Boolean!
   interactionPostInteraction: Boolean!
+  mutedUserIds: [ID!]!
 }
 
 type OTPPayload {
@@ -1893,6 +1901,11 @@ input PreferencesInput {
   interactionLikes: Boolean = null
   interactionNewFollower: Boolean = null
   interactionPostInteraction: Boolean = null
+
+  """
+  When provided, REPLACES the full mute list atomically. Omit this field to preserve existing mutes unchanged. Send the complete desired list, not just new additions.
+  """
+  mutedUserIds: [ID!] = null
 }
 
 type ProfilePayload {
@@ -2107,7 +2120,7 @@ type Query {
   """List support conversations for the authenticated user."""
   myHelpConversations(status: String! = ""): [HelpConversationType!]!
   notificationPreferences: NotificationPreferencesType!
-  notifications(cursor: String = null, limit: Int! = 20): NotificationConnection!
+  notifications(category: NotificationCategory = null, cursor: String = null, limit: Int! = 20): NotificationConnection!
 
   """
   Retrieve a single post by its UUID with full engagement metrics and viewer context.
@@ -2377,6 +2390,13 @@ type UserMiniType {
   avatarUrl: String!
   id: String!
   username: String!
+  viewerState: UserMiniViewerState!
+}
+
+type UserMiniViewerState {
+  isFollowedBy: Boolean!
+  isFollowing: Boolean!
+  isOwner: Boolean!
 }
 
 type UserProfileType {

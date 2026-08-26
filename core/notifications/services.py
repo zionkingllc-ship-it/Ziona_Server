@@ -9,7 +9,7 @@ from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.cache import cache
 from django.db import transaction
-from django.db.models import Q
+from django.db.models import BooleanField, Case, Exists, OuterRef, Q, Value, When
 from django.db.models.functions import Lower
 from django.utils import timezone
 
@@ -19,6 +19,7 @@ from core.notifications.firebase import get_fcm_project_id, send_fcm_debug, send
 from core.notifications.models import (
     DeviceToken,
     Notification,
+    NotificationMutedUser,
     NotificationPreference,
     NotificationStatus,
     NotificationType,
@@ -37,10 +38,64 @@ MENTION_CONTEXT_LABELS = {
     "anchor_response": "an anchor response",
 }
 
+NOTIFICATION_CATEGORY_TYPES = {
+    "interactions": {
+        NotificationType.REPLY_COMMENT,
+        NotificationType.REPLY_POST,
+        NotificationType.LIKE_POST,
+        NotificationType.LIKE_COMMENT,
+        NotificationType.MENTION,
+        NotificationType.NEW_FOLLOWER,
+    },
+    "circles": {
+        NotificationType.NEW_ANCHOR,
+        NotificationType.NEW_CIRCLE_POST,
+    },
+    "updates": {
+        NotificationType.ADMIN_ANNOUNCEMENT,
+        NotificationType.SUPPORT_REPLY,
+    },
+}
 
-def _is_notification_enabled(user_id: int, notification_type: str) -> bool:
+CIRCLE_REFERENCE_TYPES = {"circle_post", "circle_post_comment", "anchor", "anchor_response"}
+
+
+def _normalize_notification_category(category: str | None) -> str | None:
+    if not category:
+        return None
+    raw_value = getattr(category, "value", category)
+    value = str(raw_value).strip().lower()
+    if value in {"", "all"}:
+        return None
+    return value
+
+
+def _is_sender_muted(user_id: int, sender_id: int | str | None) -> bool:
+    """Return whether this user muted the actor who triggered a notification."""
+    if not sender_id:
+        return False
+    if str(user_id) == str(sender_id):
+        return False
+    return NotificationMutedUser.objects.filter(user_id=user_id, muted_user_id=sender_id).exists()
+
+
+def _is_notification_enabled(
+    user_id: int,
+    notification_type: str,
+    reference_type: str = "",
+) -> bool:
     """Check whether the 12-field mobile preference contract permits delivery."""
     pref, _ = NotificationPreference.objects.get_or_create(user_id=user_id)
+    ref_type = (reference_type or "").strip().lower()
+
+    if notification_type == NotificationType.LIKE_POST and ref_type == "circle_post":
+        return pref.circle_likes
+    if notification_type == NotificationType.LIKE_COMMENT and ref_type == "circle_post_comment":
+        return pref.circle_likes
+    if notification_type in {NotificationType.REPLY_POST, NotificationType.REPLY_COMMENT} and (
+        ref_type in {"circle_post", "circle_post_comment"}
+    ):
+        return pref.circle_comment
 
     mapping = {
         NotificationType.NEW_ANCHOR: pref.circle_anchor_post,
@@ -50,11 +105,53 @@ def _is_notification_enabled(user_id: int, notification_type: str) -> bool:
         NotificationType.LIKE_COMMENT: pref.in_app_likes and pref.interaction_likes,
         NotificationType.MENTION: pref.in_app_mention_and_tags,
         NotificationType.NEW_CIRCLE_POST: pref.circle_anchor_post,
+        NotificationType.NEW_FOLLOWER: pref.in_app_new_followers and pref.interaction_new_follower,
         NotificationType.SUPPORT_REPLY: True,
         # Admin/system announcements do not have a user-facing granular toggle.
         NotificationType.ADMIN_ANNOUNCEMENT: True,
     }
     return mapping.get(notification_type, True)
+
+
+def _filter_muted_senders(queryset, user_id: int):
+    muted_sender_ids = NotificationMutedUser.objects.filter(user_id=user_id).values("muted_user_id")
+    return queryset.exclude(sender_id__in=muted_sender_ids)
+
+
+def _filter_notification_category(queryset, category: str | None):
+    normalized = _normalize_notification_category(category)
+    if normalized is None:
+        return queryset
+
+    if normalized == "interactions":
+        return queryset.filter(notification_type__in=NOTIFICATION_CATEGORY_TYPES["interactions"])
+    if normalized == "circles":
+        return queryset.filter(
+            Q(notification_type__in=NOTIFICATION_CATEGORY_TYPES["circles"])
+            | Q(reference_type__in=CIRCLE_REFERENCE_TYPES)
+        )
+    if normalized == "updates":
+        return queryset.filter(notification_type__in=NOTIFICATION_CATEGORY_TYPES["updates"])
+
+    return queryset.none()
+
+
+def _annotate_sender_viewer_state(queryset, user_id: int):
+    from core.follows.models import Follow
+
+    return queryset.annotate(
+        sender_is_following=Exists(
+            Follow.objects.filter(follower_id=user_id, following_id=OuterRef("sender_id"))
+        ),
+        sender_is_followed_by=Exists(
+            Follow.objects.filter(follower_id=OuterRef("sender_id"), following_id=user_id)
+        ),
+        sender_is_owner=Case(
+            When(sender_id=user_id, then=Value(True)),
+            default=Value(False),
+            output_field=BooleanField(),
+        ),
+    )
 
 
 def queue_push_notification(user_id, title: str, body: str, data: dict[str, Any]) -> None:
@@ -223,7 +320,18 @@ def create_notification(
         sender_id: The user who triggered the notification (e.g. a liker, commenter).
                    Pass None for system/admin notifications.
     """
-    if respect_preferences and not _is_notification_enabled(user_id, type_str):
+    if sender_id and _is_sender_muted(user_id, sender_id):
+        logger.info(
+            "notification_skipped_muted_sender",
+            extra={
+                "user_id": str(user_id),
+                "sender_id": str(sender_id),
+                "notification_type": type_str,
+            },
+        )
+        return None
+
+    if respect_preferences and not _is_notification_enabled(user_id, type_str, reference_type):
         return None
 
     # Anti-spam: Do not recreate exact same notification within 1 hour
@@ -270,6 +378,7 @@ def create_notification(
         "referenceId": str(reference_id) if reference_id else "",
         "referenceType": reference_type,
         "screen": "NotificationDetail",
+        "senderId": str(sender_id) if sender_id else "",
         "destinationRoute": destination["route"],
         "destinationEntityType": destination["entityType"],
         "destinationEntityId": destination["entityId"],
@@ -374,6 +483,18 @@ def notify_mentions(
 
 def send_push_notification(user_id: int, title: str, body: str, data: dict[str, Any]) -> None:
     """Send push notification to all active device tokens for the user."""
+    sender_id = (data or {}).get("senderId") or (data or {}).get("actorId")
+    if sender_id and _is_sender_muted(user_id, sender_id):
+        logger.info(
+            "push_notification_skipped_muted_sender",
+            extra={
+                "user_id": str(user_id),
+                "sender_id": str(sender_id),
+                "notification_type": (data or {}).get("type"),
+            },
+        )
+        return
+
     tokens = list(
         DeviceToken.objects.filter(user_id=user_id, is_active=True).values_list("token", flat=True)
     )
@@ -426,7 +547,12 @@ def mark_as_read(notification_id: uuid.UUID, user_id: int) -> bool:
         raise ValueError(ErrorCodes.NOTIFICATION_NOT_FOUND) from err
 
 
-def get_notifications(user_id: int, limit: int = 20, cursor: str | None = None):
+def get_notifications(
+    user_id: int,
+    limit: int = 20,
+    cursor: str | None = None,
+    category: str | None = None,
+):
     """
     Fetch paginated notifications.
     Unread first, then order by created_at DESC.
@@ -437,6 +563,9 @@ def get_notifications(user_id: int, limit: int = 20, cursor: str | None = None):
         .select_related("sender")
         .order_by("is_read", "-created_at")
     )
+    queryset = _filter_muted_senders(queryset, user_id)
+    queryset = _filter_notification_category(queryset, category)
+    queryset = _annotate_sender_viewer_state(queryset, user_id)
 
     if cursor:
         try:
@@ -453,21 +582,58 @@ def get_notifications(user_id: int, limit: int = 20, cursor: str | None = None):
 
 def get_unread_count(user_id: int) -> int:
     """Get count of unread notifications for a user."""
-    return Notification.objects.filter(
+    queryset = Notification.objects.filter(
         user_id=user_id, is_read=False, status=NotificationStatus.ACTIVE
-    ).count()
+    )
+    return _filter_muted_senders(queryset, user_id).count()
 
 
-def update_preferences(user_id: int, preferences_dict: dict[str, bool]) -> NotificationPreference:
+def get_muted_user_ids(user_id: int) -> list[str]:
+    """Return the user's muted notification senders as stable string IDs."""
+    return [
+        str(muted_user_id)
+        for muted_user_id in NotificationMutedUser.objects.filter(user_id=user_id)
+        .order_by("created_at")
+        .values_list("muted_user_id", flat=True)
+    ]
+
+
+def update_preferences(
+    user_id: int,
+    preferences_dict: dict[str, bool],
+    muted_user_ids: list[str] | None = None,
+) -> NotificationPreference:
     """Update user notification preferences."""
-    pref, _ = NotificationPreference.objects.get_or_create(user_id=user_id)
+    with transaction.atomic():
+        pref, _ = NotificationPreference.objects.select_for_update().get_or_create(user_id=user_id)
 
-    for key, value in preferences_dict.items():
-        if hasattr(pref, key):
-            setattr(pref, key, value)
+        for key, value in preferences_dict.items():
+            if hasattr(pref, key):
+                setattr(pref, key, value)
 
-    pref.save()
-    return pref
+        pref.save()
+
+        if muted_user_ids is not None:
+            normalized_muted_ids = {
+                str(muted_id).strip()
+                for muted_id in muted_user_ids
+                if str(muted_id).strip() and str(muted_id).strip() != str(user_id)
+            }
+            valid_muted_ids = set(
+                User.objects.filter(id__in=normalized_muted_ids, deleted_at__isnull=True)
+                .exclude(id=user_id)
+                .values_list("id", flat=True)
+            )
+            NotificationMutedUser.objects.filter(user_id=user_id).delete()
+            NotificationMutedUser.objects.bulk_create(
+                [
+                    NotificationMutedUser(user_id=user_id, muted_user_id=muted_id)
+                    for muted_id in valid_muted_ids
+                ],
+                ignore_conflicts=True,
+            )
+
+        return pref
 
 
 def register_device_token(user_id: int, token: str, platform: str) -> str:
@@ -647,6 +813,7 @@ def batch_like_notifications(
     reference_id: uuid.UUID,
     reference_type: str,
     like_type: str,
+    actor_id: int | None = None,
 ):
     """
     Track and batch multiple likes within a 5-minute window.
@@ -659,6 +826,9 @@ def batch_like_notifications(
     Falls back to the original list approach when the cache backend does not
     expose a Redis client (e.g. LocMemCache in tests / CI).
     """
+    if actor_id and _is_sender_muted(recipient_id, actor_id):
+        return
+
     cache_key = f"likes_batch_{reference_type}_{reference_id}"
 
     try:
@@ -705,7 +875,9 @@ def batch_like_notifications(
 
     if existing_notif:
         existing_notif.message = message
-        existing_notif.save(update_fields=["message", "updated_at"])
+        if actor_id:
+            existing_notif.sender_id = actor_id
+        existing_notif.save(update_fields=["message", "sender_id", "updated_at"])
     else:
         create_notification(
             user_id=recipient_id,
@@ -713,6 +885,7 @@ def batch_like_notifications(
             reference_id=reference_id,
             reference_type=reference_type,
             message=message,
+            sender_id=actor_id,
         )
 
 
@@ -736,8 +909,35 @@ def create_admin_announcement(admin_id: int, message: str, target_users: list[in
             )
         )
 
+    title = "Ziona Update"
+    data = {
+        "type": NotificationType.ADMIN_ANNOUNCEMENT,
+        "referenceId": "",
+        "referenceType": "",
+        "screen": "NotificationDetail",
+        "senderId": "",
+        "destinationRoute": "notification_detail",
+        "destinationEntityType": "notification",
+        "destinationEntityId": "",
+        "destinationSecondaryEntityId": "",
+        "deepLink": "",
+    }
+
     with transaction.atomic():
         Notification.objects.bulk_create(announcements, batch_size=1000)
 
-    # In production, dispatch async celery task to handle FCM pushing
-    pass
+        def _queue_push_batches() -> None:
+            from core.notifications.tasks import send_admin_announcement_push_batch
+
+            batch_size = 500
+            for index in range(0, len(target_users), batch_size):
+                send_admin_announcement_push_batch.apply_async(
+                    kwargs={
+                        "user_ids": [str(uid) for uid in target_users[index : index + batch_size]],
+                        "title": title,
+                        "body": formatted_msg,
+                        "data": data,
+                    }
+                )
+
+        transaction.on_commit(_queue_push_batches)

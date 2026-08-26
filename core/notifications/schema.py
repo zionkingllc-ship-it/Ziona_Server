@@ -5,10 +5,15 @@ from django.utils import timezone
 from strawberry.types import Info
 
 from core.admin_dashboard.permissions import admin_required
-from core.notifications.models import Notification, NotificationPreference, NotificationStatus
+from core.notifications.models import (
+    Notification,
+    NotificationPreference,
+    NotificationStatus,
+)
 from core.notifications.services import (
     build_notification_destination,
     create_admin_announcement,
+    get_muted_user_ids,
     get_notifications,
     get_unread_count,
     mark_as_read,
@@ -18,6 +23,13 @@ from core.notifications.services import (
 )
 from core.shared.types import ErrorType
 from core.users.schema import _get_authenticated_user_id
+
+
+@strawberry.type
+class UserMiniViewerState:
+    is_following: bool = strawberry.field(name="isFollowing")
+    is_followed_by: bool = strawberry.field(name="isFollowedBy")
+    is_owner: bool = strawberry.field(name="isOwner")
 
 
 @strawberry.type
@@ -31,6 +43,7 @@ class UserMiniType:
     id: str
     username: str
     avatar_url: str = strawberry.field(name="avatarUrl", default="")
+    viewer_state: UserMiniViewerState = strawberry.field(name="viewerState")
 
 
 @strawberry.type
@@ -62,8 +75,17 @@ class NotificationTypeEnum(Enum):
     NEW_ANCHOR = "new_anchor"
     MENTION = "mention"
     NEW_CIRCLE_POST = "new_circle_post"
+    NEW_FOLLOWER = "new_follower"
     SUPPORT_REPLY = "support_reply"
     ADMIN_ANNOUNCEMENT = "admin_announcement"
+
+
+@strawberry.enum
+class NotificationCategory(Enum):
+    ALL = "all"
+    INTERACTIONS = "interactions"
+    CIRCLES = "circles"
+    UPDATES = "updates"
 
 
 def _default_notification_title(notification_type: str) -> str:
@@ -75,6 +97,7 @@ def _default_notification_title(notification_type: str) -> str:
         NotificationTypeEnum.NEW_ANCHOR.value: "New Anchor",
         NotificationTypeEnum.MENTION.value: "New Mention",
         NotificationTypeEnum.NEW_CIRCLE_POST.value: "New Circle Post",
+        NotificationTypeEnum.NEW_FOLLOWER.value: "New Follower",
         NotificationTypeEnum.SUPPORT_REPLY.value: "Support Reply",
         NotificationTypeEnum.ADMIN_ANNOUNCEMENT.value: "Ziona Update",
     }
@@ -143,6 +166,11 @@ class NotificationItem:
             id=str(sender.id),
             username=sender.username or "",
             avatar_url=getattr(sender, "avatar_url", None) or "",
+            viewer_state=UserMiniViewerState(
+                is_following=bool(getattr(self._instance, "sender_is_following", False)),
+                is_followed_by=bool(getattr(self._instance, "sender_is_followed_by", False)),
+                is_owner=bool(getattr(self._instance, "sender_is_owner", False)),
+            ),
         )
 
     @classmethod
@@ -186,9 +214,17 @@ class NotificationPreferencesType:
     circle_anchor_post: bool
     circle_comment: bool
     circle_friend_interaction: bool
+    muted_user_ids: list[strawberry.ID] = strawberry.field(name="mutedUserIds")
 
     @classmethod
-    def from_instance(cls, instance: NotificationPreference):
+    def from_instance(
+        cls,
+        instance: NotificationPreference,
+        muted_user_ids: list[str] | None = None,
+    ):
+        muted_user_ids = (
+            muted_user_ids if muted_user_ids is not None else get_muted_user_ids(instance.user_id)
+        )
         return cls(
             in_app_likes=instance.in_app_likes,
             in_app_comment=instance.in_app_comment,
@@ -202,6 +238,7 @@ class NotificationPreferencesType:
             circle_anchor_post=instance.circle_anchor_post,
             circle_comment=instance.circle_comment,
             circle_friend_interaction=instance.circle_friend_interaction,
+            muted_user_ids=[strawberry.ID(str(muted_id)) for muted_id in muted_user_ids],
         )
 
 
@@ -219,17 +256,35 @@ class PreferencesInput:
     circle_anchor_post: bool | None = None
     circle_comment: bool | None = None
     circle_friend_interaction: bool | None = None
+    muted_user_ids: list[strawberry.ID] | None = strawberry.field(
+        name="mutedUserIds",
+        default=None,
+        description=(
+            "When provided, REPLACES the full mute list atomically. Omit this field to "
+            "preserve existing mutes unchanged. Send the complete desired list, not "
+            "just new additions."
+        ),
+    )
 
 
 @strawberry.type
 class NotificationQueries:
     @strawberry.field
     def notifications(
-        self, info: Info, limit: int = 20, cursor: str | None = None
+        self,
+        info: Info,
+        limit: int = 20,
+        cursor: str | None = None,
+        category: NotificationCategory | None = None,
     ) -> NotificationConnection:
         user = _get_authenticated_notification_user(info)
 
-        qs = get_notifications(user.id, limit=limit + 1, cursor=cursor)
+        qs = get_notifications(
+            user.id,
+            limit=limit + 1,
+            cursor=cursor,
+            category=category.value if category else None,
+        )
         items = list(qs)
 
         has_more = len(items) > limit
@@ -358,7 +413,16 @@ class NotificationMutations:
             if value is not None:
                 pref_dict[field] = value
 
-        updated_pref = update_preferences(user.id, pref_dict)
+        muted_ids = getattr(preferences, "muted_user_ids", None)
+        normalized_muted_ids = (
+            [str(muted_id) for muted_id in muted_ids] if muted_ids is not None else None
+        )
+
+        updated_pref = update_preferences(
+            user.id,
+            pref_dict,
+            muted_user_ids=normalized_muted_ids,
+        )
         return NotificationPreferencesType.from_instance(updated_pref)
 
     @strawberry.mutation

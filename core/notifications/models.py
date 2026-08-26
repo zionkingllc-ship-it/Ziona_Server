@@ -17,6 +17,7 @@ class NotificationType(models.TextChoices):
     NEW_ANCHOR = "new_anchor", "New Anchor"
     MENTION = "mention", "Mention"
     NEW_CIRCLE_POST = "new_circle_post", "New Circle Post"
+    NEW_FOLLOWER = "new_follower", "New Follower"
     SUPPORT_REPLY = "support_reply", "Support Reply"
     ADMIN_ANNOUNCEMENT = "admin_announcement", "Admin Announcement"
 
@@ -123,6 +124,46 @@ class NotificationPreference(TimestampedModel):
 
     def __str__(self) -> str:
         return f"Preferences for {self.user_id}"
+
+
+class NotificationMutedUser(TimestampedModel):
+    """A per-viewer mute suppressing notifications from a specific sender."""
+
+    id = models.UUIDField(
+        primary_key=True,
+        default=uuid.uuid4,
+        editable=False,
+    )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="notification_mutes",
+    )
+    muted_user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="muted_by_notification_users",
+    )
+
+    class Meta:
+        db_table = "notification_muted_users"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["user", "muted_user"],
+                name="uq_notification_muted_user_pair",
+            ),
+            models.CheckConstraint(
+                check=~models.Q(user=models.F("muted_user")),
+                name="ck_notification_mute_no_self",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["user", "muted_user"], name="idx_notif_mute_pair"),
+            models.Index(fields=["muted_user"], name="idx_notif_mute_muted_user"),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.user_id} muted {self.muted_user_id}"
 
 
 class DeviceToken(TimestampedModel):

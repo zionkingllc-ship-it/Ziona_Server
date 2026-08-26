@@ -4,7 +4,7 @@ from django.db.models.signals import post_delete, post_save
 from django.dispatch import receiver
 
 from core.circles.models import Anchor
-from core.engagement.models import Comment, Like
+from core.engagement.models import Comment, CommentLike, Like
 from core.notifications.models import Notification, NotificationStatus, NotificationType
 from core.notifications.services import (
     batch_like_notifications,
@@ -46,6 +46,7 @@ def handle_comment_notifications(sender, instance, created, **kwargs):
                     reference_type="comment",
                     title="New Reply",
                     message=f"{instance.user.username} replied to your comment",
+                    sender_id=instance.user_id,
                 )
         else:
             post = instance.post
@@ -57,6 +58,7 @@ def handle_comment_notifications(sender, instance, created, **kwargs):
                     reference_type="comment",
                     title="New Reply",
                     message=f"{instance.user.username} replied to your post",
+                    sender_id=instance.user_id,
                 )
     except Exception as e:
         logger.error(f"Error handling comment notification: {e}", exc_info=True)
@@ -64,7 +66,7 @@ def handle_comment_notifications(sender, instance, created, **kwargs):
 
 @receiver(post_save, sender=Like)
 def handle_like_notifications(sender, instance, created, **kwargs):
-    """Trigger batched notifications for likes on posts and comments."""
+    """Trigger batched notifications for likes on posts."""
     if not created:
         return
 
@@ -79,44 +81,33 @@ def handle_like_notifications(sender, instance, created, **kwargs):
                     reference_id=post.id,
                     reference_type="post",
                     like_type=NotificationType.LIKE_POST,
-                )
-        elif instance.comment_id:
-            comment = instance.comment
-            if comment.user_id != instance.user_id:
-                batch_like_notifications(
-                    actor_username=actor_username,
-                    recipient_id=comment.user_id,
-                    reference_id=comment.id,
-                    reference_type="comment",
-                    like_type=NotificationType.LIKE_COMMENT,
+                    actor_id=instance.user_id,
                 )
     except Exception as e:
         logger.error(f"Error handling like notification: {e}", exc_info=True)
 
 
-@receiver(post_save, sender=Post)
-def handle_post_notifications(sender, instance, created, **kwargs):
-    """Trigger notifications for new circle posts."""
+@receiver(post_save, sender=CommentLike)
+def handle_comment_like_notifications(sender, instance, created, **kwargs):
+    """Trigger batched notifications for likes on comments and replies."""
     if not created:
         return
 
     try:
-        if hasattr(instance, "circle") and instance.circle_id:
-            circle = instance.circle
-            if hasattr(circle, "memberships"):
-                members = circle.memberships.select_related("user")
-                for membership in members:
-                    member_id = membership.user_id
-                    if member_id != instance.user_id:
-                        create_notification(
-                            user_id=member_id,
-                            type_str=NotificationType.NEW_CIRCLE_POST,
-                            reference_id=instance.id,
-                            reference_type="post",
-                            message=f"New post in {circle.name}",
-                        )
+        comment = instance.comment
+        if comment.user_id == instance.user_id:
+            return
+
+        batch_like_notifications(
+            actor_username=instance.user.username,
+            recipient_id=comment.user_id,
+            reference_id=comment.id,
+            reference_type="comment",
+            like_type=NotificationType.LIKE_COMMENT,
+            actor_id=instance.user_id,
+        )
     except Exception as e:
-        logger.error(f"Error handling post notification: {e}", exc_info=True)
+        logger.error(f"Error handling comment like notification: {e}", exc_info=True)
 
 
 @receiver(post_save, sender=Anchor)

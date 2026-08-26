@@ -8,6 +8,7 @@ NOTIFICATION_TEMPLATES = {
     "new_anchor": "New anchor published in {circle_name}",
     "mention": "{username} mentioned you in a comment",
     "new_circle_post": "New post in {circle_name}",
+    "new_follower": "{username} started following you",
     "admin_announcement": "{message}",
 }
 

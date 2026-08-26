@@ -4,7 +4,7 @@ from datetime import timedelta
 from celery import shared_task
 from django.utils import timezone
 
-from core.circles.models import Anchor
+from core.circles.models import Anchor, CircleMembership, CirclePost
 from core.notifications.models import Notification, NotificationStatus, NotificationType
 from core.notifications.services import create_notification, send_push_notification
 
@@ -28,6 +28,81 @@ def send_push_notification_task(self, user_id, title: str, body: str, data: dict
             exc_info=True,
         )
         raise self.retry(exc=exc) from exc
+
+
+@shared_task(bind=True, max_retries=3, default_retry_delay=60, soft_time_limit=300)
+def enqueue_circle_post_fanout(self, circle_post_id):
+    """Fan out a new CirclePost notification after its DB transaction commits."""
+    try:
+        post = (
+            CirclePost.objects.select_related("circle", "user")
+            .filter(id=circle_post_id, deleted_at__isnull=True)
+            .first()
+        )
+        if not post or not post.circle.is_active or post.circle.deleted_at:
+            return
+
+        member_ids = (
+            CircleMembership.objects.filter(circle_id=post.circle_id)
+            .exclude(user_id=post.user_id)
+            .values_list("user_id", flat=True)
+            .iterator(chunk_size=500)
+        )
+        actor_name = post.user.username or post.user.full_name or "Someone"
+        message = f"{actor_name} posted in {post.circle.name}"
+
+        created_count = 0
+        for member_id in member_ids:
+            notification = create_notification(
+                user_id=member_id,
+                type_str=NotificationType.NEW_CIRCLE_POST,
+                reference_id=post.id,
+                reference_type="circle_post",
+                title="New Circle Post",
+                message=message,
+                sender_id=post.user_id,
+                push_data={"circleId": str(post.circle_id)},
+            )
+            if notification:
+                created_count += 1
+
+        logger.info(
+            "circle_post_fanout_complete",
+            extra={
+                "circle_post_id": str(post.id),
+                "circle_id": str(post.circle_id),
+                "created_count": created_count,
+            },
+        )
+
+    except Exception as exc:
+        logger.error(
+            "circle_post_fanout_failed",
+            extra={"circle_post_id": str(circle_post_id)},
+            exc_info=True,
+        )
+        raise self.retry(exc=exc, countdown=60 * (2**self.request.retries)) from exc
+
+
+@shared_task(bind=True, max_retries=3, default_retry_delay=60, soft_time_limit=300)
+def send_admin_announcement_push_batch(
+    self,
+    user_ids: list[str],
+    title: str,
+    body: str,
+    data: dict | None = None,
+):
+    """Send admin-announcement pushes in bounded batches."""
+    try:
+        for user_id in user_ids:
+            send_push_notification(user_id=user_id, title=title, body=body, data=data or {})
+    except Exception as exc:
+        logger.warning(
+            "admin_announcement_push_batch_failed",
+            extra={"user_count": len(user_ids), "notification_type": (data or {}).get("type")},
+            exc_info=True,
+        )
+        raise self.retry(exc=exc, countdown=60 * (2**self.request.retries)) from exc
 
 
 @shared_task(bind=True, max_retries=3, default_retry_delay=60, soft_time_limit=120)
