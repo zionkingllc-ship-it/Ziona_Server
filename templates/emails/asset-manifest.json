@@ -86,14 +86,12 @@
       "alt": "Facebook"
     },
     "supportHero": {
-      "sourcePath": "email-assets/assets/support-hero.png",
       "outputPath": "assets/support-hero.png",
       "publicUrl": "{{ asset_base_url }}/assets/support-hero.png",
       "width": 420,
       "height": 140,
       "alt": "Support hero",
-      "overlay": "linear-gradient(180deg, rgba(116, 32, 146, 0.18) 0%, rgba(116, 32, 146, 0.62) 100%)",
-      "sha256": "c3aa0a8234d99a45d1a00e6a24911d98911564a7fa8e4ff14bc2bbcf975d4c47"
+      "overlay": "baked purple vertical overlay matching the React support template"
     }
   }
 }

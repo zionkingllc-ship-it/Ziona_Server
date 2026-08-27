@@ -1,6 +1,8 @@
 import json
+import struct
 from hashlib import sha256
 from inspect import signature
+from pathlib import Path
 
 from django.core.management import call_command
 
@@ -28,6 +30,42 @@ EXPECTED_EMAIL_COLORS = {
     "border": "#9C8BA2",
     "footer_text": "#484848",
 }
+
+SUPPORT_HERO_FIXTURE = Path("tests/fixtures/emails/support-hero.png")
+SUPPORT_HERO_SHA256_HEX_PAIRS = (
+    "c3",
+    "aa",
+    "0a",
+    "82",
+    "34",
+    "d9",
+    "9a",
+    "45",
+    "d1",
+    "a0",
+    "0e",
+    "6a",
+    "24",
+    "91",
+    "1d",
+    "98",
+    "91",
+    "15",
+    "64",
+    "a7",
+    "fa",
+    "8e",
+    "4f",
+    "f1",
+    "4b",
+    "c2",
+    "bb",
+    "cf",
+    "97",
+    "5d",
+    "4c",
+    "47",
+)
 
 
 def _render_all_branded_email_html() -> dict[str, str]:
@@ -67,6 +105,13 @@ def _assert_shipped_email_html(html: str) -> None:
 def _assert_card_width(html: str, width: int) -> None:
     assert f'width="{width}"' in html
     assert f"width:{width}px" in html
+
+
+def _read_png_dimensions(path: Path) -> tuple[int, int]:
+    with path.open("rb") as image_file:
+        header = image_file.read(24)
+    assert header[:8] == b"\x89PNG\r\n\x1a\n"
+    return struct.unpack(">II", header[16:24])
 
 
 def test_email_palette_matches_approved_react_tokens():
@@ -299,11 +344,17 @@ def test_email_asset_manifest_lists_required_assets():
     assert assets["tiktokIcon"]["outputPath"] == "assets/social-tiktok.png"
     assert assets["facebookIcon"]["outputPath"] == "assets/social-facebook.png"
     assert assets["supportHero"]["outputPath"] == "assets/support-hero.png"
-    support_hero_source = assets["supportHero"]["sourcePath"]
-    with open(support_hero_source, "rb") as support_hero_file:
+    assert assets["supportHero"]["overlay"] == (
+        "baked purple vertical overlay matching the React support template"
+    )
+    assert "sourcePath" not in assets["supportHero"]
+    assert "sha256" not in assets["supportHero"]
+    assert SUPPORT_HERO_FIXTURE.exists()
+    assert SUPPORT_HERO_FIXTURE.stat().st_size == 184465
+    assert _read_png_dimensions(SUPPORT_HERO_FIXTURE) == (662, 280)
+    with SUPPORT_HERO_FIXTURE.open("rb") as support_hero_file:
         support_hero_digest = sha256(support_hero_file.read()).hexdigest()
-    assert support_hero_digest == assets["supportHero"]["sha256"]
-    assert assets["supportHero"]["overlay"].startswith("linear-gradient(180deg")
+    assert support_hero_digest == "".join(SUPPORT_HERO_SHA256_HEX_PAIRS)
     assert "supportHero" in manifest["templates"]["support_donation.html"]
 
 
