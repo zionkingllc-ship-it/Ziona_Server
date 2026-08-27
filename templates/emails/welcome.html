@@ -5,30 +5,30 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Welcome to Ziona</title>
 </head>
-<body style="margin:0;padding:0;background:#F5F2F8;">
-  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#F5F2F8" style="width:100%;background:#F5F2F8;border-collapse:collapse;">
+<body style="margin:0;padding:0;background-color:{{ email_colors.background }};">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="{{ email_colors.background }}" style="width:100%;background-color:{{ email_colors.background }};border-collapse:collapse;">
     <tr>
       <td align="center" style="padding:40px 16px;">
-        <table role="presentation" width="393" cellpadding="0" cellspacing="0" border="0" align="center" bgcolor="#FFFFFF" style="width:393px;max-width:393px;margin:0 auto;background:#FFFFFF;border-radius:30px;border-collapse:separate;overflow:hidden;">
+        <table role="presentation" width="393" cellpadding="0" cellspacing="0" border="0" align="center" bgcolor="{{ email_colors.surface }}" style="width:393px;max-width:393px;margin:0 auto;background-color:{{ email_colors.surface }};border-radius:30px;border-collapse:separate;overflow:hidden;">
           <tr>
             <td style="padding:42px 18px 27px;">
               <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;border-collapse:collapse;">
                 {% include "emails/partials/logo_row.html" %}
                 <tr><td height="40" style="height:40px;font-size:0;line-height:40px;">&nbsp;</td></tr>
                 <tr>
-                  <td align="left" style="padding:0;color:#181419;font-family:'Mona Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:16px;font-weight:400;line-height:24px;">
+                  <td align="left" style="padding:0;color:{{ email_colors.text_primary }};font-family:'Mona Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:16px;font-weight:400;line-height:24px;">
                     Hi {{ username }},
                   </td>
                 </tr>
                 <tr><td height="12" style="height:12px;font-size:0;line-height:12px;">&nbsp;</td></tr>
                 <tr>
-                  <td align="center" style="padding:0;color:#181419;font-family:'Mona Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:22px;font-weight:700;line-height:28px;letter-spacing:0.22px;">
+                  <td align="center" style="padding:0;color:{{ email_colors.text_primary }};font-family:'Mona Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:22px;font-weight:700;line-height:28px;letter-spacing:0.22px;">
                     WELCOME TO ZIONA
                   </td>
                 </tr>
                 <tr><td height="8" style="height:8px;font-size:0;line-height:8px;">&nbsp;</td></tr>
                 <tr>
-                  <td align="center" style="padding:0;color:#181419;font-family:'Mona Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:16px;font-weight:600;line-height:24px;">
+                  <td align="center" style="padding:0;color:{{ email_colors.text_primary }};font-family:'Mona Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:16px;font-weight:600;line-height:24px;">
                     Let's Get Started
                   </td>
                 </tr>
@@ -37,32 +37,32 @@
                   <td bgcolor="#EDE7F6" style="padding:20px 16px;background:#EDE7F6;border-radius:16px;">
                     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;border-collapse:collapse;">
                       <tr>
-                        <td valign="middle" style="padding:0;color:#181419;font-family:'Mona Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+                    <td valign="middle" style="padding:0;color:{{ email_colors.text_primary }};font-family:'Mona Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
                           <div style="font-size:13px;font-weight:700;line-height:19px;">Make a post</div>
                           <div style="font-size:13px;font-weight:400;line-height:19px;">Share your first post and let people share your thoughts. It's the easiest way to start conversations</div>
                         </td>
                         <td width="68" align="right" valign="middle" style="padding:0 0 0 16px;">
-                          <table role="presentation" width="52" height="52" cellpadding="0" cellspacing="0" border="0" bgcolor="#E4C0F1" style="width:52px;height:52px;background:#E4C0F1;border-radius:12px;"><tr><td align="center" style="color:#742092;font-family:Arial,sans-serif;font-size:24px;font-weight:700;line-height:52px;">+</td></tr></table>
+                      <table role="presentation" width="52" height="52" cellpadding="0" cellspacing="0" border="0" bgcolor="#E4C0F1" style="width:52px;height:52px;background:#E4C0F1;border-radius:12px;"><tr><td align="center" style="color:{{ email_colors.primary }};font-family:Arial,sans-serif;font-size:24px;font-weight:700;line-height:52px;">+</td></tr></table>
                         </td>
                       </tr>
                       <tr><td colspan="2" height="28" style="height:28px;font-size:0;line-height:28px;">&nbsp;</td></tr>
                       <tr>
                         <td width="68" align="left" valign="middle" style="padding:0 16px 0 0;">
-                          <table role="presentation" width="52" height="52" cellpadding="0" cellspacing="0" border="0" bgcolor="#E4C0F1" style="width:52px;height:52px;background:#E4C0F1;border-radius:12px;"><tr><td align="center" style="color:#742092;font-family:Arial,sans-serif;font-size:18px;font-weight:700;line-height:52px;">2</td></tr></table>
+                      <table role="presentation" width="52" height="52" cellpadding="0" cellspacing="0" border="0" bgcolor="#E4C0F1" style="width:52px;height:52px;background:#E4C0F1;border-radius:12px;"><tr><td align="center" style="color:{{ email_colors.primary }};font-family:Arial,sans-serif;font-size:18px;font-weight:700;line-height:52px;">2</td></tr></table>
                         </td>
-                        <td valign="middle" style="padding:0;color:#181419;font-family:'Mona Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+                    <td valign="middle" style="padding:0;color:{{ email_colors.text_primary }};font-family:'Mona Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
                           <div style="font-size:13px;font-weight:700;line-height:19px;">Find other creators</div>
                           <div style="font-size:13px;font-weight:400;line-height:19px;">Discover creators with similar interests and grow your network. Follow and connect with people that inspire you.</div>
                         </td>
                       </tr>
                       <tr><td colspan="2" height="28" style="height:28px;font-size:0;line-height:28px;">&nbsp;</td></tr>
                       <tr>
-                        <td valign="middle" style="padding:0;color:#181419;font-family:'Mona Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+                    <td valign="middle" style="padding:0;color:{{ email_colors.text_primary }};font-family:'Mona Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
                           <div style="font-size:13px;font-weight:700;line-height:19px;">Join a circle</div>
                           <div style="font-size:13px;font-weight:400;line-height:19px;">Be part of a circle that fits your Christian needs. Connect, learn and grow with a community.</div>
                         </td>
                         <td width="68" align="right" valign="middle" style="padding:0 0 0 16px;">
-                          <table role="presentation" width="52" height="52" cellpadding="0" cellspacing="0" border="0" bgcolor="#E4C0F1" style="width:52px;height:52px;background:#E4C0F1;border-radius:12px;"><tr><td align="center" style="color:#742092;font-family:Arial,sans-serif;font-size:18px;font-weight:700;line-height:52px;">O</td></tr></table>
+                      <table role="presentation" width="52" height="52" cellpadding="0" cellspacing="0" border="0" bgcolor="#E4C0F1" style="width:52px;height:52px;background:#E4C0F1;border-radius:12px;"><tr><td align="center" style="color:{{ email_colors.primary }};font-family:Arial,sans-serif;font-size:18px;font-weight:700;line-height:52px;">O</td></tr></table>
                         </td>
                       </tr>
                     </table>

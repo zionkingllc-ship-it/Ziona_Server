@@ -5,59 +5,59 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Notification Digest</title>
 </head>
-<body style="margin:0;padding:0;background:#F5F2F8;">
-  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#F5F2F8" style="width:100%;background:#F5F2F8;border-collapse:collapse;">
+<body style="margin:0;padding:0;background-color:{{ email_colors.background }};">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="{{ email_colors.background }}" style="width:100%;background-color:{{ email_colors.background }};border-collapse:collapse;">
     <tr>
       <td align="center" style="padding:40px 16px;">
-        <table role="presentation" width="393" cellpadding="0" cellspacing="0" border="0" align="center" bgcolor="#FFFFFF" style="width:393px;max-width:393px;margin:0 auto;background:#FFFFFF;border-radius:30px;border-collapse:separate;overflow:hidden;">
+        <table role="presentation" width="393" cellpadding="0" cellspacing="0" border="0" align="center" bgcolor="{{ email_colors.surface }}" style="width:393px;max-width:393px;margin:0 auto;background-color:{{ email_colors.surface }};border-radius:30px;border-collapse:separate;overflow:hidden;">
           <tr>
             <td style="padding:42px 18px 27px;">
               <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;border-collapse:collapse;">
                 {% include "emails/partials/logo_row.html" %}
                 <tr><td height="44" style="height:44px;font-size:0;line-height:44px;">&nbsp;</td></tr>
                 <tr>
-                  <td align="left" style="padding:0;color:#181419;font-family:'Mona Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:16px;font-weight:600;line-height:24px;">
+                  <td align="left" style="padding:0;color:{{ email_colors.text_primary }};font-family:'Mona Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:16px;font-weight:600;line-height:24px;">
                     Hi {{ username }},
                   </td>
                 </tr>
                 <tr><td height="18" style="height:18px;font-size:0;line-height:18px;">&nbsp;</td></tr>
                 <tr>
-                  <td align="center" style="padding:0;color:#181419;font-family:'Mona Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:16px;font-weight:600;line-height:24px;">
+                  <td align="center" style="padding:0;color:{{ email_colors.text_primary }};font-family:'Mona Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:16px;font-weight:600;line-height:24px;">
                     Stay up to date
                   </td>
                 </tr>
                 <tr><td height="34" style="height:34px;font-size:0;line-height:34px;">&nbsp;</td></tr>
                 <tr>
-                  <td align="left" style="padding:0;color:#181419;font-family:'Mona Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:13px;font-weight:700;line-height:19px;">
+                  <td align="left" style="padding:0;color:{{ email_colors.text_primary }};font-family:'Mona Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:13px;font-weight:700;line-height:19px;">
                     Today's Activity
                   </td>
                 </tr>
                 <tr><td height="16" style="height:16px;font-size:0;line-height:16px;">&nbsp;</td></tr>
                 {% for item in notification_items %}
                   <tr>
-                    <td bgcolor="#F6EAFA" style="padding:12px;background:#F6EAFA;border-radius:8px;">
+                  <td bgcolor="{{ email_colors.brand_inverse }}" style="padding:12px;background:{{ email_colors.brand_inverse }};border-radius:8px;">
                       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;border-collapse:collapse;">
                         <tr>
                           <td width="44" valign="top" style="width:44px;padding:0 12px 0 0;">
-                            <table role="presentation" width="44" height="44" cellpadding="0" cellspacing="0" border="0" bgcolor="#742092" style="width:44px;height:44px;background:#742092;border-radius:50%;border-collapse:separate;">
+                          <table role="presentation" width="44" height="44" cellpadding="0" cellspacing="0" border="0" bgcolor="{{ email_colors.primary }}" style="width:44px;height:44px;background:{{ email_colors.primary }};border-radius:50%;border-collapse:separate;">
                               <tr>
-                                <td align="center" valign="middle" style="color:#FFFFFF;font-family:'Mona Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:13px;font-weight:700;line-height:44px;letter-spacing:0.26px;">
+                              <td align="center" valign="middle" style="color:{{ email_colors.surface }};font-family:'Mona Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:13px;font-weight:700;line-height:44px;letter-spacing:0.26px;">
                                   {{ item.actor_initials }}
                                 </td>
                               </tr>
                             </table>
                           </td>
                           <td valign="top" style="padding:0;">
-                            <div style="color:#181419;font-family:'Mona Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:13px;font-weight:400;line-height:19px;">
+                          <div style="color:{{ email_colors.text_primary }};font-family:'Mona Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:13px;font-weight:400;line-height:19px;">
                               <strong style="font-weight:700;">{{ item.actor_name }}</strong> {{ item.action }}
                             </div>
                             {% if item.message %}
-                              <div style="padding-top:4px;color:#4E4252;font-family:'Mona Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:12px;font-weight:400;line-height:18px;">
+                          <div style="padding-top:4px;color:{{ email_colors.text_secondary }};font-family:'Mona Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:12px;font-weight:400;line-height:18px;">
                                 {{ item.message }}
                               </div>
                             {% endif %}
                             {% if item.time %}
-                              <div style="padding-top:2px;color:#836F8B;font-family:'Mona Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:11px;font-weight:500;line-height:16px;">
+                          <div style="padding-top:2px;color:{{ email_colors.text_tertiary }};font-family:'Mona Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:11px;font-weight:500;line-height:16px;">
                                 {{ item.time }}
                               </div>
                             {% endif %}

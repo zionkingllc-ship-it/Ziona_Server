@@ -5,24 +5,24 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Verify Your Email</title>
 </head>
-<body style="margin:0;padding:0;background:#F5F2F8;">
-  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#F5F2F8" style="width:100%;background:#F5F2F8;border-collapse:collapse;">
+<body style="margin:0;padding:0;background-color:{{ email_colors.background }};">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="{{ email_colors.background }}" style="width:100%;background-color:{{ email_colors.background }};border-collapse:collapse;">
     <tr>
       <td align="center" style="padding:40px 16px;">
-        <table role="presentation" width="393" cellpadding="0" cellspacing="0" border="0" align="center" bgcolor="#FFFFFF" style="width:393px;max-width:393px;margin:0 auto;background:#FFFFFF;border-radius:30px;border-collapse:separate;overflow:hidden;">
+        <table role="presentation" width="393" cellpadding="0" cellspacing="0" border="0" align="center" bgcolor="{{ email_colors.surface }}" style="width:393px;max-width:393px;margin:0 auto;background-color:{{ email_colors.surface }};border-radius:30px;border-collapse:separate;overflow:hidden;">
           <tr>
             <td style="padding:42px 18px 27px;">
               <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;border-collapse:collapse;">
                 {% include "emails/partials/logo_row.html" %}
                 <tr><td height="44" style="height:44px;font-size:0;line-height:44px;">&nbsp;</td></tr>
                 <tr>
-                  <td align="left" style="padding:0;color:#181419;font-family:'Mona Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:16px;font-weight:400;line-height:24px;">
+                  <td align="left" style="padding:0;color:{{ email_colors.text_primary }};font-family:'Mona Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:16px;font-weight:400;line-height:24px;">
                     Hi {{ username }},
                   </td>
                 </tr>
                 <tr><td height="12" style="height:12px;font-size:0;line-height:12px;">&nbsp;</td></tr>
                 <tr>
-                  <td align="center" style="padding:0;color:#181419;font-family:'Mona Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:16px;font-weight:600;line-height:24px;">
+                  <td align="center" style="padding:0;color:{{ email_colors.text_primary }};font-family:'Mona Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:16px;font-weight:600;line-height:24px;">
                     Verify your email
                   </td>
                 </tr>
@@ -34,7 +34,7 @@
                 </tr>
                 <tr><td height="44" style="height:44px;font-size:0;line-height:44px;">&nbsp;</td></tr>
                 <tr>
-                  <td align="center" style="padding:0 2px;color:#181419;font-family:'Mona Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:13px;font-weight:400;line-height:19px;">
+                  <td align="center" style="padding:0 2px;color:{{ email_colors.text_primary }};font-family:'Mona Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:13px;font-weight:400;line-height:19px;">
                     Please verify your email to complete account setup. Click the link below and input this code. <strong style="font-weight:600;">This code expires in {{ expiry_minutes }} minutes.</strong>
                   </td>
                 </tr>

@@ -1,7 +1,10 @@
 import json
+from hashlib import sha256
+from inspect import signature
 
 from django.core.management import call_command
 
+from core.emails.palette import EMAIL_COLORS, SUPPORT_DONATION_COLORS
 from core.emails.templates import (
     render_admin_announcement,
     render_moderation_notice,
@@ -11,6 +14,41 @@ from core.emails.templates import (
     render_verify_email,
     render_welcome_email,
 )
+
+EXPECTED_EMAIL_COLORS = {
+    "primary": "#742092",
+    "primary_accent": "#9629BC",
+    "brand_inverse": "#F6EAFA",
+    "text_primary": "#181419",
+    "text_secondary": "#4E4252",
+    "text_tertiary": "#836F8B",
+    "background": "#F5F2F8",
+    "surface": "#FFFFFF",
+    "surface_secondary": "#FAF9FA",
+    "border": "#9C8BA2",
+    "footer_text": "#484848",
+}
+
+
+def _render_all_branded_email_html() -> dict[str, str]:
+    return {
+        "verify": render_verify_email("Brian", "627702")[2],
+        "reset_password": render_reset_password("Brian", "627702")[2],
+        "welcome": render_welcome_email("Brian")[2],
+        "notification": render_notification_digest(
+            "Brian",
+            [{"actor_name": "Sarah", "content": "followed you", "timestamp": "Now"}],
+        )[2],
+        "admin_announcement": render_admin_announcement(
+            "Brian",
+            "Daily Anchor Update",
+            "A new anchor is available.",
+        )[2],
+        "support_donation": render_support_donation("Brian", "5.00", "May 26, 2026")[2],
+        "warning": render_moderation_notice("Brian", "warned", "Policy violation")[2],
+        "suspension": render_moderation_notice("Brian", "suspended", "Policy violation")[2],
+        "reactivation": render_moderation_notice("Brian", "reactivated")[2],
+    }
 
 
 def _assert_shipped_email_html(html: str) -> None:
@@ -29,6 +67,81 @@ def _assert_shipped_email_html(html: str) -> None:
 def _assert_card_width(html: str, width: int) -> None:
     assert f'width="{width}"' in html
     assert f"width:{width}px" in html
+
+
+def test_email_palette_matches_approved_react_tokens():
+    assert dict(EMAIL_COLORS) == EXPECTED_EMAIL_COLORS
+    assert dict(SUPPORT_DONATION_COLORS) == {
+        "highlight_background": "#F9F0FC",
+        "divider": "#CEC5D1",
+    }
+
+
+def test_branded_templates_use_palette_and_outlook_background_fallbacks(settings):
+    settings.EMAIL_ASSET_BASE_URL = "https://cdn.example.com/email"
+
+    rendered = _render_all_branded_email_html()
+    for html in rendered.values():
+        assert f'bgcolor="{EMAIL_COLORS["background"]}"' in html
+        assert f"background-color:{EMAIL_COLORS['background']}" in html
+        assert f'bgcolor="{EMAIL_COLORS["surface"]}"' in html
+        assert f"background-color:{EMAIL_COLORS['surface']}" in html
+        assert "#6B21A8" not in html.upper()
+        assert "#F59E0B" not in html.upper()
+        _assert_shipped_email_html(html)
+
+    combined_html = "".join(rendered.values())
+    for color_name in (
+        "primary",
+        "primary_accent",
+        "brand_inverse",
+        "text_primary",
+        "text_secondary",
+        "text_tertiary",
+        "background",
+        "surface",
+        "footer_text",
+    ):
+        assert EMAIL_COLORS[color_name] in combined_html
+
+
+def test_support_donation_uses_exact_rendered_react_colors(settings):
+    settings.EMAIL_ASSET_BASE_URL = "https://cdn.example.com/email"
+
+    html = render_support_donation("David", "5.00", "May 26, 2026")[2]
+
+    assert f'bgcolor="{SUPPORT_DONATION_COLORS["highlight_background"]}"' in html
+    assert f"background:{SUPPORT_DONATION_COLORS['highlight_background']}" in html
+    assert f'bgcolor="{SUPPORT_DONATION_COLORS["divider"]}"' in html
+    assert f"background:{SUPPORT_DONATION_COLORS['divider']}" in html
+    assert f'bgcolor="{EMAIL_COLORS["primary_accent"]}"' in html
+    assert f"color:{EMAIL_COLORS['footer_text']}" in html
+    assert "rgba(246, 234, 250, 0.7)" not in html
+    assert "rgba(156, 139, 162, 0.5)" not in html
+
+
+def test_public_email_renderer_signatures_are_unchanged():
+    expected_parameters = {
+        render_verify_email: ("user_name", "otp_code", "expiry_minutes", "brand"),
+        render_reset_password: ("user_name", "otp_code", "expiry_minutes", "brand"),
+        render_welcome_email: ("user_name", "brand"),
+        render_notification_digest: ("user_name", "activities", "brand"),
+        render_admin_announcement: (
+            "user_name",
+            "heading",
+            "body",
+            "circle_name",
+            "published_at",
+            "cta_label",
+            "cta_link",
+            "brand",
+        ),
+        render_moderation_notice: ("user_name", "action_type", "reason", "brand"),
+        render_support_donation: ("user_name", "support_amount", "support_date", "brand"),
+    }
+
+    for renderer, parameter_names in expected_parameters.items():
+        assert tuple(signature(renderer).parameters) == parameter_names
 
 
 def test_verify_email_template_renders_html_and_plain(settings):
@@ -186,6 +299,11 @@ def test_email_asset_manifest_lists_required_assets():
     assert assets["tiktokIcon"]["outputPath"] == "assets/social-tiktok.png"
     assert assets["facebookIcon"]["outputPath"] == "assets/social-facebook.png"
     assert assets["supportHero"]["outputPath"] == "assets/support-hero.png"
+    support_hero_source = assets["supportHero"]["sourcePath"]
+    with open(support_hero_source, "rb") as support_hero_file:
+        support_hero_digest = sha256(support_hero_file.read()).hexdigest()
+    assert support_hero_digest == assets["supportHero"]["sha256"]
+    assert assets["supportHero"]["overlay"].startswith("linear-gradient(180deg")
     assert "supportHero" in manifest["templates"]["support_donation.html"]
 
 

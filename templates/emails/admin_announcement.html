@@ -5,31 +5,31 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>{{ announcement_heading }}</title>
 </head>
-<body style="margin:0;padding:0;background:#F5F2F8;">
-  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#F5F2F8" style="width:100%;background:#F5F2F8;border-collapse:collapse;">
+<body style="margin:0;padding:0;background-color:{{ email_colors.background }};">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="{{ email_colors.background }}" style="width:100%;background-color:{{ email_colors.background }};border-collapse:collapse;">
     <tr>
       <td align="center" style="padding:40px 16px;">
-        <table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" align="center" bgcolor="#FFFFFF" style="width:600px;max-width:600px;margin:0 auto;background:#FFFFFF;border:1px solid #E9DDF0;border-radius:28px;border-collapse:separate;overflow:hidden;">
+        <table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" align="center" bgcolor="{{ email_colors.surface }}" style="width:600px;max-width:600px;margin:0 auto;background-color:{{ email_colors.surface }};border:1px solid #E9DDF0;border-radius:28px;border-collapse:separate;overflow:hidden;">
           <tr>
             <td style="padding:40px;">
               <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;border-collapse:collapse;">
                 <tr>
                   <td width="48" valign="middle" style="width:48px;padding:0 12px 0 0;">
-                    <table role="presentation" width="48" height="48" cellpadding="0" cellspacing="0" border="0" bgcolor="#F6EAFA" style="width:48px;height:48px;background:#F6EAFA;border-radius:16px;border-collapse:separate;">
+                    <table role="presentation" width="48" height="48" cellpadding="0" cellspacing="0" border="0" bgcolor="{{ email_colors.brand_inverse }}" style="width:48px;height:48px;background:{{ email_colors.brand_inverse }};border-radius:16px;border-collapse:separate;">
                       <tr>
                         <td align="center" valign="middle">
-                          <table role="presentation" width="36" height="36" cellpadding="0" cellspacing="0" border="0" bgcolor="#742092" style="width:36px;height:36px;background:#742092;border-radius:12px;border-collapse:separate;"><tr><td align="center" style="color:#FFFFFF;font-family:'Mona Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:18px;font-weight:600;line-height:36px;">Z</td></tr></table>
+                          <table role="presentation" width="36" height="36" cellpadding="0" cellspacing="0" border="0" bgcolor="{{ email_colors.primary }}" style="width:36px;height:36px;background:{{ email_colors.primary }};border-radius:12px;border-collapse:separate;"><tr><td align="center" style="color:{{ email_colors.surface }};font-family:'Mona Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:18px;font-weight:600;line-height:36px;">Z</td></tr></table>
                         </td>
                       </tr>
                     </table>
                   </td>
                   <td valign="middle" style="padding:0;">
-                    <div style="color:#742092;font-family:'Mona Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:14px;font-weight:600;line-height:20px;letter-spacing:3.36px;text-transform:uppercase;">Ziona</div>
+                    <div style="color:{{ email_colors.primary }};font-family:'Mona Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:14px;font-weight:600;line-height:20px;letter-spacing:3.36px;text-transform:uppercase;">Ziona</div>
                   </td>
                 </tr>
                 <tr><td colspan="2" height="32" style="height:32px;font-size:0;line-height:32px;">&nbsp;</td></tr>
                 <tr>
-                  <td colspan="2" style="padding:0;color:#742092;font-family:'Mona Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:12px;font-weight:600;line-height:18px;letter-spacing:2.88px;text-transform:uppercase;">
+                  <td colspan="2" style="padding:0;color:{{ email_colors.primary }};font-family:'Mona Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:12px;font-weight:600;line-height:18px;letter-spacing:2.88px;text-transform:uppercase;">
                     Admin Announcement
                   </td>
                 </tr>
@@ -42,8 +42,8 @@
                 <tr><td colspan="2" height="32" style="height:32px;font-size:0;line-height:32px;">&nbsp;</td></tr>
                 <tr>
                   <td colspan="2" bgcolor="#F8F3FB" style="padding:24px;background:#F8F3FB;border-radius:24px;">
-                    <div style="color:#742092;font-family:'Mona Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:14px;font-weight:500;line-height:20px;">Hello {{ username }},</div>
-                    <div style="padding-top:16px;color:#4E4252;font-family:'Mona Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:16px;font-weight:400;line-height:28px;">{{ announcement_body }}</div>
+                    <div style="color:{{ email_colors.primary }};font-family:'Mona Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:14px;font-weight:500;line-height:20px;">Hello {{ username }},</div>
+                    <div style="padding-top:16px;color:{{ email_colors.text_secondary }};font-family:'Mona Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:16px;font-weight:400;line-height:28px;">{{ announcement_body }}</div>
                   </td>
                 </tr>
                 <tr><td colspan="2" height="24" style="height:24px;font-size:0;line-height:24px;">&nbsp;</td></tr>
@@ -68,8 +68,8 @@
                   <td colspan="2" align="left" style="padding:0;">
                     <table role="presentation" cellpadding="0" cellspacing="0" border="0">
                       <tr>
-                        <td align="center" bgcolor="#742092" style="border-radius:16px;background:#742092;">
-                          <a href="{{ announcement_cta_link }}" style="display:inline-block;padding:12px 24px;color:#FFFFFF;font-family:'Mona Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:14px;font-weight:600;line-height:20px;text-decoration:none;border-radius:16px;">{{ announcement_cta_label }}</a>
+                        <td align="center" bgcolor="{{ email_colors.primary }}" style="border-radius:16px;background:{{ email_colors.primary }};">
+                          <a href="{{ announcement_cta_link }}" style="display:inline-block;padding:12px 24px;color:{{ email_colors.surface }};font-family:'Mona Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:14px;font-weight:600;line-height:20px;text-decoration:none;border-radius:16px;">{{ announcement_cta_label }}</a>
                         </td>
                       </tr>
                     </table>

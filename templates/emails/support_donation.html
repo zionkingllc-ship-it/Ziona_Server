@@ -5,27 +5,27 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Support Received</title>
 </head>
-<body style="margin:0;padding:0;background:#F5F2F8;">
-  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#F5F2F8" style="width:100%;background:#F5F2F8;border-collapse:collapse;">
+<body style="margin:0;padding:0;background-color:{{ email_colors.background }};">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="{{ email_colors.background }}" style="width:100%;background-color:{{ email_colors.background }};border-collapse:collapse;">
     <tr>
       <td align="center" style="padding:40px 16px;">
-        <table role="presentation" width="480" cellpadding="0" cellspacing="0" border="0" align="center" bgcolor="#FFFFFF" style="width:480px;max-width:480px;margin:0 auto;background:#FFFFFF;border-radius:30px;border-collapse:separate;overflow:hidden;">
+        <table role="presentation" width="480" cellpadding="0" cellspacing="0" border="0" align="center" bgcolor="{{ email_colors.surface }}" style="width:480px;max-width:480px;margin:0 auto;background-color:{{ email_colors.surface }};border-radius:30px;border-collapse:separate;overflow:hidden;">
           <tr>
             <td style="padding:51px 19px;">
               <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;border-collapse:collapse;">
                 {% include "emails/partials/logo_row.html" %}
                 <tr><td height="37" style="height:37px;font-size:0;line-height:37px;">&nbsp;</td></tr>
                 <tr>
-                  <td align="center" background="{{ support_hero_url }}" bgcolor="#742092" style="height:140px;padding:24px 35px;background-color:#742092;background-image:url('{{ support_hero_url }}');background-size:cover;background-position:center;border-radius:24px;overflow:hidden;">
+                  <td align="center" background="{{ support_hero_url }}" bgcolor="{{ email_colors.primary }}" style="height:140px;padding:24px 35px;background-color:{{ email_colors.primary }};background-image:url('{{ support_hero_url }}');background-size:cover;background-position:center;border-radius:24px;overflow:hidden;">
                     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;border-collapse:collapse;">
                       <tr>
-                        <td align="center" style="padding:0;color:#FFFFFF;font-family:'Mona Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:20px;font-weight:600;line-height:24px;">
+                        <td align="center" style="padding:0;color:{{ email_colors.surface }};font-family:'Mona Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:20px;font-weight:600;line-height:24px;">
                           You're part of something beautiful
                         </td>
                       </tr>
                       <tr><td height="25" style="height:25px;font-size:0;line-height:25px;">&nbsp;</td></tr>
                       <tr>
-                        <td align="center" style="padding:0;color:#FFFFFF;font-family:'Mona Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:13px;font-weight:500;line-height:19px;">
+                        <td align="center" style="padding:0;color:{{ email_colors.surface }};font-family:'Mona Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:13px;font-weight:500;line-height:19px;">
                           Your generosity just made a real difference.
                         </td>
                       </tr>
@@ -34,35 +34,35 @@
                 </tr>
                 <tr><td height="23" style="height:23px;font-size:0;line-height:23px;">&nbsp;</td></tr>
                 <tr>
-                  <td align="left" style="padding:0;color:#181419;font-family:'Mona Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:16px;font-weight:400;line-height:24px;">
+                  <td align="left" style="padding:0;color:{{ email_colors.text_primary }};font-family:'Mona Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:16px;font-weight:400;line-height:24px;">
                     Hi {{ username }},
                   </td>
                 </tr>
                 <tr><td height="16" style="height:16px;font-size:0;line-height:16px;">&nbsp;</td></tr>
                 <tr>
-                  <td align="center" style="padding:0;color:#742092;font-family:'Mona Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:16px;font-weight:600;line-height:24px;">
+                  <td align="center" style="padding:0;color:{{ email_colors.primary }};font-family:'Mona Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:16px;font-weight:600;line-height:24px;">
                     Thank you for your support!
                   </td>
                 </tr>
                 <tr><td height="16" style="height:16px;font-size:0;line-height:16px;">&nbsp;</td></tr>
                 <tr>
-                  <td align="left" style="padding:0;color:#181419;font-family:'Mona Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:13px;font-weight:400;line-height:19px;">
+                  <td align="left" style="padding:0;color:{{ email_colors.text_primary }};font-family:'Mona Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:13px;font-weight:400;line-height:19px;">
                     Your support has been received and we are truly grateful. What you did today isn't just a donation; it's a declaration that faith, community, and creativity matter.
                   </td>
                 </tr>
                 <tr><td height="14" style="height:14px;font-size:0;line-height:14px;">&nbsp;</td></tr>
                 <tr>
-                  <td align="left" style="padding:0;color:#181419;font-family:'Mona Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:13px;font-weight:400;line-height:19px;">
+                  <td align="left" style="padding:0;color:{{ email_colors.text_primary }};font-family:'Mona Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:13px;font-weight:400;line-height:19px;">
                     Because of YOU, we're able to grow, improve and reach more people.
                   </td>
                 </tr>
                 <tr><td height="16" style="height:16px;font-size:0;line-height:16px;">&nbsp;</td></tr>
                 <tr>
-                  <td bgcolor="#F6EAFA" style="padding:0;background:#F6EAFA;border-radius:8px;overflow:hidden;">
+                  <td bgcolor="{{ support_email_colors.highlight_background }}" style="padding:0;background:{{ support_email_colors.highlight_background }};border-radius:8px;overflow:hidden;">
                     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;border-collapse:collapse;">
                       <tr>
-                        <td width="8" bgcolor="#9629BC" style="width:8px;background:#9629BC;font-size:0;line-height:0;">&nbsp;</td>
-                        <td style="padding:16px 12px 16px 16px;color:#181419;font-family:'Mona Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:13px;font-weight:600;line-height:19px;">
+                        <td width="8" bgcolor="{{ email_colors.primary_accent }}" style="width:8px;background:{{ email_colors.primary_accent }};font-size:0;line-height:0;">&nbsp;</td>
+                        <td style="padding:16px 12px 16px 16px;color:{{ email_colors.text_primary }};font-family:'Mona Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:13px;font-weight:600;line-height:19px;">
                           <span style="font-weight:400;">As a supporter, you'll receive </span>early priority access<span style="font-weight:400;"> to new features as we roll them out.</span>
                         </td>
                       </tr>
@@ -71,21 +71,21 @@
                 </tr>
                 <tr><td height="16" style="height:16px;font-size:0;line-height:16px;">&nbsp;</td></tr>
                 <tr>
-                  <td align="left" style="padding:0;color:#181419;font-family:'Mona Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:13px;font-weight:400;line-height:19px;">
+                  <td align="left" style="padding:0;color:{{ email_colors.text_primary }};font-family:'Mona Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:13px;font-weight:400;line-height:19px;">
                     Contribution received: <strong style="font-weight:600;">{{ support_amount }}</strong> on <strong style="font-weight:600;">{{ support_date }}</strong>.
                   </td>
                 </tr>
                 <tr><td height="16" style="height:16px;font-size:0;line-height:16px;">&nbsp;</td></tr>
                 <tr>
-                  <td align="left" style="padding:0;color:#181419;font-family:'Mona Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:13px;font-weight:400;line-height:19px;">
+                  <td align="left" style="padding:0;color:{{ email_colors.text_primary }};font-family:'Mona Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:13px;font-weight:400;line-height:19px;">
                     We are grateful to have you on this journey with us.
                   </td>
                 </tr>
                 <tr><td height="33" style="height:33px;font-size:0;line-height:33px;">&nbsp;</td></tr>
-                <tr><td height="1" bgcolor="#9C8BA2" style="height:1px;background:#9C8BA2;font-size:0;line-height:1px;">&nbsp;</td></tr>
+                <tr><td height="1" bgcolor="{{ support_email_colors.divider }}" style="height:1px;background:{{ support_email_colors.divider }};font-size:0;line-height:1px;">&nbsp;</td></tr>
                 <tr><td height="37" style="height:37px;font-size:0;line-height:37px;">&nbsp;</td></tr>
                 <tr>
-                  <td align="center" style="padding:0;color:#484848;font-family:'Mona Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:10px;font-weight:500;line-height:15px;">
+                  <td align="center" style="padding:0;color:{{ email_colors.footer_text }};font-family:'Mona Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:10px;font-weight:500;line-height:15px;">
                     With gratitude,<br />The Ziona Support Team
                   </td>
                 </tr>

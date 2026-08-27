@@ -6,8 +6,8 @@ Each function is None/empty-safe:
   - user_name falls back to "Friend" when falsy
   - activities defaults to [] when None
 
-Design: purple (#6B21A8) / gold (#F59E0B) Ziona branding, inline CSS only
-        for maximum Ensend / email-client compatibility.
+Design: Ziona's canonical React-template palette, with inline CSS only for
+        maximum Ensend / email-client compatibility.
 """
 
 from __future__ import annotations
@@ -17,6 +17,8 @@ from decimal import Decimal
 from django.conf import settings
 from django.template.loader import render_to_string
 from django.utils import timezone
+
+from core.emails.palette import EMAIL_COLORS, SUPPORT_DONATION_COLORS
 
 # ─────────────────────────────────────────────────────────────
 # Brand configuration
@@ -67,6 +69,8 @@ def _base_context(**overrides) -> dict:
         "tiktok_icon_url": f"{asset_base_url}/assets/social-tiktok.png",
         "facebook_icon_url": f"{asset_base_url}/assets/social-facebook.png",
         "support_hero_url": f"{asset_base_url}/assets/support-hero.png",
+        "email_colors": EMAIL_COLORS,
+        "support_email_colors": SUPPORT_DONATION_COLORS,
         "year": timezone.now().year,
     }
     context.update(overrides)
