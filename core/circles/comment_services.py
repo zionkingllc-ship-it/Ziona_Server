@@ -21,6 +21,7 @@ from core.circles.models import (
     CirclePostCommentLike,
 )
 from core.shared.exceptions import ZionaError
+from core.shared.utils import parse_uuid
 
 logger = logging.getLogger("core.circles")
 
@@ -177,6 +178,11 @@ def delete_circle_post_comment(
 
     Atomically decrements CirclePost.comments_count.
     """
+    # A non-UUID id would make Django raise ValidationError against the UUID pk,
+    # which escapes the DoesNotExist handler below as a bare GraphQL error.
+    if parse_uuid(comment_id) is None:
+        raise ZionaError(message="Comment not found", code=COMMENT_NOT_FOUND)
+
     try:
         comment = (
             CirclePostComment.objects.select_related("post")
@@ -221,6 +227,11 @@ def toggle_circle_post_comment_like(
         liked=True  → like was created.
         liked=False → like was removed.
     """
+    # A non-UUID id would make Django raise ValidationError against the UUID pk,
+    # which escapes the DoesNotExist handler below as a bare GraphQL error.
+    if parse_uuid(comment_id) is None:
+        raise ZionaError(message="Comment not found", code=COMMENT_NOT_FOUND)
+
     try:
         comment = (
             CirclePostComment.objects.select_related("post")

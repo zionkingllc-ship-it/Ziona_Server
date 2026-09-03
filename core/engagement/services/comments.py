@@ -27,12 +27,27 @@ from core.shared.dtos import (
     CommentViewerStateDTO,
 )
 from core.shared.exceptions import EngagementError, ErrorCode
+from core.shared.utils import parse_uuid
 
 logger = logging.getLogger("core.engagement")
 
 COMMENT_MAX_LENGTH = 500
 COMMENT_MAX_THREAD_DEPTH = 3
 MENTION_REGEX = re.compile(r"@(\w{3,30})")
+
+
+def _require_comment_id(comment_id, message: str = "Comment not found.") -> None:
+    """Reject a malformed comment id before it reaches the UUID primary key.
+
+    Comment ids are UUIDs, so comparing a non-UUID string against the pk makes
+    Django raise ValidationError when the query is compiled — which reaches the
+    client as an unstructured GraphQL error carrying a Django-internal message
+    and no error code. Failing here routes callers to their normal not-found
+    path instead.
+    """
+    if parse_uuid(comment_id) is None:
+        raise EngagementError(message=message, code=ErrorCode.COMMENT_NOT_FOUND)
+
 
 DEFAULT_BOOKMARK_FOLDERS = [
     "All",
@@ -81,6 +96,7 @@ def create_comment(
 
     parent_comment = None
     if parent_comment_id:
+        _require_comment_id(parent_comment_id, message="Parent comment not found.")
         parent_comment = Comment.objects.filter(
             id=parent_comment_id, deleted_at__isnull=True
         ).first()
@@ -142,6 +158,7 @@ def delete_comment(user_id: str, comment_id: str) -> CommentDeleteResponseDTO:
     Raises:
         EngagementError: If comment not found or permission denied.
     """
+    _require_comment_id(comment_id)
     comment = Comment.objects.filter(id=comment_id, deleted_at__isnull=True).first()
 
     if not comment:
@@ -181,6 +198,7 @@ def like_comment(user_id: str, comment_id: str) -> CommentStatsDTO:
     Raises:
         EngagementError: If comment not found.
     """
+    _require_comment_id(comment_id)
     comment = Comment.objects.filter(id=comment_id, deleted_at__isnull=True).first()
 
     if not comment:
@@ -215,6 +233,7 @@ def unlike_comment(user_id: str, comment_id: str) -> CommentStatsDTO:
     Raises:
         EngagementError: If comment not found.
     """
+    _require_comment_id(comment_id)
     comment = Comment.objects.filter(id=comment_id, deleted_at__isnull=True).first()
 
     if not comment:
@@ -329,7 +348,14 @@ def get_comment_replies(
         CommentsResponseDTO with paginated reply comments, oldest-first.
     """
     limit = min(limit, 50)
-    parent_comment = Comment.objects.filter(id=comment_id, deleted_at__isnull=True).first()
+    # Query path: a malformed id resolves to "no replies", matching the existing
+    # behaviour for a well-formed but missing id. This resolver has no error
+    # payload to return, so raising here would surface a bare GraphQL error.
+    parent_comment = (
+        Comment.objects.filter(id=comment_id, deleted_at__isnull=True).first()
+        if parse_uuid(comment_id)
+        else None
+    )
     if not parent_comment:
         return CommentsResponseDTO(
             comments=[],
