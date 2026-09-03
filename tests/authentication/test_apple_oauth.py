@@ -301,6 +301,37 @@ class TestAppleOAuth:
         assert user.social_auth_provider is None
         assert user.full_name == "Pending Apple"
 
+    def test_accepts_apple_token_from_additional_configured_bundle(
+        self, api_client, apple_private_key, settings
+    ):
+        """A second bundle in APPLE_CLIENT_IDS is accepted.
+
+        This is how the staging build (com.zionking.ziona.staging) signs in
+        alongside production without a code change — the allowlist is a list and
+        is passed straight to jwt.decode(audience=[...]).
+        """
+        staging_bundle = "com.zionking.ziona.staging"
+        settings.APPLE_CLIENT_IDS = [APPLE_AUDIENCE, staging_bundle]
+        raw_nonce = "staging-bundle-nonce"
+        _cache_nonce(raw_nonce)
+        token = _apple_token(
+            apple_private_key,
+            sub="apple-sub-staging",
+            raw_nonce=raw_nonce,
+            aud=staging_bundle,
+            email="staging.user@example.com",
+        )
+
+        response = api_client.post(
+            self.url,
+            data=json.dumps({"identityToken": token, "rawNonce": raw_nonce}),
+            content_type="application/json",
+        )
+
+        assert response.status_code == 200, response.json()
+        assert response.json()["success"] is True
+        assert User.objects.filter(email="staging.user@example.com").exists()
+
     def test_rejects_unconfigured_apple_audience(self, api_client, apple_private_key):
         raw_nonce = "bad-audience-nonce"
         _cache_nonce(raw_nonce)
