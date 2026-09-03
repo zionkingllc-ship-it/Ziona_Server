@@ -428,8 +428,13 @@ class NotificationMutations:
     @strawberry.mutation
     def register_device_token(self, info: Info, token: str, platform: str) -> SuccessResponse:
         user = _get_authenticated_notification_user(info)
-        register_device_token(user.id, token, platform)
-        # We can pass the message or just return True
+        try:
+            register_device_token(user.id, token, platform)
+        except ValueError as exc:
+            # Missing token/platform, or a token kind FCM cannot deliver to.
+            # Returned as a payload so the client sees a code rather than an
+            # unstructured GraphQL error.
+            return SuccessResponse(success=False, error=str(exc))
         return SuccessResponse(success=True)
 
     @strawberry.mutation

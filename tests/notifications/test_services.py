@@ -27,6 +27,16 @@ from core.notifications.services import (
 User = get_user_model()
 
 
+def _fcm_token(label: str) -> str:
+    """Build an FCM-shaped registration token for test fixtures.
+
+    Registration rejects Expo and raw-APNs tokens, so fixtures must look like a
+    real FCM token ("<instance-id>:APA91b<...>") when the test is about
+    registration behaviour rather than token validation.
+    """
+    return f"{label}:APA91b" + "x" * 120
+
+
 @pytest.fixture
 def user(db):
     return User.objects.create_user(
@@ -337,35 +347,35 @@ def test_register_device_token_limit(db, user):
 
 
 def test_register_device_token_is_idempotent_for_same_user(db, user):
-    register_device_token(user.id, "ExponentPushToken[same-device]", "ios")
-    register_device_token(user.id, "ExponentPushToken[same-device]", "android")
+    register_device_token(user.id, _fcm_token("same-device"), "ios")
+    register_device_token(user.id, _fcm_token("same-device"), "android")
 
-    token = DeviceToken.objects.get(token="ExponentPushToken[same-device]")
+    token = DeviceToken.objects.get(token=_fcm_token("same-device"))
     assert token.user == user
     assert token.platform == "android"
     assert token.is_active is True
-    assert DeviceToken.objects.filter(token="ExponentPushToken[same-device]").count() == 1
+    assert DeviceToken.objects.filter(token=_fcm_token("same-device")).count() == 1
 
 
 def test_register_device_token_transfers_same_device_to_new_user(db, user, other_user):
-    register_device_token(user.id, "ExponentPushToken[shared-device]", "ios")
-    register_device_token(other_user.id, "ExponentPushToken[shared-device]", "ios")
+    register_device_token(user.id, _fcm_token("shared-device"), "ios")
+    register_device_token(other_user.id, _fcm_token("shared-device"), "ios")
 
-    token = DeviceToken.objects.get(token="ExponentPushToken[shared-device]")
+    token = DeviceToken.objects.get(token=_fcm_token("shared-device"))
     assert token.user == other_user
     assert token.is_active is True
     assert DeviceToken.objects.filter(user=user).count() == 0
 
 
 def test_register_device_token_keeps_transferred_token_when_enforcing_limit(db, user, other_user):
-    register_device_token(other_user.id, "ExponentPushToken[shared-device]", "ios")
+    register_device_token(other_user.id, _fcm_token("shared-device"), "ios")
     for i in range(5):
-        register_device_token(user.id, f"ExponentPushToken[user-device-{i}]", "ios")
+        register_device_token(user.id, _fcm_token(f"user-device-{i}"), "ios")
 
-    register_device_token(user.id, "ExponentPushToken[shared-device]", "ios")
+    register_device_token(user.id, _fcm_token("shared-device"), "ios")
 
     assert DeviceToken.objects.filter(user=user).count() == 5
-    assert DeviceToken.objects.filter(user=user, token="ExponentPushToken[shared-device]").exists()
+    assert DeviceToken.objects.filter(user=user, token=_fcm_token("shared-device")).exists()
     assert not DeviceToken.objects.filter(user=other_user).exists()
 
 
@@ -500,14 +510,14 @@ def test_register_device_token_logs_without_full_token(db, user, monkeypatch):
 
     monkeypatch.setattr("core.notifications.services.logger.info", fake_info)
 
-    register_device_token(user.id, "ExponentPushToken[private-secret-token]", "ios")
+    register_device_token(user.id, _fcm_token("private-secret-token"), "ios")
 
     assert any(message == "device_token_registered" for message, _ in log_calls)
     assert "private-secret-token" not in str(log_calls)
 
 
 def test_send_push_notification_logs_provider_summary(db, user, monkeypatch):
-    register_device_token(user.id, "ExponentPushToken[device-1]", "ios")
+    register_device_token(user.id, _fcm_token("device-1"), "ios")
     log_calls = []
 
     def fake_info(message, *args, **kwargs):

@@ -19,6 +19,17 @@ logger = logging.getLogger(__name__)
 
 _firebase_initialized = False
 
+# FCM rejects the message because the server's credentials belong to a different
+# Firebase project than the app that minted the token. The token is still valid,
+# so these must NOT be added to the deactivation list.
+_CREDENTIAL_MISMATCH_CODES = frozenset(
+    {
+        "SENDER_ID_MISMATCH",
+        "messaging/mismatched-credential",
+        "messaging/sender-id-mismatch",
+    }
+)
+
 
 def initialize_firebase():
     """Load credentials and initialize Firebase Admin SDK."""
@@ -116,6 +127,23 @@ def send_fcm_notification(
                             "messaging/registration-token-not-registered",
                         ]:
                             all_invalid_tokens.append(chunk[i])
+                        elif err_code in _CREDENTIAL_MISMATCH_CODES:
+                            # The token is fine — this server is authenticated to
+                            # the wrong Firebase project. Deactivating here would
+                            # destroy good tokens, so log loudly instead: without
+                            # this the only symptom is success_count: 0.
+                            logger.error(
+                                "fcm_sender_id_mismatch",
+                                extra={
+                                    "error_code": err_code,
+                                    "server_project_id": get_fcm_project_id(),
+                                    "hint": (
+                                        "Backend credentials belong to a different "
+                                        "Firebase project than the app that minted "
+                                        "this token."
+                                    ),
+                                },
+                            )
 
         except Exception as e:
             logger.error(

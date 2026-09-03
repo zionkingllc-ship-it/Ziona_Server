@@ -59,6 +59,11 @@ NOTIFICATION_CATEGORY_TYPES = {
 
 CIRCLE_REFERENCE_TYPES = {"circle_post", "circle_post_comment", "anchor", "anchor_response"}
 
+# Token kinds FCM cannot deliver to (see _classify_token). Rejected at
+# registration so the client learns immediately, instead of the token being
+# stored, rejected by FCM, and silently deactivated forever.
+_UNDELIVERABLE_TOKEN_KINDS = {"expo", "apns_raw"}
+
 
 def _normalize_notification_category(category: str | None) -> str | None:
     if not category:
@@ -652,6 +657,23 @@ def register_device_token(user_id: int, token: str, platform: str) -> str:
         raise ValueError("DEVICE_TOKEN_REQUIRED")
     if not platform:
         raise ValueError("DEVICE_PLATFORM_REQUIRED")
+
+    # Reject token kinds FCM can never deliver to. Storing them is worse than
+    # refusing: FCM rejects them with INVALID_ARGUMENT, which permanently sets
+    # is_active=False, and from then on every event silently short-circuits on
+    # "no active tokens" — push dies with no error the client ever sees.
+    token_kind = _classify_token(token)
+    if token_kind in _UNDELIVERABLE_TOKEN_KINDS:
+        logger.warning(
+            "device_token_rejected_unsupported_kind",
+            extra={
+                "user_id": str(user_id),
+                "platform": platform,
+                "token_kind": token_kind,
+                "token_tail": token[-8:],
+            },
+        )
+        raise ValueError(ErrorCodes.INVALID_DEVICE_TOKEN)
 
     with transaction.atomic():
         # Take every row lock this registration could need up front, in one
