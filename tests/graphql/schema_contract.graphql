@@ -1323,6 +1323,7 @@ type MediaFileType {
   duration: Int
   height: Int
   id: String!
+  sortOrder: Int!
   thumbnailUrl: String
   type: MediaType!
   url: String!

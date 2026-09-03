@@ -502,7 +502,7 @@ class Post:
                 )
             )
         elif raw_type == "image":
-            for img in self._dto.media.items:
+            for index, img in enumerate(self._dto.media.items):
                 media_list.append(
                     MediaFileType(
                         id=img.id,
@@ -510,6 +510,7 @@ class Post:
                         type=MediaType.IMAGE,
                         width=img.width,
                         height=img.height,
+                        sort_order=getattr(img, "order", index),
                     )
                 )
         return media_list

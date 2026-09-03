@@ -375,7 +375,7 @@ def _dto_to_feed_post(dto) -> FeedPost:
                 )
             )
         elif dto.type == "image" and isinstance(dto.media, ImageMediaDTO):
-            for img in dto.media.items:
+            for index, img in enumerate(dto.media.items):
                 media_list.append(
                     MediaFileType(
                         id=getattr(img, "id", dto.id),
@@ -384,6 +384,7 @@ def _dto_to_feed_post(dto) -> FeedPost:
                         type=MediaTypeEnum.IMAGE,
                         width=getattr(img, "width", None),
                         height=getattr(img, "height", None),
+                        sort_order=getattr(img, "order", index),
                     )
                 )
 

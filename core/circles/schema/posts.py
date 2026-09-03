@@ -168,7 +168,8 @@ class CirclePostType:
             prayed_count=post.prayed_count,
             anchor_liked_count=post.anchor_liked_count,
             _media_list=[
-                _media_file_to_graphql(media_file) for media_file in post.media_files.all()
+                _media_file_to_graphql(media_file, index)
+                for index, media_file in enumerate(post.media_files.all())
             ],
         )
         # Carry viewer annotations from the ORM queryset onto the instance

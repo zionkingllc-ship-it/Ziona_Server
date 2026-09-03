@@ -3,7 +3,6 @@
 Split from the former core/circles/schema.py (no contract change).
 """
 
-
 from core.media.schema import MediaFileType
 from core.shared.types import MediaType as GraphQLMediaType
 
@@ -31,7 +30,7 @@ def _unique_anchor_dates(*anchor_groups) -> list[str]:
     return dates
 
 
-def _media_file_to_graphql(media_file) -> MediaFileType:
+def _media_file_to_graphql(media_file, index: int = 0) -> MediaFileType:
     from core.shared.utils import normalize_duration_seconds
 
     return MediaFileType(
@@ -42,4 +41,8 @@ def _media_file_to_graphql(media_file) -> MediaFileType:
         height=media_file.height,
         thumbnail_url=media_file.thumbnail_url,
         duration=normalize_duration_seconds(media_file.duration),
+        # `order` is annotated from the through table's position by the ordered
+        # prefetch (core.media.ordering). Fall back to list position so a
+        # non-annotated queryset still yields a stable ascending sequence.
+        sort_order=getattr(media_file, "order", index),
     )

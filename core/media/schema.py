@@ -19,6 +19,10 @@ class MediaFileType:
     height: int | None = None
     thumbnail_url: str | None = None  # For videos
     duration: int | None = None  # For videos
+    # Creator-selected display position within a post (0-based). Items are
+    # already returned in this order; the value lets clients re-sort safely
+    # after caching or merging. Single-media posts are always 0.
+    sort_order: int = strawberry.field(name="sortOrder", default=0)
 
 
 @strawberry.type
