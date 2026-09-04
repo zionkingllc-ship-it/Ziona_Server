@@ -315,6 +315,13 @@ def _apply_auto_hide(post_id: str | None, comment_id: str | None) -> None:
 
     Called immediately after a new report is persisted.  Uses a raw
     .update() call to avoid a second round-trip and stay race-safe.
+
+    The threshold counts *distinct reporters*, not report rows.  ``unique_user_report``
+    scopes uniqueness to (reporter, target, **reason**), so one user may legitimately
+    file several reports on the same content by picking different reasons — counting
+    rows would let a single account cross the threshold on its own and unilaterally
+    take down any post.  Mirrors ``core.circles.moderation_services``, which has always
+    counted distinct reporters.
     """
     from datetime import datetime
     from datetime import timezone as tz
@@ -325,7 +332,9 @@ def _apply_auto_hide(post_id: str | None, comment_id: str | None) -> None:
     now = datetime.now(tz.utc)
 
     if post_id:
-        report_count = Report.objects.filter(post_id=post_id).count()
+        report_count = (
+            Report.objects.filter(post_id=post_id).values("reporter_id").distinct().count()
+        )
         if report_count >= _AUTO_HIDE_THRESHOLD:
             # Soft-delete (hide) the post using the existing deleted_at pattern
             updated = Post.all_objects.filter(id=post_id, deleted_at__isnull=True).update(
@@ -338,7 +347,9 @@ def _apply_auto_hide(post_id: str | None, comment_id: str | None) -> None:
                 )
 
     elif comment_id:
-        report_count = Report.objects.filter(comment_id=comment_id).count()
+        report_count = (
+            Report.objects.filter(comment_id=comment_id).values("reporter_id").distinct().count()
+        )
         if report_count >= _AUTO_HIDE_THRESHOLD:
             updated = Comment.all_objects.filter(id=comment_id, deleted_at__isnull=True).update(
                 deleted_at=now
