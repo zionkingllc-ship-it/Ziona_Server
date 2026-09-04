@@ -115,10 +115,22 @@ def _hidden_or_live(target, text: str, media_url: str, media_type: str, thumbnai
 
 
 def _circle_report_target_previews(reports) -> dict:
-    """Bulk-resolve report targets (3 queries max) → {(target_type, id): preview}."""
-    from core.circles.models import Anchor, AnchorResponse, Circle
+    """Bulk-resolve report targets (5 queries max) → {(target_type, id): preview}.
 
-    ids_by_type: dict[str, set[str]] = {"anchor": set(), "response": set(), "circle": set()}
+    One bulk query per target type, plus the ordered-media prefetch circle posts need.
+    A target type missing from ``ids_by_type`` silently degrades to
+    ``_missing_target_preview()``, so every value in ``CircleReport.TARGET_TYPE_CHOICES``
+    must have an entry here.
+    """
+    from core.circles.models import Anchor, AnchorResponse, Circle, CirclePost
+    from core.media.ordering import ordered_circle_post_media_prefetch
+
+    ids_by_type: dict[str, set[str]] = {
+        "anchor": set(),
+        "response": set(),
+        "circle": set(),
+        "post": set(),
+    }
     for r in reports:
         if r.target_type in ids_by_type:
             ids_by_type[r.target_type].add(str(r.target_id))
@@ -148,6 +160,22 @@ def _circle_report_target_previews(reports) -> dict:
     for circle in Circle.all_objects.filter(id__in=ids_by_type["circle"]):
         previews[("circle", str(circle.id))] = _hidden_or_live(
             circle, circle.name, circle.cover_image, "image", ""
+        )
+
+    circle_posts = CirclePost.all_objects.filter(id__in=ids_by_type["post"]).prefetch_related(
+        ordered_circle_post_media_prefetch()
+    )
+    for post in circle_posts:
+        # Prefer the media pipeline (typed, with a thumbnail) and fall back to the
+        # legacy single-URL columns, mirroring CirclePostType._primary_media.
+        media = next(iter(post.media_files.all()), None)
+        if media:
+            media_url, media_type = media.url, media.media_type or ""
+            thumbnail = media.thumbnail_url or ""
+        else:
+            media_url, media_type, thumbnail = (post.media_url or post.image_url), "", ""
+        previews[("post", str(post.id))] = _hidden_or_live(
+            post, post.text, media_url, media_type, thumbnail
         )
 
     return previews
@@ -277,7 +305,7 @@ def _remove_circle_target(report, admin_user, ip_address: str) -> None:
     """Take down the reported content (mirrors the auto-hide mechanics)."""
     from django.utils import timezone as dj_timezone
 
-    from core.circles.models import Anchor, AnchorResponse
+    from core.circles.models import Anchor, AnchorResponse, CirclePost
     from core.shared.exceptions import AdminError
 
     now = dj_timezone.now()
@@ -294,6 +322,11 @@ def _remove_circle_target(report, admin_user, ip_address: str) -> None:
         if response and response.deleted_at is None:
             response.deleted_at = now
             response.save(update_fields=["deleted_at"])
+    elif report.target_type == "post":
+        post = CirclePost.all_objects.filter(id=report.target_id).first()
+        if post and post.deleted_at is None:
+            post.deleted_at = now
+            post.save(update_fields=["deleted_at"])
     elif report.target_type == "circle":
         from core.admin_dashboard.circle_services import CircleManagementService
 
@@ -311,7 +344,7 @@ def _restore_circle_target(report) -> None:
     Circles are never auto-hidden by the report threshold, so a ``keep`` on a
     circle target changes no content — it only resolves the reports.
     """
-    from core.circles.models import Anchor, AnchorResponse
+    from core.circles.models import Anchor, AnchorResponse, CirclePost
 
     if report.target_type == "anchor":
         anchor = Anchor.all_objects.filter(id=report.target_id).first()
@@ -326,3 +359,8 @@ def _restore_circle_target(report) -> None:
         if response and response.deleted_at is not None:
             response.deleted_at = None
             response.save(update_fields=["deleted_at"])
+    elif report.target_type == "post":
+        post = CirclePost.all_objects.filter(id=report.target_id).first()
+        if post and post.deleted_at is not None:
+            post.deleted_at = None
+            post.save(update_fields=["deleted_at"])

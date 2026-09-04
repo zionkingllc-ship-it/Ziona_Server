@@ -8,6 +8,8 @@ query end to end.
 from datetime import timedelta
 
 import pytest
+from django.db import connection
+from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 
 from core.admin_dashboard.circle_report_services import list_circle_reports
@@ -331,3 +333,192 @@ def test_admin_review_circle_report_graphql_mutation(
     assert payload["report"]["contentPreview"]["available"] is False
     anchor.refresh_from_db()
     assert anchor.deleted_at is not None
+
+
+# ──────────────────────────────────────────────────────────────────────────
+#  target_type="post" (CirclePost)
+#
+#  `post` was added to CircleReport.TARGET_TYPE_CHOICES in migration 0014 and
+#  wired into the reporting side, but never into this admin service — every
+#  test above uses anchor/response, so nothing caught it. Reported circle posts
+#  rendered as "missing", and both review actions were silent no-ops.
+# ──────────────────────────────────────────────────────────────────────────
+
+
+def _circle_post(circle, author, text="Reported Circle Post", **overrides):
+    from core.circles.models import CirclePost
+
+    defaults = {"circle": circle, "user": author, "text": text}
+    defaults.update(overrides)
+    return CirclePost.objects.create(**defaults)
+
+
+def _ready_media(author, name="circle-media.jpg", media_type="image"):
+    from core.media.models import MediaFile
+
+    return MediaFile.objects.create(
+        user=author,
+        file_name=name,
+        storage_path=name,
+        media_type=media_type,
+        file_size=2048,
+        status="ready",
+    )
+
+
+@pytest.mark.django_db
+def test_list_circle_reports_resolves_circle_post_preview(authenticated_admin, create_user, circle):
+    admin = authenticated_admin["user"]
+    reporter = create_user(email="post-rep@example.com", username="postrep")
+    post = _circle_post(circle, admin, text="Something objectionable")
+    media = _ready_media(admin)
+    post.media_files.add(media)
+    CircleReport.objects.create(
+        reporter=reporter,
+        circle=circle,
+        target_type="post",
+        target_id=post.id,
+        reason="spam",
+    )
+
+    row = list_circle_reports()["reports"][0]
+
+    assert row["target_type"] == "post"
+    preview = row["content_preview"]
+    assert preview["available"] is True
+    assert preview["text"] == "Something objectionable"
+    assert preview["media_url"] == media.url
+    assert preview["media_type"] == "image"
+
+
+@pytest.mark.django_db
+def test_circle_post_preview_falls_back_to_legacy_media_url(
+    authenticated_admin, create_user, circle
+):
+    """Older circle posts predate the media pipeline and only carry a URL column."""
+    admin = authenticated_admin["user"]
+    reporter = create_user(email="legacy-rep@example.com", username="legacyrep")
+    post = _circle_post(circle, admin, media_url="https://example.com/legacy.jpg")
+    CircleReport.objects.create(
+        reporter=reporter, circle=circle, target_type="post", target_id=post.id, reason="spam"
+    )
+
+    preview = list_circle_reports()["reports"][0]["content_preview"]
+
+    assert preview["available"] is True
+    assert preview["media_url"] == "https://example.com/legacy.jpg"
+
+
+@pytest.mark.django_db
+def test_auto_hidden_circle_post_is_reported_as_hidden(authenticated_admin, create_user, circle):
+    admin = authenticated_admin["user"]
+    post = _circle_post(circle, admin, text="Hidden Post")
+    for i in range(3):
+        reporter = create_user(email=f"ph{i}@example.com", username=f"phrep{i}")
+        CircleReport.objects.create(
+            reporter=reporter,
+            circle=circle,
+            target_type="post",
+            target_id=post.id,
+            reason="spam",
+        )
+    post.deleted_at = timezone.now()  # the 3-report auto-hide
+    post.save(update_fields=["deleted_at"])
+
+    row = list_circle_reports()["reports"][0]
+
+    assert row["report_count"] == 3
+    assert row["auto_hidden"] is True
+    assert row["content_preview"]["unavailable_reason"] == "hidden"
+    assert row["content_preview"]["text"] == "Hidden Post"  # admins still see what it was
+
+
+@pytest.mark.django_db
+def test_review_remove_takes_down_a_circle_post(authenticated_admin, create_user, circle):
+    """Regression: the report resolved but the post stayed live."""
+    from core.admin_dashboard.circle_report_services import review_circle_report
+
+    admin = authenticated_admin["user"]
+    reporter = create_user(email="prem-rep@example.com", username="premrep")
+    post = _circle_post(circle, admin, text="Take me down")
+    report = CircleReport.objects.create(
+        reporter=reporter,
+        circle=circle,
+        target_type="post",
+        target_id=post.id,
+        reason="hate speech",
+    )
+
+    result = review_circle_report(str(report.id), "remove", admin)
+
+    assert result["status"] == "resolved_removed"
+    post.refresh_from_db()
+    assert post.deleted_at is not None
+    assert result["content_preview"]["unavailable_reason"] == "hidden"
+
+
+@pytest.mark.django_db
+def test_review_keep_restores_an_auto_hidden_circle_post(authenticated_admin, create_user, circle):
+    """Regression: an auto-hidden circle post could never be brought back."""
+    from core.admin_dashboard.circle_report_services import review_circle_report
+
+    admin = authenticated_admin["user"]
+    post = _circle_post(circle, admin, text="Wrongly hidden post")
+    reports = [
+        CircleReport.objects.create(
+            reporter=create_user(email=f"pk{i}@example.com", username=f"pkrep{i}"),
+            circle=circle,
+            target_type="post",
+            target_id=post.id,
+            reason="spam",
+        )
+        for i in range(3)
+    ]
+    post.deleted_at = timezone.now()
+    post.save(update_fields=["deleted_at"])
+
+    result = review_circle_report(str(reports[0].id), "keep", admin)
+
+    assert result["status"] == "resolved_kept"
+    post.refresh_from_db()
+    assert post.deleted_at is None
+    assert not CircleReport.objects.filter(target_id=post.id, status="pending").exists()
+
+
+@pytest.mark.django_db
+def test_preview_resolution_does_not_n_plus_one(
+    authenticated_admin, create_user, circle, django_assert_num_queries
+):
+    """Query count must not grow with the number of reported circle posts.
+
+    Circle-post media is a M2M, so dropping the ordered prefetch would add a
+    query per post. Asserting the count is *unchanged* between a small and a
+    larger page catches that without pinning a brittle magic number.
+    """
+    admin = authenticated_admin["user"]
+
+    def _reported_post(i):
+        post = _circle_post(circle, admin, text=f"Post {i}")
+        post.media_files.add(_ready_media(admin, name=f"m{i}.jpg"))
+        CircleReport.objects.create(
+            reporter=create_user(email=f"nq{i}@example.com", username=f"nqrep{i}"),
+            circle=circle,
+            target_type="post",
+            target_id=post.id,
+            reason="spam",
+        )
+
+    for i in range(2):
+        _reported_post(i)
+
+    with CaptureQueriesContext(connection) as small:
+        assert len(list_circle_reports()["reports"]) == 2
+
+    for i in range(2, 8):
+        _reported_post(i)
+
+    with django_assert_num_queries(len(small)):
+        result = list_circle_reports()
+
+    assert len(result["reports"]) == 8
+    assert all(r["content_preview"]["available"] for r in result["reports"])
