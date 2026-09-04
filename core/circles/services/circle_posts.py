@@ -280,6 +280,9 @@ def get_circle_post(post_id: str, viewer_id: str | None = None) -> CirclePost:
         target_type="circle",
         target_field="circle_id",
     )
+    # Also suppress the post itself for a viewer who reported it — get_circle_feed
+    # already does this, so without it a reported post stays reachable by direct link.
+    queryset = exclude_hidden_circle_content(queryset, viewer_id, target_type="post")
 
     if viewer_id:
         queryset = queryset.annotate(

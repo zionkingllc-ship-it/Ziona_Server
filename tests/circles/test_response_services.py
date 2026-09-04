@@ -361,6 +361,24 @@ def test_report_circle_post_hidden_for_reporter_only(circle_with_anchor, test_us
     assert post.id in author_post_ids
 
 
+def test_reported_circle_post_is_not_reachable_by_direct_link(circle_with_anchor, test_users):
+    """Hiding it from the feed is not enough — the single-post fetch must agree."""
+    from core.circles.services import get_circle_post
+    from core.shared.exceptions import ZionaError
+
+    circle, _ = circle_with_anchor
+    author, reporter, _ = test_users
+    post = CirclePost.objects.create(circle=circle, user=author, text="Reported then opened")
+
+    report_circle_content(reporter.id, "post", post.id, "Spam", circle.id)
+
+    with pytest.raises(ZionaError) as excinfo:
+        get_circle_post(str(post.id), viewer_id=str(reporter.id))
+    assert excinfo.value.code == "CIRCLE_POST_NOT_FOUND"
+
+    assert get_circle_post(str(post.id), viewer_id=str(author.id)).id == post.id
+
+
 def test_report_circle_post_auto_hides_after_three(circle_with_anchor, test_users):
     circle, _ = circle_with_anchor
     author, member, _ = test_users
