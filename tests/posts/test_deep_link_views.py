@@ -42,25 +42,60 @@ def test_android_assetlinks_default_matches_release_fingerprints(client):
 @pytest.mark.django_db
 def test_apple_app_site_association_builds_appid_from_team_id(client, settings):
     settings.APPLE_TEAM_ID = "ABCDE12345"
-    settings.APPLE_DEFAULT_CLIENT_IDS = ["com.zionking.ziona"]
+    settings.APPLE_BUNDLE_ID = "com.zionking.ziona"
 
     resp = client.get("/.well-known/apple-app-site-association")
 
     assert resp.status_code == 200
     assert resp["Content-Type"] == "application/json"
     detail = resp.json()["applinks"]["details"][0]
-    assert detail["appID"] == "ABCDE12345.com.zionking.ziona"
-    assert detail["paths"] == ["/post/*", "/profile/*"]
+    # Modern AASA shape (iOS 13+): appIDs/components, not appID/paths.
+    assert detail["appIDs"] == ["ABCDE12345.com.zionking.ziona"]
+    assert [c["/"] for c in detail["components"] if "/" in c] == [
+        "/post/*",
+        "/profile/*",
+        "/viewer/*",
+    ]
+
+
+@pytest.mark.django_db
+def test_apple_app_site_association_excludes_opt_out_fragment(client):
+    """The exclude rule must come first — order decides which rule wins."""
+    resp = client.get("/.well-known/apple-app-site-association")
+
+    components = resp.json()["applinks"]["details"][0]["components"]
+    assert components[0] == {
+        "#": "no_universal_links",
+        "exclude": True,
+        "comment": "Matches any URL whose fragment begins with no_universal_links",
+    }
+
+
+@pytest.mark.django_db
+def test_apple_appid_tracks_the_configured_bundle_id(client, settings):
+    """Staging must be able to serve its own bundle.
+
+    The appID used to be read from APPLE_DEFAULT_CLIENT_IDS — a hardcoded list
+    that doubles as the Sign-in-with-Apple audience allowlist — so staging served
+    the production bundle and its build could never verify a Universal Link.
+    """
+    settings.APPLE_TEAM_ID = "RLL2NX9J5Z"
+    settings.APPLE_BUNDLE_ID = "com.zionking.ziona.staging"
+
+    resp = client.get("/.well-known/apple-app-site-association")
+
+    detail = resp.json()["applinks"]["details"][0]
+    assert detail["appIDs"] == ["RLL2NX9J5Z.com.zionking.ziona.staging"]
 
 
 @pytest.mark.django_db
 def test_apple_appid_falls_back_to_placeholder_when_team_id_unset(client, settings):
     settings.APPLE_TEAM_ID = ""
-    settings.APPLE_DEFAULT_CLIENT_IDS = ["com.zionking.ziona"]
+    settings.APPLE_BUNDLE_ID = "com.zionking.ziona"
 
     resp = client.get("/.well-known/apple-app-site-association")
 
-    assert resp.json()["applinks"]["details"][0]["appID"] == "TEAMID.com.zionking.ziona"
+    assert resp.json()["applinks"]["details"][0]["appIDs"] == ["TEAMID.com.zionking.ziona"]
 
 
 @pytest.mark.django_db

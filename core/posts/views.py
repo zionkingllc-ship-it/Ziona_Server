@@ -21,6 +21,17 @@ from core.media.ordering import (
 from core.posts.models import Post
 from core.shared.utils import build_post_share_url, build_profile_share_url, parse_uuid
 
+# URL paths handed to the app when a Universal Link is tapped, as
+# (path, human-readable note) pairs. A path needs no server route to be listed
+# here — the file only tells iOS which URLs belong to the app. `/viewer/*` is
+# intentionally app-only: it has no Django view, so it has no web fallback and no
+# Open Graph preview for crawlers.
+_UNIVERSAL_LINK_PATHS = (
+    ("/post/*", "Open shared post URLs in the Ziona app"),
+    ("/profile/*", "Open shared profile URLs in the Ziona app"),
+    ("/viewer/*", "Open viewer URLs in the Ziona app (app-only, no web page)"),
+)
+
 
 def _ios_app_id() -> str:
     """Build the Universal Links appID as ``<TeamID>.<bundle id>``.
@@ -29,8 +40,8 @@ def _ios_app_id() -> str:
     a missing Team ID is obvious rather than silently invalid.
     """
     team_id = settings.APPLE_TEAM_ID or "TEAMID"
-    bundle_ids = getattr(settings, "APPLE_DEFAULT_CLIENT_IDS", []) or ["com.zionking.ziona"]
-    return f"{team_id}.{bundle_ids[0]}"
+    bundle_id = getattr(settings, "APPLE_BUNDLE_ID", "") or "com.zionking.ziona"
+    return f"{team_id}.{bundle_id}"
 
 
 @cache_control(max_age=86400)
@@ -39,14 +50,26 @@ def apple_app_site_association(request: HttpRequest) -> JsonResponse:
 
     Must be reachable at https://<share domain>/.well-known/apple-app-site-association
     with no file extension and Content-Type application/json (both satisfied here).
+
+    Uses the modern ``appIDs``/``components`` shape (iOS 13+) rather than the
+    legacy ``appID``/``paths`` one, so an ``exclude`` rule can opt individual URLs
+    out of opening the app.
     """
+    components = [
+        {
+            "#": "no_universal_links",
+            "exclude": True,
+            "comment": "Matches any URL whose fragment begins with no_universal_links",
+        },
+    ]
+    components += [{"/": path, "comment": note} for path, note in _UNIVERSAL_LINK_PATHS]
     data = {
         "applinks": {
             "apps": [],
             "details": [
                 {
-                    "appID": _ios_app_id(),
-                    "paths": ["/post/*", "/profile/*"],
+                    "appIDs": [_ios_app_id()],
+                    "components": components,
                 }
             ],
         },

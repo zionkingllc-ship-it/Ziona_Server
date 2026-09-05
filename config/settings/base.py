@@ -535,6 +535,13 @@ ANDROID_SHA256_CERT_FINGERPRINTS = env.list(
 # Apple Team ID for the Universal Links appID (f"{TEAM_ID}.{bundle_id}"). Public
 # by design — it ships in the world-readable apple-app-site-association file.
 APPLE_TEAM_ID = env("APPLE_TEAM_ID", default="RLL2NX9J5Z")
+# Bundle id this environment's build ships as, used to build that appID.
+# Deliberately NOT read from APPLE_DEFAULT_CLIENT_IDS: that list is the
+# Sign-in-with-Apple audience allowlist and is intentionally multi-valued (prod +
+# staging accepted together), whereas an AASA details entry must name the one
+# bundle installed on the device fetching it. Sharing the two made staging serve
+# the production bundle, so its build could never verify a Universal Link.
+APPLE_BUNDLE_ID = env("APPLE_BUNDLE_ID", default="com.zionking.ziona")
 
 
 FIREBASE_CREDENTIALS_FILE = env("FIREBASE_CREDENTIALS_FILE", default="")

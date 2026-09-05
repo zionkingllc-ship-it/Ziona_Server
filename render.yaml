@@ -46,17 +46,28 @@ services:
         sync: false
       - key: GOOGLE_CLIENT_IDS
         sync: false
+      # Bundle id of the STAGING build. Feeds the Universal Links appID in
+      # well-known/apple-app-site-association, so it must match the bundle the
+      # staging app actually ships as, not production's.
       - key: APPLE_BUNDLE_ID
-        value: com.zionking.ziona
+        value: com.zionking.ziona.staging
       - key: APPLE_CLIENT_IDS
         sync: false
       # Apple Team ID for iOS Universal Links (well-known/apple-app-site-association).
       - key: APPLE_TEAM_ID
         value: RLL2NX9J5Z
       - key: ANDROID_APP_PACKAGE_NAME
-        value: com.zionking.ziona
+        value: com.zionking.ziona.staging
+      # Staging upload-key SHA-256. Staging is not on Play yet, so there is a
+      # single key; once it reaches an internal track the Play App Signing
+      # SHA-256 must be appended here or App Links will stop verifying.
       - key: ANDROID_SHA256_CERT_FINGERPRINTS
-        value: B6:A8:22:F3:C7:E0:71:56:6B:24:93:C4:57:6A:85:D9:81:01:65:3D:BD:CB:70:D2:0E:34:23:4B:5D:45:6B:52,53:5B:CE:7A:2F:80:80:F4:2C:66:77:6E:9E:C7:E9:15:72:79:D5:52:73:1A:58:B1:81:6A:B7:26:23:1C:72:68
+        value: B8:01:9A:D4:37:0C:D5:F4:4F:4F:AF:29:CA:65:2F:54:84:BE:47:9C:24:3E:B1:10:D7:76:FE:10:82:75:97:2C
+      # Domain the staging build declares in Associated Domains
+      # (applinks:staging.ziona.app). Share links must point at the host serving
+      # the matching well-known files, or the app is never opened.
+      - key: APP_SHARE_BASE_URL
+        value: https://staging.ziona.app
       - key: ENSEND_API_KEY
         sync: false
       - key: ENSEND_API_URL
@@ -260,8 +271,14 @@ services:
         value: RLL2NX9J5Z
       - key: ANDROID_APP_PACKAGE_NAME
         value: com.zionking.ziona
+      # Production upload key + Play App Signing key — both must be listed,
+      # because Play re-signs the uploaded artifact.
       - key: ANDROID_SHA256_CERT_FINGERPRINTS
         value: B6:A8:22:F3:C7:E0:71:56:6B:24:93:C4:57:6A:85:D9:81:01:65:3D:BD:CB:70:D2:0E:34:23:4B:5D:45:6B:52,53:5B:CE:7A:2F:80:80:F4:2C:66:77:6E:9E:C7:E9:15:72:79:D5:52:73:1A:58:B1:81:6A:B7:26:23:1C:72:68
+      # Set explicitly rather than relying on the settings default: leaving it
+      # unset is what made staging generate production share links.
+      - key: APP_SHARE_BASE_URL
+        value: https://www.ziona.app
       - key: ENSEND_API_KEY
         sync: false
       - key: ENSEND_API_URL
