@@ -446,3 +446,121 @@ def test_report_anchor_accepts_uppercase_target_type(circle_with_anchor, test_us
 
     report = report_circle_content(reporter.id, "ANCHOR", anchor.id, "Spam", circle.id)
     assert report.target_type == "anchor"
+
+
+# ──────────────────────────────────────────────────────────────────────────
+#  target_type="comment" (CirclePostComment)
+#
+#  Reporting a circle comment used to fail with INVALID_TARGET_TYPE — correct
+#  behaviour, since no such target existed. These cover the new target end to
+#  end: validation, the circle-scoping join, per-reporter suppression, and the
+#  auto-hide threshold's effect on the parent's denormalized comment count.
+# ──────────────────────────────────────────────────────────────────────────
+
+
+def _post_with_comment(circle, author, text="a reportable comment"):
+    from core.circles.models import CirclePostComment
+
+    post = CirclePost.objects.create(circle=circle, user=author, text="host post")
+    comment = CirclePostComment.objects.create(post=post, user=author, text=text)
+    CirclePost.objects.filter(pk=post.pk).update(comments_count=1)
+    post.refresh_from_db()
+    return post, comment
+
+
+def test_report_circle_comment_creates_report(circle_with_anchor, test_users):
+    circle, _ = circle_with_anchor
+    author, reporter, _ = test_users
+    _post, comment = _post_with_comment(circle, author)
+
+    report = report_circle_content(reporter.id, "comment", comment.id, "Spam", circle.id)
+
+    assert report.target_type == "comment"
+    assert str(report.target_id) == str(comment.id)
+
+
+def test_report_circle_comment_normalizes_case_and_alias_target_types(
+    circle_with_anchor, test_users
+):
+    circle, _ = circle_with_anchor
+    author, reporter, _ = test_users
+
+    # The mobile client sends enum-style values; all must resolve to "comment".
+    for raw_target in ("COMMENT", "CIRCLE_COMMENT", "post_comment", "comment"):
+        _post, comment = _post_with_comment(circle, author)
+        report = report_circle_content(reporter.id, raw_target, comment.id, "Spam", circle.id)
+        assert report.target_type == "comment"
+
+
+def test_report_circle_comment_not_in_circle(circle_with_anchor, test_users):
+    """The post__circle_id join stops cross-circle reporting."""
+    circle, _ = circle_with_anchor
+    _author, reporter, _ = test_users
+    other_circle = Circle.objects.create(name="Other Circle", description="x")
+    _stray_post, stray_comment = _post_with_comment(other_circle, reporter)
+
+    with pytest.raises(ZionaError) as excinfo:
+        report_circle_content(reporter.id, "comment", stray_comment.id, "Spam", circle.id)
+
+    assert excinfo.value.code == "TARGET_NOT_FOUND"
+
+
+def test_non_member_cannot_report_circle_comment(circle_with_anchor, test_users):
+    circle, _ = circle_with_anchor
+    author, _member, outsider = test_users
+    _post, comment = _post_with_comment(circle, author)
+
+    with pytest.raises(ZionaError) as excinfo:
+        report_circle_content(outsider.id, "comment", comment.id, "Spam", circle.id)
+
+    # Assert the membership check specifically — a bare ZionaError would also be
+    # satisfied by INVALID_TARGET_TYPE, which is what this raised before the
+    # target type existed.
+    assert excinfo.value.code == "NOT_CIRCLE_MEMBER"
+
+
+def test_reported_circle_comment_hidden_for_reporter_only(circle_with_anchor, test_users):
+    """Without the read-path exclusion the hide is recorded but never applied."""
+    from core.circles.comment_services import get_circle_post_comments
+
+    circle, _ = circle_with_anchor
+    author, reporter, _ = test_users
+    post, comment = _post_with_comment(circle, author)
+
+    report_circle_content(reporter.id, "comment", comment.id, "Spam", circle.id)
+
+    reporter_comments, _, reporter_total = get_circle_post_comments(
+        str(post.id), viewer_id=str(reporter.id)
+    )
+    author_comments, _, author_total = get_circle_post_comments(
+        str(post.id), viewer_id=str(author.id)
+    )
+
+    assert [c.id for c in reporter_comments] == []
+    assert reporter_total == 0  # pageInfo.totalCount self-corrects
+    assert [c.id for c in author_comments] == [comment.id]
+    assert author_total == 1
+
+
+def test_report_circle_comment_auto_hides_after_three_and_decrements_count(
+    circle_with_anchor, test_users
+):
+    circle, _ = circle_with_anchor
+    author, member, _ = test_users
+    post, comment = _post_with_comment(circle, author)
+
+    report_circle_content(author.id, "comment", comment.id, "Spam", circle.id)
+    report_circle_content(member.id, "comment", comment.id, "Spam", circle.id)
+    comment.refresh_from_db()
+    post.refresh_from_db()
+    assert comment.deleted_at is None  # only 2 distinct reporters
+    assert post.comments_count == 1
+
+    third = User.objects.create_user(email="commentmod4@example.com", password="password123")
+    CircleMembership.objects.create(circle=circle, user=third, role="member")
+    report_circle_content(third.id, "comment", comment.id, "Spam", circle.id)
+
+    comment.refresh_from_db()
+    post.refresh_from_db()
+    assert comment.deleted_at is not None  # soft-deleted at 3 distinct reporters
+    assert post.comments_count == 0  # parent counter stays truthful for everyone

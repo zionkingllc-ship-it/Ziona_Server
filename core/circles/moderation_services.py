@@ -1,13 +1,22 @@
 """
 Phase 4: Moderation Service Layer.
-Handles reporting of Circle content (anchors, responses, circles) and
-implements the auto-hide threshold logic (3 distinct reports).
+Handles reporting of Circle content (anchors, responses, circles, posts and
+post comments) and implements the auto-hide threshold logic (3 distinct
+reporters).
 """
 
 from django.db import transaction
+from django.db.models import F
 
 from core.circles.access import require_circle_membership
-from core.circles.models import Anchor, AnchorResponse, Circle, CirclePost, CircleReport
+from core.circles.models import (
+    Anchor,
+    AnchorResponse,
+    Circle,
+    CirclePost,
+    CirclePostComment,
+    CircleReport,
+)
 from core.engagement.hidden_content import hide_circle_content_for_user
 from core.shared.exceptions import ZionaError
 from core.shared.utils import parse_uuid
@@ -15,12 +24,16 @@ from core.shared.utils import parse_uuid
 # Canonical circle-report target types are lowercase. Accept case-insensitive
 # input and common client aliases (e.g. "CIRCLE_POST") so the mobile app's
 # enum-style values map cleanly instead of erroring with INVALID_TARGET_TYPE.
-_CIRCLE_REPORT_TARGET_TYPES = ("anchor", "response", "circle", "post")
+_CIRCLE_REPORT_TARGET_TYPES = ("anchor", "response", "circle", "post", "comment")
 _CIRCLE_REPORT_TARGET_ALIASES = {
     "circle_post": "post",
     "circlepost": "post",
     "anchor_response": "response",
     "circle_anchor": "anchor",
+    "circle_comment": "comment",
+    "post_comment": "comment",
+    "circle_post_comment": "comment",
+    "circlepostcomment": "comment",
 }
 
 
@@ -82,6 +95,16 @@ def report_circle_content(
         ).exists()
     ):
         raise ZionaError(message="Post not found in this circle", code="TARGET_NOT_FOUND")
+    if (
+        target_type == "comment"
+        # The post__circle_id join is load-bearing: a comment carries no circle of
+        # its own, so without it a member of one circle could report a comment in
+        # another and land the report in the wrong moderation queue.
+        and not CirclePostComment.objects.filter(
+            id=target_id, post__circle_id=circle_id, deleted_at__isnull=True
+        ).exists()
+    ):
+        raise ZionaError(message="Comment not found in this circle", code="TARGET_NOT_FOUND")
     if target_type == "circle" and str(circle.id) != str(target_id):
         raise ZionaError(message="Target ID must match Circle ID", code="TARGET_MISMATCH")
 
@@ -154,6 +177,19 @@ def _auto_hide_content(target_type: str, target_id: str):
         if post and not post.deleted_at:
             post.deleted_at = now
             post.save(update_fields=["deleted_at"])
+
+    elif target_type == "comment":
+        comment = CirclePostComment.objects.filter(id=target_id).first()
+        if comment and not comment.deleted_at:
+            comment.deleted_at = now
+            comment.save(update_fields=["deleted_at", "updated_at"])
+            # Unlike an anchor's response count, CirclePost.comments_count is read
+            # straight off the column (and feeds the TRENDING sort), so hiding a
+            # comment without decrementing leaves a number that is wrong for every
+            # viewer, not just the reporter. Mirrors delete_circle_post_comment.
+            CirclePost.objects.filter(pk=comment.post_id, comments_count__gt=0).update(
+                comments_count=F("comments_count") - 1
+            )
 
     elif target_type == "circle":
         # Circles require manual admin review before deletion, just flag them

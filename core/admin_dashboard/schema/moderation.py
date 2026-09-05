@@ -189,7 +189,7 @@ def _map_prior_report(data: dict) -> AdminPriorReportType:
 
 @strawberry.type
 class AdminCircleReportPreviewType:
-    """Resolved preview of the reported circle content (anchor/response/circle)."""
+    """Resolved preview of the reported circle content (anchor/response/circle/post/comment)."""
 
     available: bool
     unavailable_reason: str = strawberry.field(name="unavailableReason")
@@ -272,7 +272,7 @@ def _map_circle_report(data: dict) -> AdminCircleReportType:
 class ModerationAdminQueries:
     @strawberry.field(
         name="adminCircleReports",
-        description="List reports on circle content (anchors, responses, circles).",
+        description="List reports on circle content (anchors, responses, circles, posts, comments).",
     )
     @admin_required
     def admin_circle_reports(

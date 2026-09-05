@@ -380,13 +380,14 @@ class AnchorResponseReaction(models.Model):
 
 
 class CircleReport(models.Model):
-    """Reports for Circle content (Anchors or Responses). Auto-hides after 3 reports."""
+    """Reports for Circle content. Auto-hides after 3 distinct reporters."""
 
     TARGET_TYPE_CHOICES = (
         ("anchor", "Anchor"),
         ("response", "Anchor Response"),
         ("circle", "Circle"),
         ("post", "Circle Post"),
+        ("comment", "Circle Post Comment"),
     )
 
     STATUS_CHOICES = (

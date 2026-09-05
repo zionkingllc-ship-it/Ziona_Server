@@ -20,6 +20,7 @@ from core.circles.models import (
     CirclePostComment,
     CirclePostCommentLike,
 )
+from core.engagement.hidden_content import exclude_hidden_circle_content
 from core.shared.exceptions import ZionaError
 from core.shared.utils import parse_uuid
 
@@ -62,6 +63,13 @@ def get_circle_post_comments(
         .select_related("user")
         .order_by("created_at")  # oldest-first for threaded reading
     )
+
+    # Suppress comments this viewer has reported (per-reporter suppression),
+    # matching how get_circle_feed treats reported posts. Without this the report
+    # is recorded and the hide row written, but the reporter keeps seeing the
+    # comment. total_count below is taken from this same queryset, so the page
+    # count self-corrects.
+    queryset = exclude_hidden_circle_content(queryset, viewer_id, target_type="comment")
 
     # Annotate viewer like state in a single pass — zero N+1.
     if viewer_id:

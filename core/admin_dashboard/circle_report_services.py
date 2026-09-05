@@ -9,7 +9,7 @@ import contextlib
 from django.db.models import Count, Q
 
 # ──────────────────────────────────────────────
-#  Circle reports (CircleReport — anchors, responses, circles)
+#  Circle reports (CircleReport — anchors, responses, circles, posts, comments)
 # ──────────────────────────────────────────────
 
 CIRCLE_REPORT_PAGE_MAX = 50
@@ -115,14 +115,20 @@ def _hidden_or_live(target, text: str, media_url: str, media_type: str, thumbnai
 
 
 def _circle_report_target_previews(reports) -> dict:
-    """Bulk-resolve report targets (5 queries max) → {(target_type, id): preview}.
+    """Bulk-resolve report targets (6 queries max) → {(target_type, id): preview}.
 
     One bulk query per target type, plus the ordered-media prefetch circle posts need.
     A target type missing from ``ids_by_type`` silently degrades to
     ``_missing_target_preview()``, so every value in ``CircleReport.TARGET_TYPE_CHOICES``
     must have an entry here.
     """
-    from core.circles.models import Anchor, AnchorResponse, Circle, CirclePost
+    from core.circles.models import (
+        Anchor,
+        AnchorResponse,
+        Circle,
+        CirclePost,
+        CirclePostComment,
+    )
     from core.media.ordering import ordered_circle_post_media_prefetch
 
     ids_by_type: dict[str, set[str]] = {
@@ -130,6 +136,7 @@ def _circle_report_target_previews(reports) -> dict:
         "response": set(),
         "circle": set(),
         "post": set(),
+        "comment": set(),
     }
     for r in reports:
         if r.target_type in ids_by_type:
@@ -177,6 +184,10 @@ def _circle_report_target_previews(reports) -> dict:
         previews[("post", str(post.id))] = _hidden_or_live(
             post, post.text, media_url, media_type, thumbnail
         )
+
+    # Comments carry no media of any kind, so the preview is text alone.
+    for comment in CirclePostComment.all_objects.filter(id__in=ids_by_type["comment"]):
+        previews[("comment", str(comment.id))] = _hidden_or_live(comment, comment.text, "", "", "")
 
     return previews
 
@@ -303,9 +314,10 @@ def review_circle_report(
 
 def _remove_circle_target(report, admin_user, ip_address: str) -> None:
     """Take down the reported content (mirrors the auto-hide mechanics)."""
+    from django.db.models import F
     from django.utils import timezone as dj_timezone
 
-    from core.circles.models import Anchor, AnchorResponse, CirclePost
+    from core.circles.models import Anchor, AnchorResponse, CirclePost, CirclePostComment
     from core.shared.exceptions import AdminError
 
     now = dj_timezone.now()
@@ -327,6 +339,16 @@ def _remove_circle_target(report, admin_user, ip_address: str) -> None:
         if post and post.deleted_at is None:
             post.deleted_at = now
             post.save(update_fields=["deleted_at"])
+    elif report.target_type == "comment":
+        comment = CirclePostComment.all_objects.filter(id=report.target_id).first()
+        if comment and comment.deleted_at is None:
+            comment.deleted_at = now
+            comment.save(update_fields=["deleted_at", "updated_at"])
+            # Keep the parent's denormalized count truthful, as the manual delete
+            # and the auto-hide threshold both do.
+            CirclePost.objects.filter(pk=comment.post_id, comments_count__gt=0).update(
+                comments_count=F("comments_count") - 1
+            )
     elif report.target_type == "circle":
         from core.admin_dashboard.circle_services import CircleManagementService
 
@@ -344,7 +366,9 @@ def _restore_circle_target(report) -> None:
     Circles are never auto-hidden by the report threshold, so a ``keep`` on a
     circle target changes no content — it only resolves the reports.
     """
-    from core.circles.models import Anchor, AnchorResponse, CirclePost
+    from django.db.models import F
+
+    from core.circles.models import Anchor, AnchorResponse, CirclePost, CirclePostComment
 
     if report.target_type == "anchor":
         anchor = Anchor.all_objects.filter(id=report.target_id).first()
@@ -364,3 +388,13 @@ def _restore_circle_target(report) -> None:
         if post and post.deleted_at is not None:
             post.deleted_at = None
             post.save(update_fields=["deleted_at"])
+    elif report.target_type == "comment":
+        comment = CirclePostComment.all_objects.filter(id=report.target_id).first()
+        if comment and comment.deleted_at is not None:
+            comment.deleted_at = None
+            comment.save(update_fields=["deleted_at", "updated_at"])
+            # Symmetric with the decrement in _remove_circle_target and the
+            # auto-hide branch: restoring the comment restores the count.
+            CirclePost.objects.filter(pk=comment.post_id).update(
+                comments_count=F("comments_count") + 1
+            )

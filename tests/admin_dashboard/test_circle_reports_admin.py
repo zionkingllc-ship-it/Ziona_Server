@@ -522,3 +522,133 @@ def test_preview_resolution_does_not_n_plus_one(
 
     assert len(result["reports"]) == 8
     assert all(r["content_preview"]["available"] for r in result["reports"])
+
+
+# ──────────────────────────────────────────────────────────────────────────
+#  target_type="comment" (CirclePostComment)
+#
+#  Text-only target — the model carries no media fields at all. Unlike posts,
+#  a comment has a denormalized counter on its parent, so remove and keep must
+#  move it in step with the auto-hide threshold.
+# ──────────────────────────────────────────────────────────────────────────
+
+
+def _circle_post_comment(circle, author, text="Reported comment", **overrides):
+    from core.circles.models import CirclePost, CirclePostComment
+
+    post = CirclePost.objects.create(circle=circle, user=author, text="host post")
+    defaults = {"post": post, "user": author, "text": text}
+    defaults.update(overrides)
+    comment = CirclePostComment.objects.create(**defaults)
+    CirclePost.objects.filter(pk=post.pk).update(comments_count=1)
+    post.refresh_from_db()
+    return post, comment
+
+
+@pytest.mark.django_db
+def test_list_circle_reports_resolves_comment_preview(authenticated_admin, create_user, circle):
+    admin = authenticated_admin["user"]
+    reporter = create_user(email="cmt-rep@example.com", username="cmtrep")
+    _post, comment = _circle_post_comment(circle, admin, text="Something objectionable")
+    CircleReport.objects.create(
+        reporter=reporter,
+        circle=circle,
+        target_type="comment",
+        target_id=comment.id,
+        reason="spam",
+    )
+
+    row = list_circle_reports()["reports"][0]
+
+    assert row["target_type"] == "comment"
+    preview = row["content_preview"]
+    assert preview["available"] is True
+    assert preview["text"] == "Something objectionable"
+    # Comments have no media columns at all.
+    assert preview["media_url"] == ""
+    assert preview["media_type"] == ""
+    assert preview["thumbnail_url"] == ""
+
+
+@pytest.mark.django_db
+def test_auto_hidden_comment_is_reported_as_hidden(authenticated_admin, create_user, circle):
+    admin = authenticated_admin["user"]
+    _post, comment = _circle_post_comment(circle, admin, text="Hidden comment")
+    for i in range(3):
+        reporter = create_user(email=f"ch{i}@example.com", username=f"chrep{i}")
+        CircleReport.objects.create(
+            reporter=reporter,
+            circle=circle,
+            target_type="comment",
+            target_id=comment.id,
+            reason="spam",
+        )
+    comment.deleted_at = timezone.now()  # the 3-report auto-hide
+    comment.save(update_fields=["deleted_at"])
+
+    row = list_circle_reports()["reports"][0]
+
+    assert row["report_count"] == 3
+    assert row["auto_hidden"] is True
+    assert row["content_preview"]["unavailable_reason"] == "hidden"
+    assert row["content_preview"]["text"] == "Hidden comment"  # admins still see what it was
+
+
+@pytest.mark.django_db
+def test_review_remove_takes_down_a_comment_and_decrements_count(
+    authenticated_admin, create_user, circle
+):
+    from core.admin_dashboard.circle_report_services import review_circle_report
+
+    admin = authenticated_admin["user"]
+    reporter = create_user(email="crem-rep@example.com", username="cremrep")
+    post, comment = _circle_post_comment(circle, admin, text="Take me down")
+    report = CircleReport.objects.create(
+        reporter=reporter,
+        circle=circle,
+        target_type="comment",
+        target_id=comment.id,
+        reason="hate speech",
+    )
+
+    result = review_circle_report(str(report.id), "remove", admin)
+
+    assert result["status"] == "resolved_removed"
+    comment.refresh_from_db()
+    post.refresh_from_db()
+    assert comment.deleted_at is not None
+    assert post.comments_count == 0
+    assert result["content_preview"]["unavailable_reason"] == "hidden"
+
+
+@pytest.mark.django_db
+def test_review_keep_restores_an_auto_hidden_comment_and_readds_count(
+    authenticated_admin, create_user, circle
+):
+    from core.admin_dashboard.circle_report_services import review_circle_report
+
+    admin = authenticated_admin["user"]
+    post, comment = _circle_post_comment(circle, admin, text="Wrongly hidden comment")
+    reports = [
+        CircleReport.objects.create(
+            reporter=create_user(email=f"ck{i}@example.com", username=f"ckrep{i}"),
+            circle=circle,
+            target_type="comment",
+            target_id=comment.id,
+            reason="spam",
+        )
+        for i in range(3)
+    ]
+    # Simulate the auto-hide, which also decrements the parent counter.
+    comment.deleted_at = timezone.now()
+    comment.save(update_fields=["deleted_at"])
+    post.__class__.objects.filter(pk=post.pk).update(comments_count=0)
+
+    result = review_circle_report(str(reports[0].id), "keep", admin)
+
+    assert result["status"] == "resolved_kept"
+    comment.refresh_from_db()
+    post.refresh_from_db()
+    assert comment.deleted_at is None
+    assert post.comments_count == 1  # restored in step with the content
+    assert not CircleReport.objects.filter(target_id=comment.id, status="pending").exists()

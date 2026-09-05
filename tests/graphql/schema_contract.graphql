@@ -1964,7 +1964,9 @@ type Query {
   """List circle members."""
   adminCircleMembers(circleId: String!, page: Int! = 1, pageSize: Int! = 20): CircleMembersPaginatedType!
 
-  """List reports on circle content (anchors, responses, circles)."""
+  """
+  List reports on circle content (anchors, responses, circles, posts, comments).
+  """
   adminCircleReports(circleId: String! = "", page: Int! = 1, pageSize: Int! = 20, search: String! = "", status: String! = "", targetType: String! = ""): AdminCircleReportsPaginatedType!
 
   """Get circle-scoped stats for the admin circle detail page."""

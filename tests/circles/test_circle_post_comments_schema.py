@@ -62,3 +62,53 @@ def test_circle_post_comments_query_is_registered(authenticated_user):
     assert comments[0]["author"]["name"] == "Comment Author"
     assert comments[0]["author"]["username"] == "comment_author"
     assert content["data"]["circlePostComments"]["pageInfo"]["totalCount"] == 1
+
+
+@pytest.mark.django_db
+def test_reported_comment_disappears_for_the_reporter_end_to_end(authenticated_user, create_user):
+    """The whole loop through the real resolver: report → gone, count included."""
+    from core.circles.moderation_services import report_circle_content
+
+    reporter = authenticated_user["user"]
+    author = create_user(email="cmt-author@example.com", username="cmt_author")
+    circle = Circle.objects.create(
+        name="Reported Comment Circle",
+        description="Circle for the comment report test",
+        cover_image="https://example.com/cover.jpg",
+    )
+    CircleMembership.objects.create(circle=circle, user=reporter, role="member")
+    CircleMembership.objects.create(circle=circle, user=author, role="member")
+    post = CirclePost.objects.create(circle=circle, user=author, text="Post with a bad comment")
+    CirclePostComment.objects.create(post=post, user=author, text="Objectionable comment")
+
+    client = Client()
+    client.defaults["HTTP_AUTHORIZATION"] = f"Bearer {authenticated_user['access_token']}"
+    query = """
+        query CirclePostComments($postId: String!) {
+          circlePostComments(postId: $postId, page: 1, pageSize: 10) {
+            comments { id text }
+            pageInfo { totalCount }
+          }
+        }
+    """
+
+    def _fetch():
+        response = client.post(
+            "/graphql/",
+            data=json.dumps({"query": query, "variables": {"postId": str(post.id)}}),
+            content_type="application/json",
+        )
+        body = json.loads(response.content)
+        assert "errors" not in body, body.get("errors")
+        return body["data"]["circlePostComments"]
+
+    before = _fetch()
+    assert len(before["comments"]) == 1
+    assert before["pageInfo"]["totalCount"] == 1
+
+    comment_id = before["comments"][0]["id"]
+    report_circle_content(reporter.id, "comment", comment_id, "Spam", circle.id)
+
+    after = _fetch()
+    assert after["comments"] == []
+    assert after["pageInfo"]["totalCount"] == 0
