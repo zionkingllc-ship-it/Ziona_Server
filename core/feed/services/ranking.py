@@ -19,7 +19,7 @@ from django.db.models import (
     Value,
     When,
 )
-from django.db.models.functions import Coalesce
+from django.db.models.functions import Coalesce, Greatest
 from django.utils import timezone
 
 from core.engagement.hidden_content import exclude_hidden_posts
@@ -42,6 +42,20 @@ DISCOVERY_BLEND_SIZE = 3
 FOLLOWED_BLEND_SIZE = 1
 REPORT_PENALTY_THRESHOLD = 5
 REPORT_SUPPRESSION_THRESHOLD = 10
+
+# A post with no engagement must still score above zero. freshness is a
+# MULTIPLIER, so without this floor 0 × anything = 0: the post sorts below every
+# post that has ever been engaged with, falls outside the candidate window, and
+# can never earn the first impression it needs to escape. A creator with no
+# followers has no other route in — the following feed is chronological but
+# requires followers — so a zero score is a permanent shadow ban.
+NEW_POST_FLOOR = 1
+
+# A post nobody has engaged with never decays past the 7-day freshness bucket.
+# Age alone should not bury content that has never actually had its chance;
+# without this, content that was invisible while the bug existed stays invisible
+# forever, because it is now old AND unengaged.
+UNSEEN_FRESHNESS_FLOOR = 0.4
 CREATOR_DIVERSITY_WINDOW = 10
 CREATOR_DIVERSITY_MAX_PER_WINDOW = 2
 
@@ -76,9 +90,15 @@ def _with_engagement_counts(qs):
 
 
 def _with_final_score(qs):
-    """Annotate MVP ranking score: engagement × freshness × report penalty."""
+    """Annotate the ranking score: (engagement + floor) × freshness × report penalty.
+
+    The floor terms are what keep a post with no engagement reachable. Both
+    multipliers are applied to a value that can never be zero, and a post nobody
+    has engaged with keeps at least ``UNSEEN_FRESHNESS_FLOOR`` of its freshness,
+    so it competes on recency rather than dropping out of the feed entirely.
+    """
     now = timezone.now()
-    return _with_engagement_counts(qs).annotate(
+    scored = _with_engagement_counts(qs).annotate(
         engagement_score=ExpressionWrapper(
             F("likes_count") + (F("comments_count") * Value(2)) + (F("shares_count") * Value(3)),
             output_field=FloatField(),
@@ -95,8 +115,20 @@ def _with_final_score(qs):
             default=Value(1.0),
             output_field=FloatField(),
         ),
+    )
+    # Chained, not folded into the call above: a Case cannot reference an
+    # annotation declared in the same .annotate().
+    return scored.annotate(
+        freshness_floor=Case(
+            When(engagement_score__lte=0, then=Value(UNSEEN_FRESHNESS_FLOOR)),
+            default=Value(0.0),
+            output_field=FloatField(),
+        ),
+    ).annotate(
         final_score=ExpressionWrapper(
-            F("engagement_score") * F("freshness_multiplier") * F("report_penalty_multiplier"),
+            (F("engagement_score") + Value(NEW_POST_FLOOR))
+            * Greatest(F("freshness_multiplier"), F("freshness_floor"))
+            * F("report_penalty_multiplier"),
             output_field=FloatField(),
         ),
     )

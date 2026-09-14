@@ -30,7 +30,12 @@ class FeedCursor:
     and the ``algo`` / ``tier`` fields default to ``None``.
     """
 
-    VERSION = 2
+    # Bumped to 3 when the ranking score gained its zero floor. Scores minted
+    # under an older version are not comparable with current ones, so ranked
+    # pagination ignores them (see _apply_ranked_cursor) rather than skipping
+    # posts or ending a mid-scroll feed early.
+    VERSION = 3
+    SUPPORTED_VERSIONS = (1, 2, 3)
 
     @staticmethod
     def encode(
@@ -65,7 +70,7 @@ class FeedCursor:
         try:
             raw = base64.urlsafe_b64decode(cursor.encode()).decode()
             data = json.loads(raw)
-            if data.get("v") in (1, FeedCursor.VERSION):
+            if data.get("v") in FeedCursor.SUPPORTED_VERSIONS:
                 return data
         except Exception:
             logger.debug("invalid cursor format — falling back to legacy uuid")
@@ -133,6 +138,14 @@ def _apply_ranked_cursor(qs, cursor_data: dict, fallback_cursor: str | None = No
     cursor_id = cursor_data.get("id") or fallback_cursor
     cursor_score = cursor_data.get("score")
     cursor_ts = parse_datetime(cursor_data.get("ts", "") or "")
+
+    if cursor_score is not None and cursor_data.get("v") != FeedCursor.VERSION:
+        # A score from an older cursor version was computed under a different
+        # formula. Comparing it against current scores would skip posts, or —
+        # for a pre-floor score of 0 — match nothing and end the feed abruptly.
+        # Drop it and fall through to id-keyset pagination below, which is
+        # correct if slightly coarser and self-heals on the next page.
+        cursor_score = None
 
     if cursor_id and cursor_score is not None and cursor_ts is not None:
         try:

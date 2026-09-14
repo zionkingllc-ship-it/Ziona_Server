@@ -379,3 +379,105 @@ class TestDiscoverFeed:
         result = FeedService.get_discover_feed(category="Love", media_type="TEXT", limit=10)
 
         assert [post.id for post in result.posts] == [str(text_post.id)]
+
+
+class TestRankingFloor:
+    """The ranking score must never be zero.
+
+    `final_score` multiplies engagement by freshness, so before the floor a post
+    with no engagement scored 0 x anything = 0. It sorted below every post that
+    had ever been engaged with, fell outside the candidate window entirely, and
+    could never earn the first impression it needed to escape — a permanent
+    shadow ban for any creator without followers.
+    """
+
+    def test_fresh_zero_engagement_post_outranks_stale_engaged_post(self, create_user):
+        """The exact inversion the floor fixes."""
+        author = create_user(email="floor_a@test.com", username="floor_a")
+        voter = create_user(email="floor_v@test.com", username="floor_v")
+
+        stale = make_post(author, "Stale but liked", age_hours=24 * 30)
+        add_likes(stale, [voter])
+        fresh = make_post(author, "Fresh but unliked", age_hours=1)
+
+        feed = FeedService.get_discover_feed(limit=10)
+        ids = [p.id for p in feed.posts]
+
+        assert ids.index(str(fresh.id)) < ids.index(str(stale.id))
+
+    def test_orphaned_post_is_reachable_after_freshness_floor(self, create_user):
+        """A post nobody ever engaged with keeps competing on recency.
+
+        Without UNSEEN_FRESHNESS_FLOOR the backlog that was invisible while the
+        bug existed would stay invisible: old AND unengaged is the worst of both.
+        """
+        author = create_user(email="orph_a@test.com", username="orph_a")
+        voter = create_user(email="orph_v@test.com", username="orph_v")
+
+        stale_liked = make_post(author, "Old with one like", age_hours=24 * 30)
+        add_likes(stale_liked, [voter])
+        orphan = make_post(author, "Old and never seen", age_hours=24 * 30)
+
+        feed = FeedService.get_discover_feed(limit=10)
+        ids = [p.id for p in feed.posts]
+
+        assert ids.index(str(orphan.id)) < ids.index(str(stale_liked.id))
+
+    def test_popular_post_still_outranks_fresh_zero_engagement_post(self, create_user):
+        """Guardrail: the floor must not invert genuine popularity."""
+        author = create_user(email="pop_a@test.com", username="pop_a")
+        voters = make_users(create_user, "pop_v", 20)
+
+        popular = make_post(author, "Genuinely popular", age_hours=24 * 5)
+        add_likes(popular, voters)
+        fresh = make_post(author, "Brand new", age_hours=1)
+
+        feed = FeedService.get_discover_feed(limit=10)
+        ids = [p.id for p in feed.posts]
+
+        assert ids.index(str(popular.id)) < ids.index(str(fresh.id))
+
+    def test_no_post_scores_zero(self, create_user):
+        """Across a mixed corpus, nothing may score zero."""
+        from core.feed.services.ranking import _base_post_queryset, _with_final_score
+
+        author = create_user(email="zero_a@test.com", username="zero_a")
+        voter = create_user(email="zero_v@test.com", username="zero_v")
+
+        add_likes(make_post(author, "liked", age_hours=2), [voter])
+        make_post(author, "fresh unliked", age_hours=1)
+        make_post(author, "ancient unliked", age_hours=24 * 400)
+
+        scores = list(
+            _with_final_score(_base_post_queryset()).values_list("final_score", flat=True)
+        )
+
+        assert scores
+        assert min(scores) > 0, f"a post still scores zero: {sorted(scores)}"
+
+    def test_zero_engagement_post_enters_the_candidate_window(self, create_user):
+        """The failure that actually hid content — not the score, the window.
+
+        Discover ranks only `max(limit * 3, limit + 10)` candidates. Production
+        had 301 engaged posts against a 100-candidate window, so a zero-score
+        post sat at rank 302 and was absent from the feed rather than merely low
+        in it. This reproduces that shape: a corpus large enough to overflow the
+        window, every post engaged, all of it stale — plus one fresh newcomer.
+
+        Each post gets a distinct author so creator diversity cannot be what
+        admits or excludes the newcomer.
+        """
+        corpus_size = 65  # > candidate_limit of 60 for limit=20
+        authors = make_users(create_user, "cand_a", corpus_size)
+        voter = create_user(email="cand_voter@test.com", username="cand_voter")
+
+        for i, author in enumerate(authors):
+            stale = make_post(author, f"Stale engaged {i}", age_hours=24 * 30)
+            add_likes(stale, [voter])
+
+        newcomer_author = create_user(email="cand_new@test.com", username="cand_new")
+        newcomer = make_post(newcomer_author, "First ever post", age_hours=1)
+
+        feed = FeedService.get_discover_feed(limit=20)
+
+        assert str(newcomer.id) in {p.id for p in feed.posts}
