@@ -26,7 +26,7 @@ from core.notifications.models import (
     NotificationStatus,
     NotificationType,
 )
-from core.shared.utils import build_post_share_url, build_profile_share_url
+from core.shared.utils import build_post_share_url, build_profile_share_url, parse_uuid
 
 logger = logging.getLogger(__name__)
 User = get_user_model()
@@ -738,12 +738,17 @@ def _apply_notification_cursor(queryset, cursor: str | None):
         return queryset
 
     is_read = bool(data.get("r"))
-    return queryset.filter(
-        # is_read sorts ascending, so "after the cursor" means unread -> read.
-        Q(is_read__gt=is_read)
-        | Q(is_read=is_read, created_at__lt=cursor_ts)
-        | Q(is_read=is_read, created_at=cursor_ts, id__lt=data["id"])
-    )
+    # is_read sorts ascending, so "after the cursor" means unread -> read.
+    keyset = Q(is_read__gt=is_read) | Q(is_read=is_read, created_at__lt=cursor_ts)
+
+    cursor_id = parse_uuid(data.get("id"))
+    if cursor_id is not None:
+        # Only add the id tiebreak for an id the UUIDField can actually accept —
+        # a hand-edited cursor would otherwise raise at queryset evaluation,
+        # well away from here, and surface as a 500 rather than a first page.
+        keyset |= Q(is_read=is_read, created_at=cursor_ts, id__lt=cursor_id)
+
+    return queryset.filter(keyset)
 
 
 def get_unread_count(user_id: int) -> int:

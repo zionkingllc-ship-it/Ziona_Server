@@ -941,3 +941,19 @@ def test_batching_counts_distinct_actors_without_usernames(db, user, create_user
     message = Notification.objects.get(user=user).message
     assert "and 1 others liked your post" in message
     assert "None" not in message
+
+
+def test_malformed_cursor_degrades_instead_of_erroring(db, user):
+    """A hand-edited or corrupted cursor must serve a page, not a 500.
+
+    The id goes into a UUIDField lookup, which raises at queryset *evaluation*
+    — far from where the cursor was parsed — so it has to be validated up front.
+    """
+    import base64 as _b64
+    import json as _json
+
+    payload = {"v": 1, "r": False, "ts": "2026-01-01T00:00:00+00:00", "id": "not-a-uuid"}
+    cursor = _b64.urlsafe_b64encode(_json.dumps(payload).encode()).decode()
+
+    assert list(get_notifications(user.id, limit=5, cursor=cursor)) == []
+    assert list(get_notifications(user.id, limit=5, cursor="!!!not-base64!!!")) == []
