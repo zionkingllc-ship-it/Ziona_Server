@@ -493,6 +493,26 @@ class CirclePost(models.Model):
     prayed_count = models.PositiveIntegerField(default=0)
     anchor_liked_count = models.PositiveIntegerField(default=0)
 
+    # ── Immutable snapshot of the anchor this post was written against ──
+    # Flat columns rather than a JSON blob: queryable, migration-safe, and no
+    # parsing on read. Deliberately FK-less — purge_expired_anchors hard-deletes
+    # an anchor 5 days after it expires, and the card has to outlive it.
+    # Written once at creation and never updated.
+    anchor_id = models.UUIDField(null=True, blank=True, db_index=True)
+    anchor_type = models.CharField(max_length=20, blank=True, default="")
+    anchor_title = models.CharField(max_length=255, blank=True, default="")
+    anchor_content = models.TextField(blank=True, default="")
+    anchor_media_url = models.URLField(max_length=500, blank=True, default="")
+    anchor_background_image = models.URLField(max_length=500, blank=True, default="")
+    anchor_background_colors = models.JSONField(default=list, blank=True)
+    anchor_bible_reference = models.CharField(max_length=100, blank=True, default="")
+    anchor_bible_text = models.TextField(blank=True, default="")
+    # Never exposed in GraphQL: the snapshot itself does not expire. This records
+    # when the *referenced anchor* was due to expire, so the resolver can stop
+    # offering navigation to an anchor that has since been purged — without
+    # querying the anchor table once per post across the feed.
+    anchor_expires_at = models.DateTimeField(null=True, blank=True)
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     deleted_at = models.DateTimeField(null=True, blank=True)

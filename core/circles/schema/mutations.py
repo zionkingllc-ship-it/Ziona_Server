@@ -324,6 +324,7 @@ class CircleMutations:
         width: int | None = None,
         height: int | None = None,
         duration: int | None = None,
+        anchor_id: str | None = None,
     ) -> CreateCirclePostPayload:
         viewer_id = _get_authenticated_user_id(info)
         if not viewer_id:
@@ -343,6 +344,7 @@ class CircleMutations:
                 width=width,
                 height=height,
                 duration=duration,
+                anchor_id=anchor_id,
             )
             return CreateCirclePostPayload(success=True, post=CirclePostType.from_db_model(post))
         except ZionaError as e:

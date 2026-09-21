@@ -15,6 +15,7 @@ from django.db.models import Exists, F, OuterRef
 
 from core.circles.access import require_circle_membership
 from core.circles.models import (
+    Anchor,
     Circle,
     CircleMembership,
     CirclePost,
@@ -27,7 +28,7 @@ from core.media.models import MediaType as StoredMediaType
 from core.media.ordering import ordered_circle_post_media_prefetch
 from core.media.services import validate_trusted_external_image_url
 from core.shared.exceptions import ZionaError
-from core.shared.utils import parse_uuid
+from core.shared.utils import compose_scripture_reference, parse_uuid
 
 logger = logging.getLogger("core.circles")
 
@@ -380,6 +381,47 @@ def ensure_circle_post_liked(user_id: str, post_id: str) -> dict:
     return {"liked": True, "likes_count": max(post.likes_count, 0)}
 
 
+def _anchor_snapshot_fields(anchor_id: str | None, circle_id: str) -> dict:
+    """Copy an anchor's presentation onto the fields CirclePost stores.
+
+    Read once here, inside create_circle_post's transaction, and never again —
+    the snapshot is immutable, which is the whole point: the anchor is
+    hard-deleted 5 days after it expires and the card must survive that.
+    """
+    if not anchor_id:
+        return {}
+
+    if parse_uuid(anchor_id) is None:
+        raise ZionaError(message="Anchor not found in this Circle", code=ANCHOR_NOT_FOUND)
+
+    # all_objects so a soft-deleted anchor can still be referenced, and the
+    # circle_id filter is load-bearing: without it a member could snapshot an
+    # anchor out of a circle they do not belong to and republish it in theirs.
+    anchor = Anchor.all_objects.filter(id=anchor_id, circle_id=circle_id).first()
+    if not anchor:
+        raise ZionaError(message="Anchor not found in this Circle", code=ANCHOR_NOT_FOUND)
+
+    return {
+        "anchor_id": anchor.id,
+        "anchor_type": anchor.anchor_type or "",
+        "anchor_title": anchor.title or "",
+        "anchor_content": anchor.content or "",
+        # Video first: it is the richest form the card can show, and an anchor
+        # carrying both is a video anchor with a poster image.
+        "anchor_media_url": (anchor.anchor_video or anchor.anchor_image or anchor.media_url or ""),
+        "anchor_background_image": anchor.background_image or "",
+        "anchor_background_colors": list(anchor.background_colors or []),
+        "anchor_bible_reference": compose_scripture_reference(
+            anchor.scripture_book,
+            anchor.scripture_chapter,
+            anchor.scripture_verse_start,
+            anchor.scripture_verse_end,
+        ),
+        "anchor_bible_text": anchor.scripture_text or "",
+        "anchor_expires_at": anchor.expires_at,
+    }
+
+
 @transaction.atomic
 def create_circle_post(
     user_id: str,
@@ -392,14 +434,20 @@ def create_circle_post(
     width: int | None = None,
     height: int | None = None,
     duration: int | None = None,
+    anchor_id: str | None = None,
 ) -> CirclePost:
     """
     Create a post inside a Circle.
+
+    When ``anchor_id`` is given the anchor is copied onto the post as an
+    immutable snapshot, so the reference card keeps rendering after the anchor
+    expires and after it is hard-deleted 5 days later.
 
     Raises:
         ZionaError(CIRCLE_NOT_FOUND) if the circle does not exist.
         ZionaError(NOT_MEMBER) if the user is not a circle member.
         ZionaError(VALIDATION_ERROR) if no content is provided or media is invalid.
+        ZionaError(ANCHOR_NOT_FOUND) if anchor_id is not an anchor of this circle.
     """
     try:
         circle = Circle.objects.get(id=circle_id, is_active=True, deleted_at__isnull=True)
@@ -443,6 +491,7 @@ def create_circle_post(
         circle=circle,
         user_id=user_id,
         text=trimmed_text,
+        **_anchor_snapshot_fields(anchor_id, circle_id),
     )
     if resolved_media_files:
         # `_resolve_circle_post_media` returns files in the request order; persist

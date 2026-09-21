@@ -5,9 +5,10 @@ Split from the former core/circles/schema.py (no contract change).
 
 import dataclasses
 import enum
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import strawberry
+from django.utils import timezone
 
 from core.circles.schema._helpers import _media_file_to_graphql
 from core.circles.schema.anchors import AnchorType
@@ -20,12 +21,62 @@ from core.media.schema import MediaFileType
 from core.shared.types import ErrorType, PageInfo
 from core.shared.types import MediaType as GraphQLMediaType
 
+# An anchor is hard-deleted 5 days after it expires (purge_expired_anchors), so
+# past that point there is nothing left to navigate to and anchorId is withheld.
+ANCHOR_NAVIGATION_GRACE = timedelta(days=5)
+
 
 @strawberry.enum
 class CirclePostFilterEnum(enum.Enum):
     NEW = "NEW"
     TRENDING = "TRENDING"
     VIEWER_POSTS = "VIEWER_POSTS"
+
+
+@strawberry.type
+class CirclePostAnchorReferenceType:
+    """Immutable copy of the anchor a post was written against.
+
+    Taken once at creation, so the card survives the anchor's 24-hour expiry and
+    the hard delete that follows 5 days later. There is deliberately no
+    ``expiresAt``: a snapshot does not expire. Only ``anchorId`` goes null once
+    the anchor is gone — the card still renders, navigation just stops.
+    """
+
+    anchor_id: strawberry.ID | None = strawberry.field(name="anchorId", default=None)
+    anchor_type: str = strawberry.field(name="anchorType", default="")
+    title: str | None = None
+    content: str | None = None
+    media_url: str | None = strawberry.field(name="mediaUrl", default=None)
+    background_image: str | None = strawberry.field(name="backgroundImage", default=None)
+    background_colors: list[str] = strawberry.field(name="backgroundColors", default_factory=list)
+    bible_reference: str | None = strawberry.field(name="bibleReference", default=None)
+    bible_text: str | None = strawberry.field(name="bibleText", default=None)
+
+    @classmethod
+    def from_db_model(cls, post) -> "CirclePostAnchorReferenceType | None":
+        """Build from the post's snapshot columns — never from the live anchor.
+
+        Reading the anchor table here would be one query per post across the
+        whole circle feed, and the anchor may not exist any more anyway.
+        """
+        if not post.anchor_id:
+            return None
+
+        expires_at = post.anchor_expires_at
+        still_navigable = bool(expires_at and timezone.now() < expires_at + ANCHOR_NAVIGATION_GRACE)
+
+        return cls(
+            anchor_id=strawberry.ID(str(post.anchor_id)) if still_navigable else None,
+            anchor_type=post.anchor_type or "",
+            title=post.anchor_title or None,
+            content=post.anchor_content or None,
+            media_url=post.anchor_media_url or None,
+            background_image=post.anchor_background_image or None,
+            background_colors=list(post.anchor_background_colors or []),
+            bible_reference=post.anchor_bible_reference or None,
+            bible_text=post.anchor_bible_text or None,
+        )
 
 
 @strawberry.type
@@ -66,6 +117,9 @@ class CirclePostType:
     comments_count: int = strawberry.field(name="commentsCount", default=0)
     prayed_count: int = strawberry.field(name="prayedCount", default=0)
     anchor_liked_count: int = strawberry.field(name="anchorLikedCount", default=0)
+    anchor_reference: CirclePostAnchorReferenceType | None = strawberry.field(
+        name="anchorReference", default=None
+    )
     _media_list: strawberry.Private[list[MediaFileType]] = dataclasses.field(default_factory=list)
 
     def _primary_media(self) -> MediaFileType | None:
@@ -167,6 +221,7 @@ class CirclePostType:
             comments_count=post.comments_count,
             prayed_count=post.prayed_count,
             anchor_liked_count=post.anchor_liked_count,
+            anchor_reference=CirclePostAnchorReferenceType.from_db_model(post),
             _media_list=[
                 _media_file_to_graphql(media_file, index)
                 for index, media_file in enumerate(post.media_files.all())

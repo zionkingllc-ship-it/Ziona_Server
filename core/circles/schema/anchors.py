@@ -11,6 +11,7 @@ from strawberry.types import Info
 
 from core.circles.schema._helpers import _anchor_date_value
 from core.shared.types import ErrorType
+from core.shared.utils import compose_scripture_reference
 from core.users.schema import UserType, _get_authenticated_user_id
 
 
@@ -150,20 +151,15 @@ class AnchorType:
 
     @strawberry.field(name="bibleReference")
     def bible_reference(self) -> str | None:
-        if not self._dto.scripture_book:
-            return None
-
-        reference = self._dto.scripture_book
-        if self._dto.scripture_chapter:
-            reference = f"{reference} {self._dto.scripture_chapter}"
-        if self._dto.scripture_verse_start:
-            reference = f"{reference}:{self._dto.scripture_verse_start}"
-            if (
-                self._dto.scripture_verse_end
-                and self._dto.scripture_verse_end != self._dto.scripture_verse_start
-            ):
-                reference = f"{reference}-{self._dto.scripture_verse_end}"
-        return reference
+        return (
+            compose_scripture_reference(
+                self._dto.scripture_book,
+                self._dto.scripture_chapter,
+                self._dto.scripture_verse_start,
+                self._dto.scripture_verse_end,
+            )
+            or None
+        )
 
     @strawberry.field(name="bibleText")
     def bible_text(self) -> str | None:

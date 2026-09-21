@@ -140,3 +140,30 @@ def format_count(count: int) -> str:
     if b == int(b):
         return f"{int(b)}B"
     return f"{b:.1f}B".replace(".0B", "B")
+
+
+def compose_scripture_reference(
+    book: str | None,
+    chapter: int | None = None,
+    verse_start: int | None = None,
+    verse_end: int | None = None,
+) -> str:
+    """Build a human reference: ("John", 3, 16, 18) -> "John 3:16-18".
+
+    Lives here rather than in the schema layer because two callers need it and
+    they sit on opposite sides of the service boundary: the live anchor card
+    renders it on read, and a circle post snapshots it on write. Sharing the
+    function is what stops a snapshot rendering differently from the anchor it
+    was copied from.
+    """
+    if not book:
+        return ""
+
+    reference = book
+    if chapter:
+        reference = f"{reference} {chapter}"
+    if verse_start:
+        reference = f"{reference}:{verse_start}"
+        if verse_end and verse_end != verse_start:
+            reference = f"{reference}-{verse_end}"
+    return reference

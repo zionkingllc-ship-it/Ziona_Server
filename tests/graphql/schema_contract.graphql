@@ -685,6 +685,18 @@ type CircleMembersPaginatedType {
   totalPages: Int!
 }
 
+type CirclePostAnchorReferenceType {
+  anchorId: ID
+  anchorType: String!
+  backgroundColors: [String!]!
+  backgroundImage: String
+  bibleReference: String
+  bibleText: String
+  content: String
+  mediaUrl: String
+  title: String
+}
+
 type CirclePostAuthorType {
   avatar: String
   avatarUrl: String
@@ -740,6 +752,7 @@ enum CirclePostFilterEnum {
 
 type CirclePostType {
   anchorLikedCount: Int!
+  anchorReference: CirclePostAnchorReferenceType
   comments: Int!
   commentsCount: Int!
   createdAt: DateTime!
@@ -1467,7 +1480,7 @@ type Mutation {
 
   """Create a bookmark folder"""
   createBookmarkFolder(name: String!): BookmarkFolderPayload!
-  createCirclePost(circleId: String!, duration: Int = null, height: Int = null, mediaIds: [String!] = null, mediaType: MediaType = null, mediaUrls: [String!] = null, text: String = null, thumbnailUrl: String = null, width: Int = null): CreateCirclePostPayload!
+  createCirclePost(anchorId: String = null, circleId: String!, duration: Int = null, height: Int = null, mediaIds: [String!] = null, mediaType: MediaType = null, mediaUrls: [String!] = null, text: String = null, thumbnailUrl: String = null, width: Int = null): CreateCirclePostPayload!
 
   """Create a nested or top-level text comment on a Post payload."""
   createComment(parentCommentId: String = null, postId: String!, text: String!): CommentPayload!
