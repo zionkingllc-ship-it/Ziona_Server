@@ -64,8 +64,47 @@ def toggle_reaction(user_id: str, response_id: str, reaction_type: str) -> Ancho
         )
         # Increment denormalized count
         AnchorResponse.objects.filter(id=response_id).update(reaction_count=F("reaction_count") + 1)
+        _notify_reaction(response, user_id)
 
     return reaction
+
+
+def _notify_reaction(response, actor_id: str) -> None:
+    """Tell a reflection's author that someone reacted to it.
+
+    Only fires for a brand-new reaction: changing reaction type or toggling off
+    must not re-notify. Batched through the same 5-minute Redis window the post
+    and comment likes use, so a flurry of Amens collapses into one notification
+    rather than a row per reactor.
+    """
+    if str(response.user_id) == str(actor_id):
+        return
+
+    try:
+        from django.contrib.auth import get_user_model
+
+        from core.notifications.models import NotificationType
+        from core.notifications.services import batch_like_notifications
+
+        actor = get_user_model().objects.filter(id=actor_id).only("username").first()
+        if not actor:
+            return
+
+        batch_like_notifications(
+            actor_username=actor.username,
+            recipient_id=response.user_id,
+            reference_id=response.id,
+            reference_type="anchor_response",
+            like_type=NotificationType.LIKE_COMMENT,
+            actor_id=actor_id,
+            template_key="reaction_anchor_response",
+        )
+    except Exception:  # noqa: BLE001
+        import logging
+
+        logging.getLogger(__name__).warning(
+            "Failed to notify author of reaction on anchor response %s", response.id
+        )
 
 
 # ──────────────────────────────────────────────
@@ -165,22 +204,51 @@ def create_reply(
     )
 
     # Dispatch @mention notifications — scoped to circle members only.
+    mentioned_user_ids: set = set()
     try:
         from core.notifications.services import notify_mentions
 
-        notify_mentions(
+        mention_notifications = notify_mentions(
             text=content,
             actor=reply.user,
             reference_id=reply.id,
             reference_type="anchor_response",
             circle_id=str(parent.anchor.circle_id),
         )
+        mentioned_user_ids = {str(n.user_id) for n in mention_notifications}
     except Exception:  # noqa: BLE001
         import logging
 
         logging.getLogger(__name__).warning(
             "Failed to dispatch mention notifications for anchor reply %s", reply.id
         )
+
+    # Tell the parent author someone replied. Runs after notify_mentions and
+    # reads what it created: a reply that also @mentions the author would
+    # otherwise produce two notifications for one action.
+    is_self_reply = str(parent.user_id) == str(user_id)
+    if not is_self_reply and str(parent.user_id) not in mentioned_user_ids:
+        try:
+            from core.notifications.constants import NOTIFICATION_TEMPLATES
+            from core.notifications.models import NotificationType
+            from core.notifications.services import create_notification
+
+            create_notification(
+                user_id=parent.user_id,
+                type_str=NotificationType.REPLY_COMMENT,
+                reference_id=reply.id,
+                reference_type="anchor_response",
+                message=NOTIFICATION_TEMPLATES["reply_anchor_response"].format(
+                    username=reply.user.username
+                ),
+                sender_id=reply.user_id,
+            )
+        except Exception:  # noqa: BLE001
+            import logging
+
+            logging.getLogger(__name__).warning(
+                "Failed to notify parent author of anchor reply %s", reply.id
+            )
 
     return reply
 

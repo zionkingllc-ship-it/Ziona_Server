@@ -600,3 +600,173 @@ def test_duplicate_reports_do_not_reach_the_auto_hide_threshold(circle_with_anch
 
     anchor.refresh_from_db()
     assert anchor.deleted_at is None
+
+
+# ---------------------------------------------------------------------------
+# Reply and reaction notifications on a reflection.
+# ---------------------------------------------------------------------------
+
+
+def _reflection(circle, anchor, author):
+    return create_response(
+        user_id=author.id,
+        anchor_id=anchor.id,
+        response_type="reflection",
+        content="Grateful today.",
+    )
+
+
+def test_reply_notifies_the_reflection_author(circle_with_anchor, test_users):
+    from core.notifications.models import Notification, NotificationType
+
+    circle, anchor = circle_with_anchor
+    author, replier, _ = test_users
+    reflection = _reflection(circle, anchor, author)
+
+    create_reply(user_id=replier.id, parent_response_id=reflection.id, content="Amen to that")
+
+    notification = Notification.objects.get(
+        user_id=author.id, notification_type=NotificationType.REPLY_COMMENT
+    )
+    assert notification.reference_type == "anchor_response"
+    assert notification.sender_id == replier.id
+    assert "replied to your reflection" in notification.message
+
+
+def test_reply_that_mentions_the_author_notifies_once(circle_with_anchor, test_users):
+    """A mention and a reply are the same action — the author gets one row."""
+    from core.notifications.models import Notification
+
+    circle, anchor = circle_with_anchor
+    author, replier, _ = test_users
+    author.username = "authorname"
+    author.save(update_fields=["username"])
+    reflection = _reflection(circle, anchor, author)
+
+    create_reply(
+        user_id=replier.id,
+        parent_response_id=reflection.id,
+        content="@authorname this encouraged me",
+    )
+
+    assert Notification.objects.filter(user_id=author.id).count() == 1
+
+
+def test_replying_to_yourself_does_not_notify(circle_with_anchor, test_users):
+    from core.notifications.models import Notification
+
+    circle, anchor = circle_with_anchor
+    author, _replier, _ = test_users
+    reflection = _reflection(circle, anchor, author)
+
+    create_reply(user_id=author.id, parent_response_id=reflection.id, content="Adding to this")
+
+    assert not Notification.objects.filter(user_id=author.id).exists()
+
+
+def test_reply_notification_respects_the_circle_comment_preference(circle_with_anchor, test_users):
+    """anchor_response is circle content — it must answer to circle_comment."""
+    from core.notifications.models import Notification, NotificationPreference
+
+    circle, anchor = circle_with_anchor
+    author, replier, _ = test_users
+    NotificationPreference.objects.create(user=author, circle_comment=False)
+    reflection = _reflection(circle, anchor, author)
+
+    create_reply(user_id=replier.id, parent_response_id=reflection.id, content="Amen")
+
+    assert not Notification.objects.filter(user_id=author.id).exists()
+
+
+def test_reaction_notifies_the_reflection_author(circle_with_anchor, test_users):
+    from core.notifications.models import Notification
+
+    circle, anchor = circle_with_anchor
+    author, reactor, _ = test_users
+    reflection = _reflection(circle, anchor, author)
+
+    toggle_reaction(user_id=reactor.id, response_id=reflection.id, reaction_type="amen")
+
+    notification = Notification.objects.get(user_id=author.id)
+    assert notification.reference_type == "anchor_response"
+    assert "reacted to your reflection" in notification.message
+    # Never "liked your comment" — the type is reused, the wording is not.
+    assert "comment" not in notification.message
+
+
+def test_multiple_reactions_batch_into_one_notification(circle_with_anchor, test_users):
+    from core.notifications.models import Notification
+
+    circle, anchor = circle_with_anchor
+    author, first, second = test_users
+    CircleMembership.objects.get_or_create(circle=circle, user=second, defaults={"role": "member"})
+    reflection = _reflection(circle, anchor, author)
+
+    toggle_reaction(user_id=first.id, response_id=reflection.id, reaction_type="amen")
+    toggle_reaction(user_id=second.id, response_id=reflection.id, reaction_type="encouraged")
+
+    notifications = Notification.objects.filter(user_id=author.id)
+    assert notifications.count() == 1
+    assert "1 other" in notifications.first().message
+
+
+def test_reacting_to_your_own_reflection_does_not_notify(circle_with_anchor, test_users):
+    from core.notifications.models import Notification
+
+    circle, anchor = circle_with_anchor
+    author, _other, _ = test_users
+    reflection = _reflection(circle, anchor, author)
+
+    toggle_reaction(user_id=author.id, response_id=reflection.id, reaction_type="amen")
+
+    assert not Notification.objects.filter(user_id=author.id).exists()
+
+
+def test_changing_or_removing_a_reaction_does_not_renotify(circle_with_anchor, test_users):
+    from core.notifications.models import Notification
+
+    circle, anchor = circle_with_anchor
+    author, reactor, _ = test_users
+    reflection = _reflection(circle, anchor, author)
+
+    toggle_reaction(user_id=reactor.id, response_id=reflection.id, reaction_type="amen")
+    baseline = Notification.objects.filter(user_id=author.id).count()
+
+    # Change type, then toggle off entirely.
+    toggle_reaction(user_id=reactor.id, response_id=reflection.id, reaction_type="thoughtful")
+    toggle_reaction(user_id=reactor.id, response_id=reflection.id, reaction_type="thoughtful")
+
+    assert Notification.objects.filter(user_id=author.id).count() == baseline
+
+
+def test_reaction_notification_respects_the_circle_likes_preference(circle_with_anchor, test_users):
+    from core.notifications.models import Notification, NotificationPreference
+
+    circle, anchor = circle_with_anchor
+    author, reactor, _ = test_users
+    NotificationPreference.objects.create(user=author, circle_likes=False)
+    reflection = _reflection(circle, anchor, author)
+
+    toggle_reaction(user_id=reactor.id, response_id=reflection.id, reaction_type="amen")
+
+    assert not Notification.objects.filter(user_id=author.id).exists()
+
+
+def test_reflection_notifications_route_into_the_circle(circle_with_anchor, test_users):
+    from core.notifications.models import Notification
+    from core.notifications.services import build_notification_destination
+
+    circle, anchor = circle_with_anchor
+    author, replier, _ = test_users
+    reflection = _reflection(circle, anchor, author)
+    create_reply(user_id=replier.id, parent_response_id=reflection.id, content="Amen")
+
+    notification = Notification.objects.get(user_id=author.id)
+    destination = build_notification_destination(
+        notification_type=notification.notification_type,
+        reference_type=notification.reference_type,
+        reference_id=str(notification.reference_id),
+    )
+
+    assert destination["route"] == "anchor_response"
+    assert destination["circleId"] == str(circle.id)

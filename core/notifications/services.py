@@ -111,12 +111,17 @@ def _is_notification_enabled(
     pref, _ = NotificationPreference.objects.get_or_create(user_id=user_id)
     ref_type = (reference_type or "").strip().lower()
 
+    # anchor_response is circle content: reactions and replies on a reflection
+    # must answer to the circle toggles, not the global comment/like ones.
     if notification_type == NotificationType.LIKE_POST and ref_type == "circle_post":
         return pref.circle_likes
-    if notification_type == NotificationType.LIKE_COMMENT and ref_type == "circle_post_comment":
+    if notification_type == NotificationType.LIKE_COMMENT and ref_type in {
+        "circle_post_comment",
+        "anchor_response",
+    }:
         return pref.circle_likes
     if notification_type in {NotificationType.REPLY_POST, NotificationType.REPLY_COMMENT} and (
-        ref_type in {"circle_post", "circle_post_comment"}
+        ref_type in {"circle_post", "circle_post_comment", "anchor_response"}
     ):
         return pref.circle_comment
 
@@ -992,9 +997,15 @@ def batch_like_notifications(
     reference_type: str,
     like_type: str,
     actor_id: int | None = None,
+    template_key: str | None = None,
 ):
     """
     Track and batch multiple likes within a 5-minute window.
+
+    ``template_key`` selects the wording independently of ``like_type``, so
+    content that reuses an existing notification type can still read correctly —
+    an Amen on a reflection is a LIKE_COMMENT to the client but is not "liked
+    your comment". Defaults to ``like_type``, so existing callers are unchanged.
 
     Uses atomic Redis SET operations (sadd / scard / smembers) to avoid the
     read-modify-write race condition present in a plain list-based cache approach.
@@ -1008,33 +1019,43 @@ def batch_like_notifications(
         return
 
     cache_key = f"likes_batch_{reference_type}_{reference_id}"
+    # Keyed on the actor id, not the username: username is nullable (OAuth
+    # signups keep it null until they pick one), so two username-less actors
+    # used to collapse to a single set member and the recipient was told
+    # "None liked your post" no matter how many people had.
+    member = f"{actor_id or actor_username}:{actor_username or 'Someone'}"
+
+    def _display(value: str) -> str:
+        _, separator, name = value.partition(":")
+        return name if separator else value
 
     try:
         # Atomic Redis SET path ─ preferred in production
         redis_client = cache.client.get_client()
         # sadd returns the number of elements actually added (0 if already present)
-        redis_client.sadd(cache_key, actor_username)
+        redis_client.sadd(cache_key, member)
         # Refresh the TTL on every new like so the window stays at 5 minutes
         redis_client.expire(cache_key, 300)
         count = redis_client.scard(cache_key)
         members = {
             m.decode() if isinstance(m, bytes) else m for m in redis_client.smembers(cache_key)
         }
-        first_liker = next(iter(members))  # deterministic enough for display
+        first_liker = _display(next(iter(members)))  # deterministic enough for display
     except (AttributeError, Exception):
         # Fallback: non-Redis cache backend (tests, dev with LocMemCache)
         likes_data = cache.get(cache_key, [])
-        if actor_username not in likes_data:
-            likes_data.append(actor_username)
+        if member not in likes_data:
+            likes_data.append(member)
             cache.set(cache_key, likes_data, timeout=300)
         count = len(likes_data)
-        first_liker = likes_data[0]
+        first_liker = _display(likes_data[0])
 
+    wording = template_key or like_type
     if count == 1:
-        message = NOTIFICATION_TEMPLATES[like_type].format(username=actor_username)
+        message = NOTIFICATION_TEMPLATES[wording].format(username=actor_username)
     else:
         others_count = count - 1
-        message = BATCHED_LIKE_TEMPLATES[like_type].format(
+        message = BATCHED_LIKE_TEMPLATES[wording].format(
             username=first_liker, others_count=others_count
         )
 

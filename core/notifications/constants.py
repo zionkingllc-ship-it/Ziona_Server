@@ -10,11 +10,16 @@ NOTIFICATION_TEMPLATES = {
     "new_circle_post": "New post in {circle_name}",
     "new_follower": "{username} started following you",
     "admin_announcement": "{message}",
+    # Anchor responses reuse the reply/like notification types, so their wording
+    # is keyed separately — "liked your comment" is wrong for a reflection.
+    "reply_anchor_response": "{username} replied to your reflection",
+    "reaction_anchor_response": "{username} reacted to your reflection",
 }
 
 BATCHED_LIKE_TEMPLATES = {
     "like_post": "{username} and {others_count} others liked your post",
     "like_comment": "{username} and {others_count} others liked your comment",
+    "reaction_anchor_response": ("{username} and {others_count} others reacted to your reflection"),
 }
 
 

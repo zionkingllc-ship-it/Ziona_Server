@@ -915,3 +915,29 @@ def test_legacy_iso_cursor_still_paginates(db, user, other_user):
     page = list(get_notifications(user.id, limit=5, cursor=now.isoformat()))
 
     assert [n.id for n in page] == [older.id]
+
+
+def test_batching_counts_distinct_actors_without_usernames(db, user, create_user):
+    """username is nullable — OAuth signups keep it null until they pick one.
+
+    Batching used to key its Redis set on the username, so two username-less
+    likers collapsed to one member and the recipient was told "None liked your
+    post" however many people actually had.
+    """
+    post_id = uuid.uuid4()
+    first = create_user(email="nouser1@example.com", username=None)
+    second = create_user(email="nouser2@example.com", username=None)
+
+    for actor in (first, second):
+        batch_like_notifications(
+            actor_username=actor.username,
+            recipient_id=user.id,
+            reference_id=post_id,
+            reference_type="post",
+            like_type=NotificationType.LIKE_POST,
+            actor_id=actor.id,
+        )
+
+    message = Notification.objects.get(user=user).message
+    assert "and 1 others liked your post" in message
+    assert "None" not in message
