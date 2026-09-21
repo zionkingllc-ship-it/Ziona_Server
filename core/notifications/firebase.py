@@ -59,6 +59,41 @@ def initialize_firebase():
         logger.error(f"Failed to initialize Firebase: {e}", exc_info=True)
 
 
+def _build_multicast_message(tokens: list[str], title: str, body: str, data: dict[str, str]):
+    """Build the FCM message with the per-platform config required to alert the user.
+
+    A ``notification`` block alone is not enough to make a device ring:
+
+    - Android defaults to NORMAL priority, which Doze defers indefinitely on
+      aggressive OEM builds (MIUI/HyperOS especially). It also needs an explicit
+      ``channel_id``; on Android 8+ a message whose channel the app never
+      registered is dropped silently. The client registers "default" at
+      IMPORTANCE_HIGH (see the mobile app's setupAndroidChannel).
+    - APNs needs ``sound`` on the aps payload and priority 10, or the push
+      arrives without alerting — delivered, but silent.
+
+    Shared by the production sender and send_fcm_debug() so the diagnostic
+    exercises exactly the message real users receive.
+    """
+    return messaging.MulticastMessage(
+        notification=messaging.Notification(title=title, body=body),
+        data=data,
+        tokens=tokens,
+        android=messaging.AndroidConfig(
+            priority="high",
+            notification=messaging.AndroidNotification(
+                channel_id=getattr(settings, "FCM_ANDROID_CHANNEL_ID", "default"),
+                sound="default",
+                default_vibrate_timings=True,
+            ),
+        ),
+        apns=messaging.APNSConfig(
+            headers={"apns-priority": "10"},
+            payload=messaging.APNSPayload(aps=messaging.Aps(sound="default")),
+        ),
+    )
+
+
 def send_fcm_notification(
     tokens: list[str], title: str, body: str, data: dict[str, Any]
 ) -> dict[str, int]:
@@ -93,14 +128,7 @@ def send_fcm_notification(
     for chunk_start in range(0, len(tokens), fcm_chunk_size):
         chunk = tokens[chunk_start : chunk_start + fcm_chunk_size]
 
-        message = messaging.MulticastMessage(
-            notification=messaging.Notification(
-                title=title,
-                body=body,
-            ),
-            data=formatted_data,
-            tokens=chunk,
-        )
+        message = _build_multicast_message(chunk, title, body, formatted_data)
 
         try:
             response = messaging.send_each_for_multicast(message)
@@ -211,11 +239,7 @@ def send_fcm_debug(
         return _all("FIREBASE_NOT_INITIALIZED", "Firebase Admin SDK failed to initialize")
 
     formatted_data = {str(k): str(v) for k, v in data.items() if v is not None}
-    message = messaging.MulticastMessage(
-        notification=messaging.Notification(title=title, body=body),
-        data=formatted_data,
-        tokens=tokens,
-    )
+    message = _build_multicast_message(tokens, title, body, formatted_data)
 
     try:
         response = messaging.send_each_for_multicast(message)

@@ -1729,6 +1729,7 @@ type NotificationConnection {
 }
 
 type NotificationDestinationType {
+  circleId: ID
   deepLink: String
   entityId: ID
   entityType: String!

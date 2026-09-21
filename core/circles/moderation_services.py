@@ -114,12 +114,17 @@ def report_circle_content(
     ).first()
 
     if existing_report:
+        # Idempotent: the reporter already has the outcome they asked for — the
+        # content is on file and hidden for them — so return the existing report
+        # instead of raising. Raising here surfaced as a failed mutation in the
+        # app even though nothing had gone wrong, which is what made repeated
+        # reports during QA look like a broken feature.
         hide_circle_content_for_reporter(
             reporter_id=reporter_id,
             target_type=target_type,
             target_id=target_id,
         )
-        raise ZionaError(message="You have already reported this content", code="ALREADY_REPORTED")
+        return existing_report
 
     # ── Create Report ──
     report = CircleReport.objects.create(

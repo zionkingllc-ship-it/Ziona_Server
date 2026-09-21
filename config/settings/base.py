@@ -546,6 +546,9 @@ APPLE_BUNDLE_ID = env("APPLE_BUNDLE_ID", default="com.zionking.ziona")
 
 FIREBASE_CREDENTIALS_FILE = env("FIREBASE_CREDENTIALS_FILE", default="")
 FIREBASE_PROJECT_ID = env("FIREBASE_PROJECT_ID", default="")
+# Must match a channel the Android client registers at IMPORTANT_HIGH, or the
+# push is dropped silently on Android 8+. The app registers "default".
+FCM_ANDROID_CHANNEL_ID = env("FCM_ANDROID_CHANNEL_ID", default="default")
 
 
 ENCRYPTION_KEY = env("ENCRYPTION_KEY", default="")

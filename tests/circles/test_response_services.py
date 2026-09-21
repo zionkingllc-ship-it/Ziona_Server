@@ -564,3 +564,39 @@ def test_report_circle_comment_auto_hides_after_three_and_decrements_count(
     post.refresh_from_db()
     assert comment.deleted_at is not None  # soft-deleted at 3 distinct reporters
     assert post.comments_count == 0  # parent counter stays truthful for everyone
+
+
+def test_reporting_the_same_content_twice_is_idempotent(circle_with_anchor, test_users):
+    """Re-reporting hides the content either way, so it is not a failure.
+
+    Raising here surfaced in the app as a failed mutation even though the user
+    had exactly the outcome they asked for — which is what made repeated
+    reports during QA look like a broken feature.
+    """
+    from core.circles.models import CircleReport
+
+    circle, anchor = circle_with_anchor
+    _author, reporter, _ = test_users
+
+    first = report_circle_content(reporter.id, "anchor", anchor.id, "Spam", circle.id)
+    second = report_circle_content(reporter.id, "anchor", anchor.id, "Spam", circle.id)
+
+    assert second.id == first.id
+    assert (
+        CircleReport.objects.filter(
+            reporter_id=reporter.id, target_type="anchor", target_id=anchor.id
+        ).count()
+        == 1
+    )
+
+
+def test_duplicate_reports_do_not_reach_the_auto_hide_threshold(circle_with_anchor, test_users):
+    """Idempotency must not let one reporter hide content on their own."""
+    circle, anchor = circle_with_anchor
+    _author, reporter, _ = test_users
+
+    for _ in range(4):
+        report_circle_content(reporter.id, "anchor", anchor.id, "Spam", circle.id)
+
+    anchor.refresh_from_db()
+    assert anchor.deleted_at is None

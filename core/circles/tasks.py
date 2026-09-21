@@ -3,9 +3,11 @@ Celery Background Tasks for Circles / Anchors.
 
 Scheduled tasks:
 - expire_old_anchors          → every 5 min  — invalidates Redis cache on expiry
-- publish_scheduled_anchors   → every 5 min  — fires push notifications on publish
-- batched_reaction_notifications → hourly    — batches Amen/Encouraged notifications
 - purge_expired_anchors        → nightly 02:00 UTC — hard-deletes anchors > 5 days old
+
+Publishing a scheduled anchor and notifying its circle lives in
+core.admin_dashboard.tasks (post_scheduled_anchor on an ETA, with
+check_scheduled_anchors as the every-minute safety net).
 """
 
 import logging
@@ -43,44 +45,6 @@ def expire_old_anchors():
         invalidate_active_anchor_cache(str(circle_id))
 
     return f"Processed {len(recently_expired)} expired anchors"
-
-
-@shared_task
-def publish_scheduled_anchors():
-    """
-    Run every 5 minutes via Celery Beat.
-    Finds anchors whose published_at <= NOW() but haven't been notified yet,
-    marks them as notified and triggers push notifications.
-    """
-    now = timezone.now()
-
-    newly_active = Anchor.objects.filter(
-        published_at__lte=now,
-        is_notified=False,
-        deleted_at__isnull=True,
-    ).select_related("circle")
-
-    count = 0
-    from core.circles.notification_services import send_new_anchor_notification
-
-    for anchor in newly_active:
-        anchor.is_notified = True
-        anchor.save(update_fields=["is_notified", "updated_at"])
-        invalidate_active_anchor_cache(str(anchor.circle_id))
-        send_new_anchor_notification(str(anchor.id))
-        count += 1
-
-    return f"Published {count} scheduled anchors"
-
-
-@shared_task(name="circles.process_batched_reaction_notifications")
-def batched_reaction_notifications():
-    """
-    Run hourly to send batched "Amen" / "Encouraged" notifications.
-    """
-    from core.circles.notification_services import process_batched_reaction_notifications
-
-    process_batched_reaction_notifications()
 
 
 @shared_task(name="circles.purge_expired_anchors")

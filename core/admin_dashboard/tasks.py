@@ -202,6 +202,7 @@ def check_scheduled_anchors(self):
     now = datetime.now(timezone.utc)
 
     posted_circle_ids: set[str] = set()
+    posted_anchors: list = []
 
     with transaction.atomic():
         overdue_anchors = Anchor.objects.select_for_update(skip_locked=True, of=("self",)).filter(
@@ -228,6 +229,7 @@ def check_scheduled_anchors(self):
             )
 
             posted_circle_ids.add(str(anchor.circle_id))
+            posted_anchors.append(anchor)
 
             # Schedule expiry
             expire_anchor.apply_async(args=[str(anchor.id)], eta=anchor.expires_at)
@@ -242,6 +244,27 @@ def check_scheduled_anchors(self):
 
         for circle_id in posted_circle_ids:
             invalidate_active_anchor_cache(circle_id)
+
+    # Notify outside the atomic block so FCM dispatch never runs while the
+    # select_for_update rows are still locked.
+    #
+    # This safety net used to post anchors silently: only the ETA-scheduled
+    # post_scheduled_anchor notified anyone. Every Render deploy restarts the
+    # broker and drops pending ETA tasks, so anchors routinely landed here and
+    # members were never told. Double-notification is not a risk — whichever
+    # path posts the anchor first moves it out of "scheduled", and the other
+    # skips it.
+    for anchor in posted_anchors:
+        try:
+            from core.admin_dashboard.anchor_services import _notify_circle_members
+
+            _notify_circle_members(anchor)
+        except Exception:
+            logger.warning(
+                "Failed to notify circle members for overdue anchor",
+                extra={"anchor_id": str(anchor.id)},
+                exc_info=True,
+            )
 
     logger.info("check_scheduled_anchors_complete")
 

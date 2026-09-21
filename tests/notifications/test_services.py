@@ -691,3 +691,227 @@ def test_push_falls_back_to_inline_when_broker_is_unreachable(
         )
 
     assert sent_inline == ["New Like"]
+
+
+# ---------------------------------------------------------------------------
+# Destination resolution — what the mobile clients navigate on.
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def circle_fixture(db, user):
+    """A circle with an anchor, a post and a comment on that post."""
+    from core.circles.models import (
+        Anchor,
+        Circle,
+        CircleMembership,
+        CirclePost,
+        CirclePostComment,
+    )
+
+    circle = Circle.objects.create(name="Dest Circle", description="x")
+    CircleMembership.objects.create(circle=circle, user=user, role="member")
+    anchor = Anchor.objects.create(
+        circle=circle,
+        created_by=user,
+        anchor_type="devotional",
+        title="Anchor",
+        content="Body",
+        published_at=timezone.now(),
+        expires_at=timezone.now() + timedelta(days=1),
+    )
+    post = CirclePost.objects.create(circle=circle, user=user, text="hello")
+    comment = CirclePostComment.objects.create(post=post, user=user, text="hi")
+    return circle, anchor, post, comment
+
+
+def test_anchor_destination_carries_the_circle_id(db, circle_fixture):
+    """Without the circle id the client cannot open the anchor's circle."""
+    circle, anchor, _post, _comment = circle_fixture
+
+    destination = build_notification_destination(
+        notification_type=NotificationType.NEW_ANCHOR,
+        reference_type="anchor",
+        reference_id=str(anchor.id),
+    )
+
+    assert destination["route"] == "anchor_detail"
+    assert destination["entityId"] == str(anchor.id)
+    assert destination["secondaryEntityId"] == str(circle.id)
+    assert destination["circleId"] == str(circle.id)
+
+
+def test_expired_anchor_still_routes_into_its_circle(db, circle_fixture):
+    """An anchor lives 24h; the notification outlives it and must still navigate."""
+    circle, anchor, _post, _comment = circle_fixture
+    anchor.expires_at = timezone.now() - timedelta(days=2)
+    anchor.deleted_at = timezone.now()
+    anchor.save(update_fields=["expires_at", "deleted_at"])
+
+    destination = build_notification_destination(
+        notification_type=NotificationType.NEW_ANCHOR,
+        reference_type="anchor",
+        reference_id=str(anchor.id),
+    )
+
+    assert destination["circleId"] == str(circle.id)
+
+
+def test_camel_case_reference_type_resolves(db, circle_fixture):
+    """Legacy rows stored "Anchor"; the client's route map is case-sensitive."""
+    circle, anchor, _post, _comment = circle_fixture
+
+    destination = build_notification_destination(
+        notification_type=NotificationType.NEW_ANCHOR,
+        reference_type="Anchor",
+        reference_id=str(anchor.id),
+    )
+
+    assert destination["route"] == "anchor_detail"
+    assert destination["circleId"] == str(circle.id)
+
+
+def test_create_notification_normalizes_reference_type(db, user, circle_fixture):
+    """New rows must be stored lowercase so the Circles filter matches them."""
+    _circle, anchor, _post, _comment = circle_fixture
+
+    notif = create_notification(
+        user_id=user.id,
+        type_str=NotificationType.NEW_ANCHOR,
+        reference_id=anchor.id,
+        reference_type="Anchor",
+        message="New anchor!",
+    )
+
+    assert notif is not None
+    assert notif.reference_type == "anchor"
+
+
+def test_circle_post_comment_destination_carries_post_and_circle(db, circle_fixture):
+    circle, _anchor, post, comment = circle_fixture
+
+    destination = build_notification_destination(
+        notification_type=NotificationType.LIKE_COMMENT,
+        reference_type="circle_post_comment",
+        reference_id=str(comment.id),
+    )
+
+    assert destination["secondaryEntityId"] == str(post.id)
+    assert destination["circleId"] == str(circle.id)
+
+
+def test_support_reply_destination_is_routable(db):
+    """ContactMessage had no branch, so support replies fell back to the list."""
+    ticket_id = uuid.uuid4()
+
+    destination = build_notification_destination(
+        notification_type=NotificationType.SUPPORT_REPLY,
+        reference_type="ContactMessage",
+        reference_id=str(ticket_id),
+    )
+
+    assert destination["route"] == "support_ticket"
+    assert destination["entityId"] == str(ticket_id)
+
+
+def test_notification_page_does_not_issue_a_query_per_row(db, user, other_user, settings):
+    """The list used to cost one lookup per comment notification, twice over."""
+    from django.db import connection
+    from django.test.utils import CaptureQueriesContext
+
+    from core.engagement.models import Comment
+    from core.notifications.schema import NotificationItem
+    from core.notifications.services import _build_destination_context
+    from core.posts.models import Post
+
+    post = Post.objects.create(user=other_user, post_type="text", caption="hi")
+    for index in range(15):
+        comment = Comment.objects.create(post=post, user=user, text=f"c{index}")
+        Notification.objects.create(
+            user=user,
+            sender=other_user,
+            notification_type=NotificationType.LIKE_COMMENT,
+            reference_id=comment.id,
+            reference_type="comment",
+            message="liked your comment",
+        )
+
+    with CaptureQueriesContext(connection) as captured:
+        rows = list(get_notifications(user.id, limit=15))
+        context = _build_destination_context(
+            (row.reference_type, str(row.reference_id)) for row in rows
+        )
+        for row in rows:
+            item = NotificationItem.from_instance(row)
+            item._destination_data = build_notification_destination(
+                notification_type=row.notification_type,
+                reference_type=row.reference_type,
+                reference_id=str(row.reference_id),
+                notification_id=str(row.id),
+                context=context,
+            )
+            # Both fields the mobile client asks for, on every row.
+            item.destination()
+            item.deep_link()
+
+    assert len(rows) == 15
+    # One for the page, one for the batched comment lookup. Previously 31.
+    assert len(captured.captured_queries) <= 3
+
+
+def test_pagination_keeps_read_notifications_newer_than_the_oldest_unread(db, user, other_user):
+    """Cursoring on created_at alone made those rows permanently unreachable."""
+    from core.notifications.services import encode_notification_cursor
+
+    now = timezone.now()
+    # Newest first: a read notification, then two unread that are older.
+    read_recent = Notification.objects.create(
+        user=user,
+        sender=other_user,
+        notification_type=NotificationType.LIKE_POST,
+        reference_id=uuid.uuid4(),
+        reference_type="post",
+        message="read but recent",
+        is_read=True,
+    )
+    unread_ids = []
+    for index in range(2):
+        notif = Notification.objects.create(
+            user=user,
+            sender=other_user,
+            notification_type=NotificationType.LIKE_POST,
+            reference_id=uuid.uuid4(),
+            reference_type="post",
+            message=f"unread {index}",
+        )
+        unread_ids.append(notif.id)
+    Notification.objects.filter(id=read_recent.id).update(created_at=now)
+    Notification.objects.filter(id=unread_ids[0]).update(created_at=now - timedelta(hours=1))
+    Notification.objects.filter(id=unread_ids[1]).update(created_at=now - timedelta(hours=2))
+
+    page_one = list(get_notifications(user.id, limit=2))
+    assert [n.id for n in page_one] == unread_ids  # unread sorts first
+
+    cursor = encode_notification_cursor(page_one[-1])
+    page_two = list(get_notifications(user.id, limit=2, cursor=cursor))
+
+    assert [n.id for n in page_two] == [read_recent.id]
+
+
+def test_legacy_iso_cursor_still_paginates(db, user, other_user):
+    """Clients mid-scroll at deploy time send a bare ISO timestamp."""
+    now = timezone.now()
+    older = Notification.objects.create(
+        user=user,
+        sender=other_user,
+        notification_type=NotificationType.LIKE_POST,
+        reference_id=uuid.uuid4(),
+        reference_type="post",
+        message="older",
+        is_read=True,
+    )
+    Notification.objects.filter(id=older.id).update(created_at=now - timedelta(hours=3))
+
+    page = list(get_notifications(user.id, limit=5, cursor=now.isoformat()))
+
+    assert [n.id for n in page] == [older.id]

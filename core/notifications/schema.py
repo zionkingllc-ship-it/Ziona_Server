@@ -11,8 +11,10 @@ from core.notifications.models import (
     NotificationStatus,
 )
 from core.notifications.services import (
+    _build_destination_context,
     build_notification_destination,
     create_admin_announcement,
+    encode_notification_cursor,
     get_muted_user_ids,
     get_notifications,
     get_unread_count,
@@ -62,6 +64,9 @@ class NotificationDestinationType:
     secondary_entity_id: strawberry.ID | None = strawberry.field(
         name="secondaryEntityId", default=None
     )
+    # Circle-nested content needs three ids (circle -> post -> comment) and the
+    # two generic slots are already spoken for, so the circle is named outright.
+    circle_id: strawberry.ID | None = strawberry.field(name="circleId", default=None)
     deep_link: str | None = strawberry.field(name="deepLink", default=None)
 
 
@@ -134,23 +139,32 @@ class NotificationItem:
 
     @strawberry.field
     def destination(self) -> NotificationDestinationType:
-        destination = build_notification_destination(
-            notification_type=self.type,
-            reference_type=self.reference_type,
-            reference_id=str(self.reference_id) if self.reference_id else None,
-            notification_id=str(self.id),
-        )
-        return NotificationDestinationType(
-            route=destination["route"],
-            entity_type=destination["entityType"],
-            entity_id=strawberry.ID(destination["entityId"]) if destination["entityId"] else None,
+        # Memoised: deepLink and destination are both requested by the mobile
+        # client, and each used to recompute this — doubling the per-row lookups.
+        cached = getattr(self, "_destination", None)
+        if cached is not None:
+            return cached
+
+        raw = getattr(self, "_destination_data", None)
+        if raw is None:
+            raw = build_notification_destination(
+                notification_type=self.type,
+                reference_type=self.reference_type,
+                reference_id=str(self.reference_id) if self.reference_id else None,
+                notification_id=str(self.id),
+            )
+        destination = NotificationDestinationType(
+            route=raw["route"],
+            entity_type=raw["entityType"],
+            entity_id=strawberry.ID(raw["entityId"]) if raw["entityId"] else None,
             secondary_entity_id=(
-                strawberry.ID(destination["secondaryEntityId"])
-                if destination["secondaryEntityId"]
-                else None
+                strawberry.ID(raw["secondaryEntityId"]) if raw["secondaryEntityId"] else None
             ),
-            deep_link=destination["deepLink"] or None,
+            circle_id=strawberry.ID(raw["circleId"]) if raw.get("circleId") else None,
+            deep_link=raw["deepLink"] or None,
         )
+        self._destination = destination
+        return destination
 
     @strawberry.field
     def user(self) -> "UserMiniType | None":
@@ -190,6 +204,8 @@ class NotificationItem:
         # Store the ORM instance so the user() resolver can read sender
         # without an additional DB round-trip.
         obj._instance = instance
+        obj._destination = None
+        obj._destination_data = None
         return obj
 
 
@@ -291,10 +307,28 @@ class NotificationQueries:
         if has_more:
             items = items[:limit]
 
-        next_cursor = items[-1].created_at.isoformat() if items else None
+        next_cursor = encode_notification_cursor(items[-1]) if items else None
+
+        # Resolve every destination for the page up front: four reference types
+        # need a parent lookup, so doing it per row cost one query each.
+        context = _build_destination_context(
+            (n.reference_type, str(n.reference_id)) for n in items if n.reference_id
+        )
+
+        mapped = []
+        for notification in items:
+            item = NotificationItem.from_instance(notification)
+            item._destination_data = build_notification_destination(
+                notification_type=notification.notification_type,
+                reference_type=notification.reference_type,
+                reference_id=str(notification.reference_id) if notification.reference_id else None,
+                notification_id=str(notification.id),
+                context=context,
+            )
+            mapped.append(item)
 
         return NotificationConnection(
-            items=[NotificationItem.from_instance(n) for n in items],
+            items=mapped,
             has_more=has_more,
             next_cursor=next_cursor,
         )

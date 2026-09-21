@@ -1,3 +1,5 @@
+import base64
+import json
 import logging
 import re
 import uuid
@@ -59,6 +61,22 @@ NOTIFICATION_CATEGORY_TYPES = {
 
 CIRCLE_REFERENCE_TYPES = {"circle_post", "circle_post_comment", "anchor", "anchor_response"}
 
+# Canonical reference_type vocabulary is lowercase snake_case — it is what both
+# clients switch on and what CIRCLE_REFERENCE_TYPES matches. Some writers used
+# CamelCase model names ("Anchor", "ContactMessage"), which silently missed both
+# the mobile route map (JS lookups are case-sensitive) and the Circles filter.
+_REFERENCE_TYPE_ALIASES = {
+    "profile": "user",
+    "contactmessage": "contact_message",
+}
+
+
+def _normalize_reference_type(reference_type: str | None) -> str:
+    """Canonicalise a reference type to the lowercase snake_case vocabulary."""
+    value = (reference_type or "").strip().lower()
+    return _REFERENCE_TYPE_ALIASES.get(value, value)
+
+
 # Token kinds FCM cannot deliver to (see _classify_token). Rejected at
 # registration so the client learns immediately, instead of the token being
 # stored, rejected by FCM, and silently deactivated forever.
@@ -119,8 +137,11 @@ def _is_notification_enabled(
 
 
 def _filter_muted_senders(queryset, user_id: int):
-    muted_sender_ids = NotificationMutedUser.objects.filter(user_id=user_id).values("muted_user_id")
-    return queryset.exclude(sender_id__in=muted_sender_ids)
+    # NOT EXISTS rather than NOT IN (subquery) — CLAUDE.md §23.
+    muted = NotificationMutedUser.objects.filter(
+        user_id=user_id, muted_user_id=OuterRef("sender_id")
+    )
+    return queryset.annotate(_sender_muted=Exists(muted)).filter(_sender_muted=False)
 
 
 def _filter_notification_category(queryset, category: str | None):
@@ -190,16 +211,93 @@ def queue_push_notification(user_id, title: str, body: str, data: dict[str, Any]
     transaction.on_commit(_dispatch)
 
 
+def _build_destination_context(pairs) -> dict[tuple[str, str], dict[str, str]]:
+    """Resolve the parent ids a destination needs, in one query per reference type.
+
+    ``pairs`` is an iterable of ``(reference_type, reference_id)``. Returns
+    ``{(ref_type, ref_id): {"parentId": ..., "circleId": ...}}``.
+
+    Resolving a whole page at once is what keeps the notification list off an
+    N+1: four of the reference types need a parent lookup, and the list resolver
+    used to run one query per row (two, because ``deepLink`` and ``destination``
+    each recomputed it) — 41 queries for a 20-row page.
+    """
+    from core.circles.models import AnchorResponse, CirclePost, CirclePostComment
+    from core.engagement.models import Comment
+
+    ids_by_type: dict[str, set[str]] = {
+        "comment": set(),
+        "circle_post": set(),
+        "circle_post_comment": set(),
+        "anchor_response": set(),
+        "anchor": set(),
+    }
+    for ref_type, ref_id in pairs:
+        normalized = _normalize_reference_type(ref_type)
+        if normalized in ids_by_type and ref_id:
+            ids_by_type[normalized].add(str(ref_id))
+
+    context: dict[tuple[str, str], dict[str, str]] = {}
+
+    if ids_by_type["comment"]:
+        for row in Comment.objects.filter(
+            id__in=ids_by_type["comment"], deleted_at__isnull=True
+        ).values("id", "post_id"):
+            context[("comment", str(row["id"]))] = {"parentId": str(row["post_id"])}
+
+    if ids_by_type["circle_post"]:
+        for row in CirclePost.objects.filter(
+            id__in=ids_by_type["circle_post"], deleted_at__isnull=True
+        ).values("id", "circle_id"):
+            context[("circle_post", str(row["id"]))] = {"circleId": str(row["circle_id"])}
+
+    if ids_by_type["circle_post_comment"]:
+        for row in CirclePostComment.objects.filter(
+            id__in=ids_by_type["circle_post_comment"], deleted_at__isnull=True
+        ).values("id", "post_id", "post__circle_id"):
+            context[("circle_post_comment", str(row["id"]))] = {
+                "parentId": str(row["post_id"]),
+                "circleId": str(row["post__circle_id"]),
+            }
+
+    if ids_by_type["anchor_response"]:
+        for row in AnchorResponse.objects.filter(
+            id__in=ids_by_type["anchor_response"], deleted_at__isnull=True
+        ).values("id", "anchor_id", "anchor__circle_id"):
+            context[("anchor_response", str(row["id"]))] = {
+                "parentId": str(row["anchor_id"]),
+                "circleId": str(row["anchor__circle_id"]),
+            }
+
+    if ids_by_type["anchor"]:
+        # all_objects, not objects: an anchor expires after 24h and may be soft
+        # deleted, but the notification must still route the member into the
+        # circle it belonged to rather than dead-ending on the list.
+        from core.circles.models import Anchor
+
+        for row in Anchor.all_objects.filter(id__in=ids_by_type["anchor"]).values(
+            "id", "circle_id"
+        ):
+            context[("anchor", str(row["id"]))] = {"circleId": str(row["circle_id"])}
+
+    return context
+
+
 def build_notification_destination(
     notification_type: str,
     reference_type: str,
     reference_id: uuid.UUID | str | None,
     *,
     notification_id: uuid.UUID | str | None = None,
+    context: dict[tuple[str, str], dict[str, str]] | None = None,
 ) -> dict[str, str]:
-    """Build mobile navigation metadata from an existing notification reference."""
-    notif_type = (notification_type or "").strip().lower()
-    ref_type = (reference_type or "").strip().lower()
+    """Build mobile navigation metadata from an existing notification reference.
+
+    ``context`` is the prefetched map from :func:`_build_destination_context`.
+    When omitted one is built for this single reference, so callers that handle
+    one notification (push delivery) keep working unchanged.
+    """
+    ref_type = _normalize_reference_type(reference_type)
     ref_id = str(reference_id) if reference_id else ""
     fallback_id = str(notification_id) if notification_id else ref_id
     fallback = {
@@ -207,19 +305,15 @@ def build_notification_destination(
         "entityType": "notification",
         "entityId": fallback_id,
         "secondaryEntityId": "",
+        "circleId": "",
         "deepLink": "",
     }
     if not ref_id:
         return fallback
 
-    if notif_type == NotificationType.NEW_ANCHOR and ref_type == "anchor":
-        return {
-            "route": "anchor_detail",
-            "entityType": "anchor",
-            "entityId": ref_id,
-            "secondaryEntityId": "",
-            "deepLink": "",
-        }
+    if context is None:
+        context = _build_destination_context([(ref_type, ref_id)])
+    resolved = context.get((ref_type, ref_id), {})
 
     if ref_type == "post":
         return {
@@ -227,6 +321,7 @@ def build_notification_destination(
             "entityType": "post",
             "entityId": ref_id,
             "secondaryEntityId": "",
+            "circleId": "",
             "deepLink": build_post_share_url(settings.APP_SHARE_BASE_URL, ref_id),
         }
 
@@ -236,21 +331,20 @@ def build_notification_destination(
             "entityType": "user",
             "entityId": ref_id,
             "secondaryEntityId": "",
+            "circleId": "",
             "deepLink": build_profile_share_url(settings.APP_SHARE_BASE_URL, ref_id),
         }
 
     if ref_type == "comment":
-        from core.engagement.models import Comment
-
-        comment = Comment.objects.filter(id=ref_id, deleted_at__isnull=True).first()
-        if not comment:
+        post_id = resolved.get("parentId", "")
+        if not post_id:
             return {**fallback, "entityType": "comment", "entityId": ref_id}
-        post_id = str(comment.post_id)
         return {
             "route": "comment_thread",
             "entityType": "comment",
             "entityId": ref_id,
             "secondaryEntityId": post_id,
+            "circleId": "",
             "deepLink": (
                 f"{build_post_share_url(settings.APP_SHARE_BASE_URL, post_id)}"
                 f"?commentId={quote(ref_id, safe='')}"
@@ -258,47 +352,57 @@ def build_notification_destination(
         }
 
     if ref_type == "circle_post":
-        from core.circles.models import CirclePost
-
-        post = CirclePost.objects.filter(id=ref_id, deleted_at__isnull=True).first()
+        circle_id = resolved.get("circleId", "")
         return {
             "route": "circle_post_detail",
             "entityType": "circle_post",
             "entityId": ref_id,
-            "secondaryEntityId": str(post.circle_id) if post else "",
+            "secondaryEntityId": circle_id,
+            "circleId": circle_id,
             "deepLink": "",
         }
 
     if ref_type == "circle_post_comment":
-        from core.circles.models import CirclePostComment
-
-        comment = CirclePostComment.objects.filter(id=ref_id, deleted_at__isnull=True).first()
         return {
             "route": "circle_post_comment_thread",
             "entityType": "circle_post_comment",
             "entityId": ref_id,
-            "secondaryEntityId": str(comment.post_id) if comment else "",
+            "secondaryEntityId": resolved.get("parentId", ""),
+            "circleId": resolved.get("circleId", ""),
             "deepLink": "",
         }
 
     if ref_type == "anchor":
+        # secondaryEntityId carries the circle id so the client can open the
+        # circle the anchor belongs to; an anchor on its own is not a
+        # navigable destination once it has expired.
+        circle_id = resolved.get("circleId", "")
         return {
             "route": "anchor_detail",
             "entityType": "anchor",
             "entityId": ref_id,
-            "secondaryEntityId": "",
+            "secondaryEntityId": circle_id,
+            "circleId": circle_id,
             "deepLink": "",
         }
 
     if ref_type == "anchor_response":
-        from core.circles.models import AnchorResponse
-
-        response = AnchorResponse.objects.filter(id=ref_id, deleted_at__isnull=True).first()
         return {
             "route": "anchor_response",
             "entityType": "anchor_response",
             "entityId": ref_id,
-            "secondaryEntityId": str(response.anchor_id) if response else "",
+            "secondaryEntityId": resolved.get("parentId", ""),
+            "circleId": resolved.get("circleId", ""),
+            "deepLink": "",
+        }
+
+    if ref_type == "contact_message":
+        return {
+            "route": "support_ticket",
+            "entityType": "contact_message",
+            "entityId": ref_id,
+            "secondaryEntityId": "",
+            "circleId": "",
             "deepLink": "",
         }
 
@@ -325,6 +429,11 @@ def create_notification(
         sender_id: The user who triggered the notification (e.g. a liker, commenter).
                    Pass None for system/admin notifications.
     """
+    # Canonicalise before anything reads it: the stored value drives the mobile
+    # route map, the Circles filter and the destination builder, and all three
+    # are case-sensitive.
+    reference_type = _normalize_reference_type(reference_type)
+
     if sender_id and _is_sender_muted(user_id, sender_id):
         logger.info(
             "notification_skipped_muted_sender",
@@ -388,6 +497,7 @@ def create_notification(
         "destinationEntityType": destination["entityType"],
         "destinationEntityId": destination["entityId"],
         "destinationSecondaryEntityId": destination["secondaryEntityId"],
+        "destinationCircleId": destination["circleId"],
         "deepLink": destination["deepLink"],
     }
     if push_data:
@@ -566,23 +676,69 @@ def get_notifications(
     queryset = (
         Notification.objects.filter(user_id=user_id, status=NotificationStatus.ACTIVE)
         .select_related("sender")
-        .order_by("is_read", "-created_at")
+        .order_by("is_read", "-created_at", "-id")
     )
     queryset = _filter_muted_senders(queryset, user_id)
     queryset = _filter_notification_category(queryset, category)
     queryset = _annotate_sender_viewer_state(queryset, user_id)
-
-    if cursor:
-        try:
-            from django.utils.dateparse import parse_datetime
-
-            cursor_date = parse_datetime(cursor)
-            if cursor_date:
-                queryset = queryset.filter(created_at__lt=cursor_date)
-        except Exception as err:
-            logger.warning(f"Error parsing cursor in notifications: {err}")
+    queryset = _apply_notification_cursor(queryset, cursor)
 
     return queryset[:limit]
+
+
+def encode_notification_cursor(notification) -> str:
+    """Encode the full sort key — unread flag, timestamp and id — as an opaque cursor."""
+    payload = {
+        "v": 1,
+        "r": bool(notification.is_read),
+        "ts": notification.created_at.isoformat(),
+        "id": str(notification.id),
+    }
+    return base64.urlsafe_b64encode(json.dumps(payload).encode()).decode()
+
+
+def _apply_notification_cursor(queryset, cursor: str | None):
+    """Keyset pagination matching the (is_read, -created_at, -id) ordering.
+
+    Paginating on ``created_at`` alone was wrong because unread sorts ahead of
+    read regardless of age: a user with more than one page of unread ended page
+    one on an old unread timestamp, and every *read* notification newer than it
+    was then filtered out permanently. Those rows were unreachable.
+
+    Legacy bare-ISO cursors from clients paging mid-deploy fall back to the old
+    timestamp filter, which self-heals on the next page.
+    """
+    if not cursor:
+        return queryset
+
+    from django.utils.dateparse import parse_datetime
+
+    try:
+        data = json.loads(base64.urlsafe_b64decode(cursor.encode()).decode())
+    except Exception:
+        data = None
+
+    if not isinstance(data, dict) or "id" not in data:
+        try:
+            legacy_date = parse_datetime(cursor)
+        except Exception:
+            legacy_date = None
+        if legacy_date:
+            return queryset.filter(created_at__lt=legacy_date)
+        logger.warning("Unparseable notification cursor — serving the first page")
+        return queryset
+
+    cursor_ts = parse_datetime(data.get("ts") or "")
+    if cursor_ts is None:
+        return queryset
+
+    is_read = bool(data.get("r"))
+    return queryset.filter(
+        # is_read sorts ascending, so "after the cursor" means unread -> read.
+        Q(is_read__gt=is_read)
+        | Q(is_read=is_read, created_at__lt=cursor_ts)
+        | Q(is_read=is_read, created_at=cursor_ts, id__lt=data["id"])
+    )
 
 
 def get_unread_count(user_id: int) -> int:

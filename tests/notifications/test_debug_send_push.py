@@ -159,3 +159,73 @@ def test_send_fcm_debug_maps_success_and_failure(monkeypatch):
     }
     assert out[1]["success"] is False
     assert out[1]["error_code"] == "messaging/invalid-argument"
+
+
+# ---------------------------------------------------------------------------
+# Per-platform delivery config — a notification block alone does not alert.
+# ---------------------------------------------------------------------------
+
+
+def _captured_message(monkeypatch, sender):
+    """Run a sender with FCM stubbed and return the MulticastMessage it built."""
+    import core.notifications.firebase as fb
+
+    monkeypatch.setattr(fb, "initialize_firebase", lambda: None)
+    monkeypatch.setattr(fb, "_firebase_initialized", True)
+    monkeypatch.setattr(fb, "firebase_admin", MagicMock())
+
+    captured = {}
+
+    def _send(message):
+        captured["message"] = message
+        response = MagicMock()
+        response.success_count = 1
+        response.failure_count = 0
+        result = MagicMock()
+        result.success = True
+        result.message_id = "m1"
+        response.responses = [result]
+        return response
+
+    monkeypatch.setattr(fb.messaging, "send_each_for_multicast", _send)
+    sender(fb)
+    return captured["message"]
+
+
+def test_push_carries_android_high_priority_and_channel(monkeypatch, settings):
+    """Normal priority is deferred by Doze on MIUI, and Android 8+ drops an
+    unknown channel silently — both look like "the push never arrived"."""
+    settings.FCM_ANDROID_CHANNEL_ID = "default"
+
+    message = _captured_message(
+        monkeypatch,
+        lambda fb: fb.send_fcm_notification(["tok"], "Title", "Body", {"type": "like_post"}),
+    )
+
+    assert message.android is not None
+    assert message.android.priority == "high"
+    assert message.android.notification.channel_id == "default"
+    assert message.android.notification.sound == "default"
+
+
+def test_push_carries_apns_sound(monkeypatch):
+    """Without aps.sound iOS delivers the push silently."""
+    message = _captured_message(
+        monkeypatch,
+        lambda fb: fb.send_fcm_notification(["tok"], "Title", "Body", {}),
+    )
+
+    assert message.apns is not None
+    assert message.apns.payload.aps.sound == "default"
+    assert message.apns.headers["apns-priority"] == "10"
+
+
+def test_debug_push_uses_the_same_message_as_production(monkeypatch):
+    """debugSendPush is only a useful diagnostic if it sends the real thing."""
+    message = _captured_message(
+        monkeypatch,
+        lambda fb: fb.send_fcm_debug(["tok"], "Title", "Body", {}),
+    )
+
+    assert message.android.priority == "high"
+    assert message.apns.payload.aps.sound == "default"
