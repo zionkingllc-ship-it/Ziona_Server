@@ -20,6 +20,10 @@ from core.follows.services import FollowService
 from core.posts.models import Post
 from core.users.models import User
 
+# Single definition so the scanner pragma cannot be reformatted away from
+# its literal, which is what happens when the value is repeated inline.
+TEST_PASSWORD = "password123"  # pragma: allowlist secret
+
 
 @pytest.fixture(autouse=True)
 def _clear_guest_cache():
@@ -33,7 +37,7 @@ def _creator(username: str, *, status: str = "active", posts: int = 1) -> User:
     user = User.objects.create_user(
         email=f"{username}@example.com",
         username=username,
-        password="password123",
+        password=TEST_PASSWORD,
         status=status,
     )
     for index in range(posts):
@@ -70,7 +74,7 @@ def test_warned_users_are_hidden_from_guests(db):
 def test_warned_users_still_appear_for_signed_in_viewers(db):
     """Scoped to guests deliberately — this pins that the signed-in path is untouched."""
     viewer = User.objects.create_user(
-        email="viewer@example.com", username="viewer", password="password123"
+        email="viewer@example.com", username="viewer", password=TEST_PASSWORD
     )
     _creator("warnedcreator", status="warned")
 
@@ -95,19 +99,19 @@ def test_engagement_outranks_a_bigger_follower_count(db):
     # `followed` has more followers but nothing on their posts.
     for index in range(5):
         fan = User.objects.create_user(
-            email=f"fan{index}@example.com", username=f"fan{index}", password="password123"
+            email=f"fan{index}@example.com", username=f"fan{index}", password=TEST_PASSWORD
         )
         Follow.objects.create(follower=fan, following=followed)
 
     # `engaging` has one follower but real engagement.
     solo = User.objects.create_user(
-        email="solo@example.com", username="solo", password="password123"
+        email="solo@example.com", username="solo", password=TEST_PASSWORD
     )
     Follow.objects.create(follower=solo, following=engaging)
     post = engaging.posts.first()
     for index in range(4):
         liker = User.objects.create_user(
-            email=f"liker{index}@example.com", username=f"liker{index}", password="password123"
+            email=f"liker{index}@example.com", username=f"liker{index}", password=TEST_PASSWORD
         )
         Like.objects.create(user=liker, post=post)
         Comment.objects.create(user=liker, post=post, text="amen")
@@ -126,7 +130,7 @@ def test_engagement_is_not_inflated_by_join_fan_out(db):
     """
     creator = _creator("prolific", posts=2)
     fan = User.objects.create_user(
-        email="fan@example.com", username="fanuser", password="password123"
+        email="fan@example.com", username="fanuser", password=TEST_PASSWORD
     )
     for post in creator.posts.all():
         Like.objects.create(user=fan, post=post)
@@ -159,7 +163,7 @@ def test_newer_creators_hold_reserved_slots(db):
     # Give each established creator enough followers to clear the ceiling.
     fans = [
         User.objects.create_user(
-            email=f"bigfan{i}@example.com", username=f"bigfan{i}", password="password123"
+            email=f"bigfan{i}@example.com", username=f"bigfan{i}", password=TEST_PASSWORD
         )
         for i in range(60)
     ]
@@ -180,7 +184,7 @@ def test_guest_list_is_filled_when_no_newcomers_qualify(db):
     """A thin newcomer pool must not shorten the list."""
     fans = [
         User.objects.create_user(
-            email=f"f{i}@example.com", username=f"f{i}", password="password123"
+            email=f"f{i}@example.com", username=f"f{i}", password=TEST_PASSWORD
         )
         for i in range(60)
     ]
@@ -221,7 +225,7 @@ def test_posts_count_is_reported(db):
 
 def test_signed_in_excludes_self_and_already_followed(db):
     viewer = User.objects.create_user(
-        email="viewer@example.com", username="viewer", password="password123"
+        email="viewer@example.com", username="viewer", password=TEST_PASSWORD
     )
     followed = _creator("alreadyfollowed")
     _creator("stranger")
@@ -235,13 +239,13 @@ def test_signed_in_excludes_self_and_already_followed(db):
 def test_signed_in_still_ranks_by_follower_count(db):
     """The personalised path was moved, not rewritten — ordering must hold."""
     viewer = User.objects.create_user(
-        email="viewer@example.com", username="viewer", password="password123"
+        email="viewer@example.com", username="viewer", password=TEST_PASSWORD
     )
     small = _creator("small")
     big = _creator("big")
     for index in range(3):
         fan = User.objects.create_user(
-            email=f"fan{index}@example.com", username=f"fan{index}", password="password123"
+            email=f"fan{index}@example.com", username=f"fan{index}", password=TEST_PASSWORD
         )
         Follow.objects.create(follower=fan, following=big)
 
@@ -253,7 +257,7 @@ def test_signed_in_still_ranks_by_follower_count(db):
 def test_signed_in_includes_creators_without_posts(db):
     """The has-posts filter is a guest-list rule; it must not leak sideways."""
     viewer = User.objects.create_user(
-        email="viewer@example.com", username="viewer", password="password123"
+        email="viewer@example.com", username="viewer", password=TEST_PASSWORD
     )
     _creator("noposts", posts=0)
 
@@ -269,7 +273,7 @@ def test_reserved_slot_goes_to_the_most_recent_poster(db):
     """
     star = _creator("star")
     fan = User.objects.create_user(
-        email="starfan@example.com", username="starfan", password="password123"
+        email="starfan@example.com", username="starfan", password=TEST_PASSWORD
     )
     Like.objects.create(user=fan, post=star.posts.first())
     Comment.objects.create(user=fan, post=star.posts.first(), text="amen")
