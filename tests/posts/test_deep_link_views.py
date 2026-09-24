@@ -153,8 +153,14 @@ def test_profile_share_preview_includes_store_fallback_and_deep_link(client, set
 def test_share_base_url_defaults_to_the_serving_host_not_a_redirecting_one(settings):
     """Deep links must target the host that serves the site.
 
-    `ziona.app` permanently 308s to `www.ziona.app`; Apple/Google refuse to verify
-    a deep-link domain whose .well-known files redirect, and will not open the app
-    through a redirect. Guards against reverting the default to the bare apex.
+    Apple and Google refuse to verify a deep-link domain whose .well-known files
+    30x-redirect, and will not open the app through a redirect. `ziona.app` used
+    to 308 to `www.ziona.app`, so www was the target; the apex now serves
+    directly and proxies the .well-known files plus /post/* and /profile/* to
+    this backend.
+
+    The value must equal the host declared in the Android intent filter and the
+    AASA — App Links open only for the exact host that was verified — so this
+    guards against it drifting back to a host the app does not claim.
     """
-    assert settings.APP_SHARE_BASE_URL == "https://www.ziona.app"
+    assert settings.APP_SHARE_BASE_URL == "https://ziona.app"
