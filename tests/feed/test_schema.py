@@ -2,6 +2,7 @@ import json
 
 import pytest
 from django.test import Client
+from django.utils import timezone
 
 from core.posts.models import Post
 
@@ -296,3 +297,124 @@ def test_discover_search_graphql_returns_empty_state_for_blank_query():
     assert payload["creators"] == []
     assert payload["posts"] == []
     assert payload["emptyState"]["message"] == "No matching content found."
+
+
+@pytest.mark.django_db
+def test_discover_search_returns_creators_only_on_the_first_page(create_user):
+    """The cursor paginates posts; creators are a header block above them.
+
+    The client accumulates pages with `pages.flatMap(p => p.creators)`, so
+    re-sending page 1 of creators alongside every page of posts made the same
+    handful of names repeat down the list — once more on each scroll.
+    """
+    creator = create_user(email="dup-creator@test.com", username="grace_creator")
+    author = create_user(email="dup-author@test.com", username="grace_author")
+    love = make_category("dup-love", "Love", "dup-love", order=1)
+    for index in range(6):
+        Post.objects.create(
+            user=author,
+            post_type="text",
+            caption=f"Grace testimony {index}",
+            category=love,
+        )
+
+    def search(cursor=None):
+        variables = {"query": "grace", "cursor": cursor}
+        response = Client().post(
+            "/graphql/",
+            data=json.dumps(
+                {
+                    "query": """
+                    query Search($query: String!, $cursor: String) {
+                      discoverSearch(query: $query, limit: 2, cursor: $cursor) {
+                        creators { id username }
+                        posts { id }
+                        nextCursor
+                        hasMore
+                        emptyState { message }
+                      }
+                    }
+                    """,
+                    "variables": variables,
+                }
+            ),
+            content_type="application/json",
+        )
+        content = json.loads(response.content)
+        assert "errors" not in content, content.get("errors")
+        return content["data"]["discoverSearch"]
+
+    first = search()
+    assert str(creator.id) in {item["id"] for item in first["creators"]}
+    assert first["hasMore"] is True
+
+    # Walk the rest of the feed the way the client does and accumulate.
+    accumulated = [item["id"] for item in first["creators"]]
+    cursor = first["nextCursor"]
+    pages = 0
+    while cursor and pages < 5:
+        page = search(cursor)
+        assert page["creators"] == [], "creators must not repeat on a continuation page"
+        # A continuation page is mid-scroll — never an empty state.
+        assert page["emptyState"] is None
+        accumulated.extend(item["id"] for item in page["creators"])
+        cursor = page["nextCursor"]
+        pages += 1
+
+    assert pages > 0, "fixture must produce more than one page for this to prove anything"
+    assert len(accumulated) == len(set(accumulated))
+
+
+@pytest.mark.django_db
+def test_discover_search_continuation_page_never_reports_an_empty_state(create_user):
+    """ "No matching content" belongs to a search that found nothing, not to
+    running off the end of one that did.
+
+    Reachable whenever the remaining posts disappear between pages — deleted,
+    hidden, or reported — which leaves a continuation page with nothing in it.
+    """
+    create_user(email="empty-creator@test.com", username="grace_creator")
+    author = create_user(email="empty-author@test.com", username="grace_author")
+    love = make_category("empty-love", "Love", "empty-love", order=1)
+    posts = [
+        Post.objects.create(
+            user=author, post_type="text", caption=f"Grace testimony {index}", category=love
+        )
+        for index in range(6)
+    ]
+
+    def search(cursor=None):
+        response = Client().post(
+            "/graphql/",
+            data=json.dumps(
+                {
+                    "query": """
+                    query Search($query: String!, $cursor: String) {
+                      discoverSearch(query: $query, limit: 2, cursor: $cursor) {
+                        creators { id }
+                        posts { id }
+                        nextCursor
+                        emptyState { message }
+                      }
+                    }
+                    """,
+                    "variables": {"query": "grace", "cursor": cursor},
+                }
+            ),
+            content_type="application/json",
+        )
+        content = json.loads(response.content)
+        assert "errors" not in content, content.get("errors")
+        return content["data"]["discoverSearch"]
+
+    first = search()
+    cursor = first["nextCursor"]
+    assert cursor, "fixture must produce a second page"
+
+    # Everything past page one vanishes while the user is still scrolling.
+    Post.objects.filter(id__in=[p.id for p in posts]).update(deleted_at=timezone.now())
+
+    page_two = search(cursor)
+
+    assert page_two["posts"] == []
+    assert page_two["emptyState"] is None, "mid-scroll exhaustion is not an empty search"

@@ -719,11 +719,21 @@ class FeedQueries:
             cursor=cursor,
             limit=limit,
         )
-        creator_result = FollowService.search_creators(
-            query=query,
-            viewer_id=user_id,
-            page=1,
-            page_size=limit,
+        # `cursor` paginates posts only — the creator list is a header block
+        # above them, not part of the infinite scroll. Re-sending it on every
+        # page is what made the client repeat names: it accumulates pages with
+        # `pages.flatMap(p => p.creators)`, so an unchanging page 1 of creators
+        # was appended again on each scroll.
+        is_first_page = not cursor
+        creator_result = (
+            FollowService.search_creators(
+                query=query,
+                viewer_id=user_id,
+                page=1,
+                page_size=limit,
+            )
+            if is_first_page
+            else {"creators": []}
         )
 
         creators = [
@@ -742,8 +752,11 @@ class FeedQueries:
             for c in creator_result["creators"]
         ]
 
+        # First page only: past it `creators` is deliberately empty, so without
+        # this guard a continuation page that ran out of posts would tell a
+        # mid-scroll user there were no matches at all.
         empty_state = None
-        if not creators and not result.posts and result.empty_state:
+        if is_first_page and not creators and not result.posts and result.empty_state:
             empty_state = EmptyState(
                 message=result.empty_state.message,
                 suggestions=[
