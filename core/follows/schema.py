@@ -282,7 +282,10 @@ class FollowQueries:
         )
 
     @strawberry.field(
-        description="Get highly validated creators algorithmically dynamically curated for the authenticating user."
+        description=(
+            "Creators to follow. Personalised for a signed-in user; guests get a "
+            "shared list ranked on engagement, with slots held for newer creators."
+        )
     )
     def suggested_creators(
         self,
@@ -290,22 +293,20 @@ class FollowQueries:
         limit: int = 10,
     ) -> list[SuggestedCreatorType]:
         """
-        Pull 10 algorithmically tailored profiles optimizing the For You connections natively explicitly.
+        Return creators the viewer might want to follow.
 
-        Yields based on aggregated interest data arrays overlapping actively globally dynamically natively.
+        Signed in, the list is ranked on the viewer's interests and excludes
+        anyone they already follow. Without a token it falls back to a shared
+        guest list, which is what the empty-Following and first-run screens use.
 
-        **Authentication:** Required natively logically evaluating user graph dynamically
+        **Authentication:** Optional
         **Parameters:**
-        - limit (Int, optional) - Chunk Cap
-        **Returns:** Directly mapped array of 10 SuggestedCreatorType nodes organically natively
-        **Errors:** Falls back onto an empty list bounding cleanly globally natively gracefully without panicking natively.
+        - limit (Int, optional) - maximum number of creators to return
+        **Returns:** SuggestedCreatorType nodes; an empty list if none qualify.
         """
         from core.follows.services import FollowService
 
         user_id = _get_authenticated_user_id(info)
-        if not user_id:
-            return []
-
         suggestions = FollowService.get_suggested_creators(user_id, limit)
         return [
             SuggestedCreatorType(

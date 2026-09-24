@@ -8,8 +8,20 @@ and interest-based creator suggestions.
 import logging
 from datetime import timedelta
 
+from django.core.cache import cache
 from django.db import IntegrityError
-from django.db.models import Case, Count, Exists, IntegerField, OuterRef, Q, Value, When
+from django.db.models import (
+    Case,
+    Count,
+    Exists,
+    ExpressionWrapper,
+    F,
+    IntegerField,
+    OuterRef,
+    Q,
+    Value,
+    When,
+)
 from django.utils import timezone
 
 from core.follows.models import Follow
@@ -23,6 +35,22 @@ logger = logging.getLogger("core.follows")
 # instead of scanning it.
 MIN_SEARCH_QUERY_LENGTH = 2
 MAX_SEARCH_PAGE_SIZE = 50
+
+# Guest suggestions are identical for every visitor, so one cached value serves
+# them all — worth doing on a public unauthenticated endpoint (CLAUDE.md §14).
+GUEST_SUGGESTIONS_CACHE_KEY = "suggested_creators:guest:v1"
+GUEST_SUGGESTIONS_CACHE_TTL = 900
+
+# Engagement is scored across three joined relations, so the pool is narrowed
+# first rather than annotating the whole user table.
+CANDIDATE_POOL_SIZE = 100
+
+# Share of the guest list ranked purely on engagement. The remainder is reserved
+# for creators who post but are not yet established.
+GUEST_POPULAR_SLOT_RATIO = 0.6
+
+# A creator above this follower count no longer needs the reserved slots.
+FRESH_FOLLOWER_CEILING = 50
 
 
 class FollowService:
@@ -323,42 +351,22 @@ class FollowService:
         }
 
     @staticmethod
-    def get_suggested_creators(
-        user_id: str,
-        limit: int = 10,
-    ) -> list[dict]:
-        """Get suggested creators based on user interests.
+    def _creator_candidate_queryset(exclude_ids: set, allowed_statuses: list[str]):
+        """Followable creators, annotated with follower and post counts.
 
-        Orders by follower count and filters out already-followed users.
-
-        Args:
-            user_id: UUID of the requesting user.
-            limit: Number of suggestions.
-
-        Returns:
-            List of dicts with user info and follower_count.
+        Shared by the signed-in and guest suggestion paths so the two cannot
+        drift on what counts as a followable account. ``allowed_statuses`` is
+        the only difference between them today: guests never see accounts under
+        a moderation warning.
         """
-        from core.users.models import User, UserInterest, UserRole
+        from core.users.models import User, UserRole
 
-        user_interests = list(
-            UserInterest.objects.filter(user_id=user_id).values_list("interest", flat=True)
-        )
-
-        following_ids = set(
-            Follow.objects.filter(
-                follower_id=user_id,
-                following__deleted_at__isnull=True,
-                following__lifecycle_state="active",
-            ).values_list("following_id", flat=True)
-        )
-        following_ids.add(user_id)
-
-        qs = (
+        return (
             User.objects.filter(deleted_at__isnull=True)
-            .filter(is_active=True, role=UserRole.USER, status__in=["active", "warned"])
+            .filter(is_active=True, role=UserRole.USER, status__in=allowed_statuses)
             .exclude(username__isnull=True)
             .exclude(username="")
-            .exclude(id__in=following_ids)
+            .exclude(id__in=exclude_ids)
             .annotate(
                 followers_count=Count(
                     "follower_set",
@@ -374,8 +382,72 @@ class FollowService:
                     distinct=True,
                 ),
             )
-            .order_by("-followers_count", "-posts_count", "-created_at")
         )
+
+    @staticmethod
+    def _suggestion_dict(user) -> dict:
+        return {
+            "user": AuthorDTO(
+                id=str(user.id),
+                username=user.username or "",
+                avatar_url=user.avatar_url or None,
+            ),
+            "bio": user.bio or None,
+            "followers_count": user.followers_count,
+            # Already annotated by _creator_candidate_queryset; it used to be
+            # computed and thrown away, so stats.posts always reported zero.
+            "posts_count": user.posts_count,
+        }
+
+    @staticmethod
+    def get_suggested_creators(
+        user_id: str | None,
+        limit: int = 10,
+    ) -> list[dict]:
+        """Suggest creators to follow.
+
+        Signed in: ranked on the viewer's interests and follow graph.
+        Guest: one shared list — see _guest_suggested_creators.
+        """
+        if not user_id:
+            return FollowService._guest_suggested_creators(limit)
+        return FollowService._personalised_suggested_creators(user_id, limit)
+
+    @staticmethod
+    def _personalised_suggested_creators(
+        user_id: str,
+        limit: int = 10,
+    ) -> list[dict]:
+        """Get suggested creators based on user interests.
+
+        Orders by follower count and filters out already-followed users.
+
+        Args:
+            user_id: UUID of the requesting user.
+            limit: Number of suggestions.
+
+        Returns:
+            List of dicts with user info and follower_count.
+        """
+        from core.users.models import UserInterest
+
+        user_interests = list(
+            UserInterest.objects.filter(user_id=user_id).values_list("interest", flat=True)
+        )
+
+        following_ids = set(
+            Follow.objects.filter(
+                follower_id=user_id,
+                following__deleted_at__isnull=True,
+                following__lifecycle_state="active",
+            ).values_list("following_id", flat=True)
+        )
+        following_ids.add(user_id)
+
+        qs = FollowService._creator_candidate_queryset(
+            exclude_ids=following_ids,
+            allowed_statuses=["active", "warned"],
+        ).order_by("-followers_count", "-posts_count", "-created_at")
 
         if user_interests:
             qs = qs.annotate(
@@ -392,21 +464,126 @@ class FollowService:
                 "-created_at",
             )
 
-        suggestions = []
-        for user in qs[:limit]:
-            suggestions.append(
-                {
-                    "user": AuthorDTO(
-                        id=str(user.id),
-                        username=user.username or "",
-                        avatar_url=user.avatar_url or None,
-                    ),
-                    "bio": user.bio or None,
-                    "followers_count": user.followers_count,
-                }
-            )
+        return [FollowService._suggestion_dict(user) for user in qs[:limit]]
 
+    @staticmethod
+    def _guest_suggested_creators(limit: int = 10) -> list[dict]:
+        """One shared list for everyone browsing without an account.
+
+        A guest gives us nothing to personalise on, so the result is the same
+        for everybody — which makes it cacheable, and makes the ranking matter.
+        Ordered purely by follower count, the same few accounts would collect
+        every new visitor's attention forever: the rich-get-richer loop that put
+        43 posts permanently out of the For You feed. So the list reserves slots
+        for creators who are actively posting but not yet established.
+
+        Reserved slots rather than a score bonus: a bonus sits on the same axis
+        as the thing it is competing with and is eventually outgrown, while a
+        slot cannot be starved no matter how large the corpus gets.
+        """
+        cache_key = f"{GUEST_SUGGESTIONS_CACHE_KEY}:{limit}"
+        cached = cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+        suggestions = FollowService._build_guest_suggestions(limit)
+        cache.set(cache_key, suggestions, timeout=GUEST_SUGGESTIONS_CACHE_TTL)
         return suggestions
+
+    @staticmethod
+    def _build_guest_suggestions(limit: int) -> list[dict]:
+        from django.db.models import Max
+
+        # Stage 1 — narrow to a bounded pool before touching engagement. The
+        # engagement annotations join three multi-valued relations through
+        # posts; running them across the whole user table would not scale.
+        pool_ids = list(
+            FollowService._creator_candidate_queryset(
+                exclude_ids=set(),
+                allowed_statuses=["active"],
+            )
+            # An empty profile wastes a slot and makes a poor first impression.
+            .filter(posts_count__gt=0)
+            .order_by("-followers_count", "-created_at")
+            .values_list("id", flat=True)[:CANDIDATE_POOL_SIZE]
+        )
+        if not pool_ids:
+            return []
+
+        # Stage 2 — score only the pool. distinct=True on every Count: three
+        # multi-valued joins off `posts` otherwise multiply each other, and a
+        # creator with 2 posts and 2 likes would score as though they had 4.
+        scored = list(
+            FollowService._creator_candidate_queryset(
+                exclude_ids=set(),
+                allowed_statuses=["active"],
+            )
+            .filter(id__in=pool_ids)
+            .annotate(
+                likes_total=Count(
+                    "posts__likes",
+                    filter=Q(posts__deleted_at__isnull=True),
+                    distinct=True,
+                ),
+                comments_total=Count(
+                    "posts__comments",
+                    filter=Q(
+                        posts__deleted_at__isnull=True,
+                        posts__comments__deleted_at__isnull=True,
+                    ),
+                    distinct=True,
+                ),
+                shares_total=Count(
+                    "posts__shares",
+                    filter=Q(posts__deleted_at__isnull=True),
+                    distinct=True,
+                ),
+                last_post_at=Max(
+                    "posts__created_at",
+                    filter=Q(posts__deleted_at__isnull=True),
+                ),
+            )
+            .annotate(
+                # Same weighting as the feed's engagement_score, so "engaging
+                # creator" and "engaging post" cannot mean two different things.
+                engagement_score=ExpressionWrapper(
+                    F("likes_total") + (F("comments_total") * 2) + (F("shares_total") * 3),
+                    output_field=IntegerField(),
+                )
+            )
+        )
+
+        popular_slots = max(1, round(limit * GUEST_POPULAR_SLOT_RATIO))
+        by_engagement = sorted(
+            scored,
+            key=lambda u: (-u.engagement_score, -u.followers_count, -u.created_at.timestamp()),
+        )
+        newcomers = sorted(
+            (u for u in scored if u.followers_count < FRESH_FOLLOWER_CEILING),
+            key=lambda u: -(u.last_post_at.timestamp() if u.last_post_at else 0),
+        )
+
+        selected: list = []
+        seen: set = set()
+        for pool, take in ((by_engagement, popular_slots), (newcomers, limit - popular_slots)):
+            for user in pool:
+                if len(selected) >= limit or take <= 0:
+                    break
+                if user.id in seen:
+                    continue
+                selected.append(user)
+                seen.add(user.id)
+                take -= 1
+
+        # Backfill so a thin newcomer pool never shortens the list.
+        for user in by_engagement:
+            if len(selected) >= limit:
+                break
+            if user.id not in seen:
+                selected.append(user)
+                seen.add(user.id)
+
+        return [FollowService._suggestion_dict(user) for user in selected]
 
     @staticmethod
     def search_creators(

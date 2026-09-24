@@ -2177,7 +2177,7 @@ type Query {
   suggestedCircles(limit: Int! = 10): [CircleType!]!
 
   """
-  Get highly validated creators algorithmically dynamically curated for the authenticating user.
+  Creators to follow. Personalised for a signed-in user; guests get a shared list ranked on engagement, with slots held for newer creators.
   """
   suggestedCreators(limit: Int! = 10): [SuggestedCreatorType!]!
 
