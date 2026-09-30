@@ -35,9 +35,6 @@ FEED_CACHE_TTL = 300
 # Celebrity threshold — must match the value in tasks.py.
 CELEBRITY_FOLLOWER_THRESHOLD = 50_000
 
-# Maximum number of IDs to read from a Redis inbox in a single LRANGE.
-_INBOX_READ_LIMIT = 60
-
 DISCOVERY_BLEND_SIZE = 3
 FOLLOWED_BLEND_SIZE = 1
 REPORT_PENALTY_THRESHOLD = 5

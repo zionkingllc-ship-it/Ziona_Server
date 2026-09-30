@@ -60,8 +60,8 @@ class FeedService:
     ) -> FeedResponseDTO:
         """Generate the For You feed.
 
-        Fast path: tries the pre-built Redis inbox first.
-        Fallback: DB-based ranking (new user vs returning user algorithm).
+        Ranked from the database — new users get popular content, returning
+        users a discovery-first blend.
 
         Args:
             user_id: UUID of the requesting user.

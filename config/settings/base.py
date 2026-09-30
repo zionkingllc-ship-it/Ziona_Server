@@ -355,7 +355,13 @@ CELERY_RESULT_BACKEND_TRANSPORT_OPTIONS = {
     "health_check_interval": env.int("CELERY_REDIS_HEALTH_CHECK_INTERVAL", default=30),
 }
 CELERY_TASK_TRACK_STARTED = True
-CELERY_TASK_TIME_LIMIT = 300
+# The hard limit kills the worker process outright, so `finally` blocks never
+# run — a task that timed out mid-write leaves its temp file on a 2GB instance.
+# The soft limit fires first and raises SoftTimeLimitExceeded inside the task,
+# which is catchable and lets cleanup happen. The media tasks already set their
+# own pair; this covers everything else. Keep soft < hard.
+CELERY_TASK_SOFT_TIME_LIMIT = env.int("CELERY_TASK_SOFT_TIME_LIMIT", default=240)
+CELERY_TASK_TIME_LIMIT = env.int("CELERY_TASK_TIME_LIMIT", default=300)
 CELERY_BEAT_SCHEDULER = "django_celery_beat.schedulers:DatabaseScheduler"
 
 CELERY_BEAT_SCHEDULE = {

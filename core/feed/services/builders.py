@@ -5,6 +5,8 @@ Split from the former core/feed/services.py (no behavior change).
 
 import logging
 
+from django.db.models import Q
+
 from core.shared.dtos import (
     UserSuggestionDTO,
 )
@@ -81,19 +83,24 @@ def _bulk_build_post_dtos(
         )
         saved_post_ids = {str(pid) for pid in saved_post_ids}
 
-        following_user_ids = set(
-            Follow.objects.filter(follower_id=viewer_id, following_id__in=author_ids).values_list(
-                "following_id", flat=True
-            )
-        )
-        following_user_ids = {str(uid) for uid in following_user_ids}
+        # Both directions of the viewer/author edge in one round trip. They were
+        # two queries over the same table for the same author set, and this
+        # builder is shared by the For You feed, the following feed, discover
+        # search and the profile — so the saved query is paid back four times.
+        edges = Follow.objects.filter(
+            Q(follower_id=viewer_id, following_id__in=author_ids)
+            | Q(follower_id__in=author_ids, following_id=viewer_id)
+        ).values_list("follower_id", "following_id")
 
-        followed_by_user_ids = set(
-            Follow.objects.filter(follower_id__in=author_ids, following_id=viewer_id).values_list(
-                "follower_id", flat=True
-            )
-        )
-        followed_by_user_ids = {str(uid) for uid in followed_by_user_ids}
+        viewer_key = str(viewer_id)
+        following_user_ids = set()
+        followed_by_user_ids = set()
+        for follower_id, following_id in edges:
+            follower_id, following_id = str(follower_id), str(following_id)
+            if follower_id == viewer_key:
+                following_user_ids.add(following_id)
+            if following_id == viewer_key:
+                followed_by_user_ids.add(follower_id)
 
     return [
         PostService._build_post_dto(
