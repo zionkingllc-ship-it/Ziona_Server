@@ -58,11 +58,15 @@ services:
         value: RLL2NX9J5Z
       - key: ANDROID_APP_PACKAGE_NAME
         value: com.zionking.ziona.staging
-      # Staging upload-key SHA-256. Staging is not on Play yet, so there is a
-      # single key; once it reaches an internal track the Play App Signing
-      # SHA-256 must be appended here or App Links will stop verifying.
+      # Every signing key a staging build may carry. Staging is now on Play, so
+      # Play re-signs the uploaded artifact and the installed app no longer
+      # presents the upload key alone — the list grew from one to four when it
+      # reached the store. Android verifies against ANY entry, so a key missing
+      # here silently breaks App Links for builds signed with it, while a spare
+      # entry is harmless. Supplied by the mobile dev; keep in step with his
+      # assetlinks.json.
       - key: ANDROID_SHA256_CERT_FINGERPRINTS
-        value: B8:01:9A:D4:37:0C:D5:F4:4F:4F:AF:29:CA:65:2F:54:84:BE:47:9C:24:3E:B1:10:D7:76:FE:10:82:75:97:2C
+        value: B8:01:9A:D4:37:0C:D5:F4:4F:4F:AF:29:CA:65:2F:54:84:BE:47:9C:24:3E:B1:10:D7:76:FE:10:82:75:97:2C,F2:4B:BA:DA:FA:45:1A:87:F6:E6:E3:87:D7:49:E1:A1:02:62:C6:94:B9:AA:77:F4:39:20:7E:64:CB:F2:54:6D,CB:8F:7C:0F:2C:C5:43:81:79:A6:46:E7:AD:0A:D6:66:B8:BB:40:3E:92:EA:99:46:4F:66:B5:DA:10:14:BE:43,83:1C:A3:01:BF:EE:3F:F6:20:63:1C:FB:8E:1B:30:43:04:DB:F4:0C:B6:EB:A1:4C:7C:A2:DA:18:00:A9:81:56
       # Domain the staging build declares in Associated Domains
       # (applinks:staging.ziona.app). Share links must point at the host serving
       # the matching well-known files, or the app is never opened.

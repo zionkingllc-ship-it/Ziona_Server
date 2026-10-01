@@ -56,3 +56,79 @@ def test_render_cron_task_allowlist_covers_expected_schedules():
     }
 
     assert expected.issubset(SCHEDULED_TASKS)
+
+
+def _env_value(service: dict, key: str) -> str:
+    for entry in service.get("envVars", []):
+        if entry.get("key") == key:
+            return entry.get("value", "")
+    return ""
+
+
+def _service(blueprint: dict, name: str) -> dict:
+    for service in blueprint["services"]:
+        if service.get("name") == name:
+            return service
+    raise AssertionError(f"service {name} not found in render.yaml")
+
+
+def test_app_link_fingerprints_are_well_formed_per_environment(settings):
+    """A malformed or truncated SHA-256 breaks App Links with no error anywhere.
+
+    Android verifies the installed app's signing certificate against this list
+    and simply declines to verify on a mismatch — no log, no failure the backend
+    can observe. The list is hand-pasted from the mobile dev, so the realistic
+    failure is a dropped character, not bad logic.
+    """
+    import yaml
+
+    blueprint = yaml.safe_load((settings.BASE_DIR / "render.yaml").read_text(encoding="utf-8"))
+
+    for service_name, package, expected_count in [
+        ("ziona-api-staging", "com.zionking.ziona.staging", 4),
+        ("ziona-api-prod", "com.zionking.ziona", 2),
+    ]:
+        service = _service(blueprint, service_name)
+        assert _env_value(service, "ANDROID_APP_PACKAGE_NAME") == package
+
+        raw = _env_value(service, "ANDROID_SHA256_CERT_FINGERPRINTS")
+        fingerprints = [item.strip() for item in raw.split(",") if item.strip()]
+
+        assert len(fingerprints) == expected_count, (
+            f"{service_name} lists {len(fingerprints)} fingerprints, expected "
+            f"{expected_count}. If the mobile dev added a signing key this number "
+            f"changes — update it deliberately, do not delete the assertion."
+        )
+        assert len(set(fingerprints)) == len(fingerprints), f"{service_name} has a duplicate"
+
+        for fingerprint in fingerprints:
+            octets = fingerprint.split(":")
+            assert len(octets) == 32, (
+                f"{service_name}: {fingerprint[:24]}… has {len(octets)} octets, not 32 — "
+                f"a SHA-256 is 32 bytes, so this was truncated or mis-pasted"
+            )
+            assert all(
+                len(octet) == 2 and all(char in "0123456789ABCDEF" for char in octet)
+                for octet in octets
+            ), f"{service_name}: {fingerprint[:24]}… is not uppercase colon-separated hex"
+
+
+def test_staging_and_production_do_not_share_signing_keys(settings):
+    """A shared key would mean a staging build verifies against production."""
+    import yaml
+
+    blueprint = yaml.safe_load((settings.BASE_DIR / "render.yaml").read_text(encoding="utf-8"))
+    staging = set(
+        _env_value(
+            _service(blueprint, "ziona-api-staging"), "ANDROID_SHA256_CERT_FINGERPRINTS"
+        ).split(",")
+    )
+    production = set(
+        _env_value(_service(blueprint, "ziona-api-prod"), "ANDROID_SHA256_CERT_FINGERPRINTS").split(
+            ","
+        )
+    )
+
+    assert not (
+        staging & production
+    ), f"shared signing key between environments: {staging & production}"
