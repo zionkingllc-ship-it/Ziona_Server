@@ -8,6 +8,13 @@ django-filter==23.5
 # GraphQL
 strawberry-graphql==0.316.0
 strawberry-graphql-django==0.86.0
+# Pinned deliberately. strawberry 0.316.0 declares graphql-core>=3.2.0,<3.4.0,
+# but its code imports ExecutionContext from graphql.execution, which 3.3.0
+# removed — so pip resolves 3.3.0 legitimately and the app dies at import time
+# with "cannot import name 'ExecutionContext'". Nothing in our code references
+# graphql-core directly; this pin exists purely to hold a transitive dependency
+# whose own upper bound is wrong. Revisit when strawberry supports 3.3.
+graphql-core==3.2.8
 
 # Database
 psycopg2-binary==2.9.9
