@@ -297,8 +297,10 @@ class TestAppleOAuth:
         user = User.objects.get(email="pending.apple@example.com")
         assert user.apple_sub == "apple-pending-sub"
         assert user.is_email_verified is True
-        assert user.has_usable_password() is True
-        assert user.social_auth_provider is None
+        # The signup password was never proven to own this inbox, so it is
+        # dropped; Apple is now the only way in until Forgot Password.
+        assert user.has_usable_password() is False
+        assert user.social_auth_provider == "apple"
         assert user.full_name == "Pending Apple"
 
     def test_accepts_apple_token_from_additional_configured_bundle(

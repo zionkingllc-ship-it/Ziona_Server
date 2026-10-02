@@ -257,8 +257,10 @@ class TestGoogleOAuth:
         user = User.objects.get(email="pending@gmail.com")
         assert user.google_id == "pending_google_id"
         assert user.is_email_verified is True
-        assert user.has_usable_password() is True
-        assert user.social_auth_provider is None
+        # The signup password was never proven to own this inbox, so it is
+        # dropped; Google is now the only way in until Forgot Password.
+        assert user.has_usable_password() is False
+        assert user.social_auth_provider == "google"
         assert user.full_name == "Pending Google User"
         assert user.avatar_url == "http://example.com/pending.jpg"
 

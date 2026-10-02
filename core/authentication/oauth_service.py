@@ -348,6 +348,35 @@ def _ensure_email_link_allowed(existing_user: User, *, email_verified: bool) -> 
     )
 
 
+def _mark_email_verified(user: User, update_fields: list[str]) -> bool:
+    """Mark the inbox verified, dropping any password nobody proved owns it.
+
+    An unverified account's password was chosen by whoever typed this email at
+    signup, who may not own the inbox (account pre-hijacking). Until now that
+    password was inert: login refuses an unverified email, and no token is ever
+    issued without inbox proof. Verifying the email here would arm it, so it
+    goes; the owner can set one through Forgot Password.
+
+    Returns True when a password was dropped.
+    """
+    user.is_email_verified = True
+    update_fields.append("is_email_verified")
+    if not user.has_usable_password():
+        return False
+    user.set_unusable_password()
+    update_fields.append("password")
+    return True
+
+
+def _log_unverified_password_discarded(user: User, provider: str, ip_address: str | None) -> None:
+    log_security_event(
+        "auth.oauth.unverified_password_discarded",
+        user_id=str(user.id),
+        ip_address=ip_address,
+        metadata={"provider": provider},
+    )
+
+
 def _link_google_account(
     user: User,
     *,
@@ -369,9 +398,9 @@ def _link_google_account(
         user.google_id = google_id
         update_fields.append("google_id")
 
+    password_discarded = False
     if is_verified and not user.is_email_verified:
-        user.is_email_verified = True
-        update_fields.append("is_email_verified")
+        password_discarded = _mark_email_verified(user, update_fields)
 
     if name and not user.full_name:
         user.full_name = name
@@ -395,6 +424,8 @@ def _link_google_account(
         update_fields.append("social_auth_provider")
 
     _save_user_updates(user, update_fields)
+    if password_discarded:
+        _log_unverified_password_discarded(user, "google", ip_address)
 
 
 def _link_apple_account(
@@ -417,9 +448,9 @@ def _link_apple_account(
         user.apple_sub = apple_sub
         update_fields.append("apple_sub")
 
+    password_discarded = False
     if email_verified and not user.is_email_verified:
-        user.is_email_verified = True
-        update_fields.append("is_email_verified")
+        password_discarded = _mark_email_verified(user, update_fields)
 
     if full_name and not user.full_name:
         user.full_name = full_name
@@ -439,6 +470,8 @@ def _link_apple_account(
         update_fields.append("social_auth_provider")
 
     _save_user_updates(user, update_fields)
+    if password_discarded:
+        _log_unverified_password_discarded(user, "apple", ip_address)
 
 
 def _apple_email_from_claims_or_user(claims: dict[str, Any], apple_user: dict[str, Any]) -> str:
