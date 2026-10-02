@@ -432,3 +432,128 @@ class TestAppleOAuth:
         data = response.json()
         assert data["success"] is False
         assert data["error"]["code"] == "APPLE_KEYS_TIMEOUT"
+
+
+def _google_registered_user(email: str, *, google_id: str = "google_id_1") -> User:
+    """An account created by Google sign-in: no usable password."""
+    user = User.objects.create_user(
+        email=email,
+        username=f"google_{google_id}",
+        auth_provider="google",
+        social_auth_provider="google",
+        google_id=google_id,
+        is_email_verified=True,
+    )
+    user.set_unusable_password()
+    user.save(update_fields=["password"])
+    return user
+
+
+@pytest.mark.django_db
+class TestAppleLinksGoogleAccount:
+    """A user who registered with Google can later sign in with Apple."""
+
+    url = reverse("authentication:apple-oauth")
+
+    def _sign_in(self, api_client, private_key, *, email, sub, verified="true", nonce):
+        _cache_nonce(nonce)
+        token = _apple_token(
+            private_key, sub=sub, raw_nonce=nonce, email=email, email_verified=verified
+        )
+        return api_client.post(
+            self.url,
+            data=json.dumps({"identityToken": token, "rawNonce": nonce}),
+            content_type="application/json",
+        )
+
+    def test_verified_apple_email_links_to_google_account(self, api_client, apple_private_key):
+        google_user = _google_registered_user("both@example.com")
+
+        response = self._sign_in(
+            api_client,
+            apple_private_key,
+            email="both@example.com",
+            sub="apple-both",
+            nonce="link-nonce",
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["success"] is True
+        assert data["data"]["isNewUser"] is False
+        assert User.objects.filter(email="both@example.com").count() == 1
+
+        user = User.objects.get(pk=google_user.pk)
+        assert user.apple_sub == "apple-both"
+        assert user.google_id == "google_id_1"
+        assert user.social_auth_provider == "google"
+        assert user.auth_provider == "google"
+
+    def test_provider_does_not_flip_on_later_apple_sign_ins(self, api_client, apple_private_key):
+        google_user = _google_registered_user("repeat@example.com")
+
+        for i in range(2):
+            response = self._sign_in(
+                api_client,
+                apple_private_key,
+                email="repeat@example.com",
+                sub="apple-repeat",
+                nonce=f"repeat-nonce-{i}",
+            )
+            assert response.status_code == 200
+
+        user = User.objects.get(pk=google_user.pk)
+        assert user.social_auth_provider == "google"
+        assert user.auth_provider == "google"
+
+    def test_unverified_apple_email_cannot_join_google_account(self, api_client, apple_private_key):
+        google_user = _google_registered_user("victim@example.com")
+
+        response = self._sign_in(
+            api_client,
+            apple_private_key,
+            email="victim@example.com",
+            sub="apple-attacker",
+            verified="false",
+            nonce="unverified-nonce",
+        )
+
+        assert response.status_code == 409
+        assert response.json()["error"]["code"] == "EMAIL_REGISTERED_WITH_DIFFERENT_PROVIDER"
+        assert User.objects.get(pk=google_user.pk).apple_sub is None
+
+    def test_apple_account_mismatch_still_enforced_on_linked_google_account(
+        self, api_client, apple_private_key
+    ):
+        google_user = _google_registered_user("linked@example.com")
+        User.objects.filter(pk=google_user.pk).update(apple_sub="apple-original")
+
+        response = self._sign_in(
+            api_client,
+            apple_private_key,
+            email="linked@example.com",
+            sub="apple-other",
+            nonce="mismatch-nonce",
+        )
+
+        assert response.status_code == 409
+        assert response.json()["error"]["code"] == "APPLE_ACCOUNT_MISMATCH"
+        assert User.objects.get(pk=google_user.pk).apple_sub == "apple-original"
+
+    def test_other_social_providers_are_still_refused(self, api_client, apple_private_key):
+        User.objects.create_user(
+            email="fb@example.com", username="fb_user", social_auth_provider="facebook"
+        )
+
+        response = self._sign_in(
+            api_client,
+            apple_private_key,
+            email="fb@example.com",
+            sub="apple-fb",
+            nonce="fb-nonce",
+        )
+
+        assert response.status_code == 409
+        error = response.json()["error"]
+        assert error["code"] == "EMAIL_REGISTERED_WITH_DIFFERENT_PROVIDER"
+        assert "facebook instead" in error["message"]

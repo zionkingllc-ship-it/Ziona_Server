@@ -109,33 +109,8 @@ class OAuthService:
                     code="GOOGLE_ACCOUNT_MISMATCH",
                 )
 
-            if (
-                existing_user.social_auth_provider not in (None, "google")
-                and not existing_user.google_id
-            ):
-                raise AuthenticationError(
-                    f"This email is already registered via {existing_user.social_auth_provider}. "
-                    f"Please sign in with {existing_user.social_auth_provider} instead.",
-                    code="EMAIL_REGISTERED_WITH_DIFFERENT_PROVIDER",
-                )
-
-            # Existing password account, same email. Auto-link Google ONLY when
-            # Google has verified the email — that proves the same ownership a
-            # password-reset OTP would, so it grants no access the user couldn't
-            # already recover. An unverified Google email must never take over a
-            # password account. Linking keeps the password intact (see
-            # _link_google_account): the account becomes dual-login.
-            if (
-                existing_user.social_auth_provider is None
-                and not existing_user.google_id
-                and existing_user.is_email_verified
-                and not is_verified
-            ):
-                raise AuthenticationError(
-                    "This email is already registered with a password. Please sign in "
-                    "with your password instead, or use 'Forgot Password' to reset it.",
-                    code="EMAIL_REGISTERED_WITH_PASSWORD",
-                )
+            if not existing_user.google_id:
+                _ensure_email_link_allowed(existing_user, email_verified=is_verified)
 
             user = existing_user
             _link_google_account(
@@ -260,32 +235,10 @@ class OAuthService:
                         code="APPLE_ACCOUNT_MISMATCH",
                     )
 
-                if (
-                    existing_user.social_auth_provider not in (None, "apple")
-                    and not existing_user.apple_sub
-                ):
-                    raise AuthenticationError(
-                        f"This email is already registered via {existing_user.social_auth_provider}. "
-                        f"Please sign in with {existing_user.social_auth_provider} instead.",
-                        code="EMAIL_REGISTERED_WITH_DIFFERENT_PROVIDER",
-                    )
-
-                # Existing password account, same real email (relay emails never
-                # collide). Auto-link Apple ONLY when Apple has verified the email —
-                # same ownership proof as a password-reset OTP, so no extra access.
-                # An unverified email must never take over a password account.
-                # Linking keeps the password (see _link_apple_account): dual-login.
-                if (
-                    existing_user.social_auth_provider is None
-                    and not existing_user.apple_sub
-                    and existing_user.is_email_verified
-                    and not email_verified
-                ):
-                    raise AuthenticationError(
-                        "This email is already registered with a password. Please sign in "
-                        "with your password instead, or use 'Forgot Password' to reset it.",
-                        code="EMAIL_REGISTERED_WITH_PASSWORD",
-                    )
+                # Relay emails (Hide My Email) never collide with a real address,
+                # so only a real-email Apple sign-in can reach an existing account.
+                if not existing_user.apple_sub:
+                    _ensure_email_link_allowed(existing_user, email_verified=email_verified)
 
                 user = existing_user
                 _link_apple_account(
@@ -357,6 +310,44 @@ def _save_user_updates(user: User, update_fields: list[str]) -> None:
         user.save(update_fields=normalized_fields)
 
 
+# Providers whose accounts a verified Google or Apple sign-in may join by email.
+_EMAIL_LINKABLE_PROVIDERS = (None, "google", "apple")
+
+
+def _ensure_email_link_allowed(existing_user: User, *, email_verified: bool) -> None:
+    """Refuse to attach a new Google/Apple identity to an account found by email.
+
+    Linking is allowed only when the incoming provider has VERIFIED the email.
+    That proves the same inbox ownership a password-reset OTP does, and every
+    account here — password, Google or Apple — can already be recovered that
+    way, so linking grants no access the user couldn't already get. An
+    unverified email must never join an existing account, whatever its state.
+    """
+    provider = existing_user.social_auth_provider or None
+
+    if provider not in _EMAIL_LINKABLE_PROVIDERS:
+        raise AuthenticationError(
+            f"This email is already registered via {provider}. "
+            f"Please sign in with {provider} instead.",
+            code="EMAIL_REGISTERED_WITH_DIFFERENT_PROVIDER",
+        )
+
+    if email_verified:
+        return
+
+    if provider is None:
+        raise AuthenticationError(
+            "This email is already registered with a password. Please sign in "
+            "with your password instead, or use 'Forgot Password' to reset it.",
+            code="EMAIL_REGISTERED_WITH_PASSWORD",
+        )
+    raise AuthenticationError(
+        f"This email is already registered via {provider}. "
+        f"Please sign in with {provider} instead.",
+        code="EMAIL_REGISTERED_WITH_DIFFERENT_PROVIDER",
+    )
+
+
 def _link_google_account(
     user: User,
     *,
@@ -394,13 +385,14 @@ def _link_google_account(
         user.last_login_ip = ip_address
         update_fields.append("last_login_ip")
 
-    if not user.has_usable_password():
+    # Record the provider only when none is set. A Google+Apple account keeps
+    # the one it signed up with; overwriting would flip it on every sign-in.
+    if not user.has_usable_password() and not user.social_auth_provider:
         if user.auth_provider != "google":
             user.auth_provider = "google"
             update_fields.append("auth_provider")
-        if user.social_auth_provider != "google":
-            user.social_auth_provider = "google"
-            update_fields.append("social_auth_provider")
+        user.social_auth_provider = "google"
+        update_fields.append("social_auth_provider")
 
     _save_user_updates(user, update_fields)
 
@@ -437,13 +429,14 @@ def _link_apple_account(
         user.last_login_ip = ip_address
         update_fields.append("last_login_ip")
 
-    if not user.has_usable_password():
+    # Record the provider only when none is set. A Google+Apple account keeps
+    # the one it signed up with; overwriting would flip it on every sign-in.
+    if not user.has_usable_password() and not user.social_auth_provider:
         if user.auth_provider != "apple":
             user.auth_provider = "apple"
             update_fields.append("auth_provider")
-        if user.social_auth_provider != "apple":
-            user.social_auth_provider = "apple"
-            update_fields.append("social_auth_provider")
+        user.social_auth_provider = "apple"
+        update_fields.append("social_auth_provider")
 
     _save_user_updates(user, update_fields)
 
