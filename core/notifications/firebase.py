@@ -88,8 +88,20 @@ def _build_multicast_message(tokens: list[str], title: str, body: str, data: dic
             ),
         ),
         apns=messaging.APNSConfig(
-            headers={"apns-priority": "10"},
-            payload=messaging.APNSPayload(aps=messaging.Aps(sound="default")),
+            # apns-push-type is required by APNs for an alert push; without it
+            # the delivery can be refused or treated as background.
+            headers={"apns-priority": "10", "apns-push-type": "alert"},
+            payload=messaging.APNSPayload(
+                aps=messaging.Aps(
+                    # The alert is repeated here on purpose. FCM only derives
+                    # aps.alert from the top-level `notification` when no aps of
+                    # our own is supplied — and supplying one just to attach the
+                    # sound silently dropped the alert, leaving iOS an aps with
+                    # nothing to display, so nothing appeared at all.
+                    alert=messaging.ApsAlert(title=title, body=body),
+                    sound="default",
+                )
+            ),
         ),
     )
 

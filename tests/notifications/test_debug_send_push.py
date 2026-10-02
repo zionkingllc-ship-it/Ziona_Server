@@ -229,3 +229,59 @@ def test_debug_push_uses_the_same_message_as_production(monkeypatch):
 
     assert message.android.priority == "high"
     assert message.apns.payload.aps.sound == "default"
+
+
+def _encoded(title="Kammy liked your post", body="Tap to view"):
+    """Serialize exactly what FCM will receive, the way firebase-admin does."""
+    from firebase_admin import messaging
+    from firebase_admin._messaging_encoder import MessageEncoder
+
+    import core.notifications.firebase as fb
+
+    multicast = fb._build_multicast_message(["tok"], title, body, {"type": "like_post"})
+    single = messaging.Message(
+        token="tok",
+        notification=multicast.notification,
+        data=multicast.data,
+        android=multicast.android,
+        apns=multicast.apns,
+    )
+    return MessageEncoder().default(single)
+
+
+def test_apns_payload_carries_a_visible_alert():
+    """Without aps.alert the iPhone displays nothing at all.
+
+    FCM only derives aps.alert from the top-level `notification` when the
+    message supplies no aps of its own. Adding an aps purely to attach a sound
+    therefore removed the alert, and iOS received a push with nothing to show —
+    delivered, accepted, invisible. The alert must be set explicitly.
+    """
+    aps = _encoded()["apns"]["payload"]["aps"]
+
+    assert "alert" in aps, (
+        "aps has no alert — iOS will display nothing. Never send an aps " f"without one. Got: {aps}"
+    )
+    assert aps["alert"]["title"] == "Kammy liked your post"
+    assert aps["alert"]["body"] == "Tap to view"
+    assert aps["sound"] == "default"
+
+
+def test_apns_headers_declare_an_alert_push():
+    headers = _encoded()["apns"]["headers"]
+    assert headers["apns-push-type"] == "alert", "APNs needs the push type declared"
+    assert headers["apns-priority"] == "10", "priority 5 lets iOS defer delivery"
+
+
+def test_android_payload_is_high_priority_on_a_registered_channel():
+    android = _encoded()["android"]
+    assert android["priority"] == "high", "normal priority is deferred by Doze on MIUI"
+    assert android["notification"]["channel_id"], "Android 8+ drops an unknown channel silently"
+    assert android["notification"]["sound"] == "default"
+
+
+def test_top_level_notification_is_still_present():
+    """Belt and braces: the common block is what non-APNs transports read."""
+    encoded = _encoded()
+    assert encoded["notification"]["title"] == "Kammy liked your post"
+    assert encoded["notification"]["body"] == "Tap to view"
