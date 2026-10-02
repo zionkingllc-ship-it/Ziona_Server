@@ -208,10 +208,16 @@ def _get_authenticated_user_id(info: strawberry.types.Info) -> str | None:
         user = User.all_objects.get(id=user_id)
         ensure_account_can_authenticate(user)
         TokenService.enforce_user_token_cutoff(payload, user)
-        return user_id
     except Exception:
         logger.debug("Token validation failed in GraphQL", exc_info=True)
         return None
+
+    from core.authentication.activity import record_daily_activity
+
+    # Every authenticated GraphQL request passes here, so this is where real
+    # daily usage is seen — login/refresh alone miss days (24h access tokens).
+    record_daily_activity(user_id)
+    return user_id
 
 
 @strawberry.type
