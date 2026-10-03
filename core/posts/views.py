@@ -140,6 +140,11 @@ def share_preview(request: HttpRequest, post_id: str) -> HttpResponse:
         "preview_image": preview_image,
         "caption": post.caption or "Check out this post on Ziona!",
         "post_url": build_post_share_url(settings.APP_SHARE_BASE_URL, post_id),
+        # Custom-scheme link for the "Open in app" button + auto-open JS.
+        # Must NOT be https: where App Links don't fire (in-app browsers) an
+        # https button just reloads a web page instead of opening the app.
+        "deep_link": f"{settings.APP_DEEP_LINK_SCHEME}://viewer/{post_id}",
+        "android_package": settings.ANDROID_APP_PACKAGE_NAME,
         "app_name": "Ziona",
         # Store fallbacks for the app-not-installed case.
         "ios_app_store_url": settings.IOS_APP_STORE_URL,

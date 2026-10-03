@@ -46,7 +46,16 @@ def build_urlpatterns():
             name="android-asset-links",
         ),
         path("post/<str:post_id>/", share_preview, name="share-preview"),
+        # Mobile shares slash-less URLs (/post/{id}); serve them directly with
+        # 200 instead of relying on APPEND_SLASH's 301 (App Links and some
+        # crawlers dislike opening through a redirect).
+        path("post/<str:post_id>", share_preview, name="share-preview-no-slash"),
         path("profile/<str:user_id>/", profile_share_preview, name="profile-share-preview"),
+        path(
+            "profile/<str:user_id>",
+            profile_share_preview,
+            name="profile-share-preview-no-slash",
+        ),
         path("api/webhooks/stripe/", stripe_webhook, name="stripe-webhook"),
     ]
 

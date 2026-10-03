@@ -120,8 +120,29 @@ def test_share_preview_includes_store_fallback_and_deep_link(client, settings):
     # Store fallbacks present…
     assert "https://apps.apple.com/app/id123456789" in body
     assert "play.google.com/store/apps/details?id=com.zionking.ziona" in body
-    # …and the primary CTA points at the post deep link (not a bare root URL).
+    # …the OG tags still carry the canonical https URL…
     assert f"https://ziona.app/post/{post.id}" in body
+    # …but the primary CTA forces the app open via the custom scheme (an
+    # https button just reloads a web page where App Links don't fire).
+    assert f"ziona://viewer/{post.id}" in body
+
+
+@pytest.mark.django_db
+def test_share_preview_serves_slashless_url_without_redirect(client, settings):
+    """Mobile shares /post/{id} (no trailing slash) — serve it with a 200."""
+    settings.APP_SHARE_BASE_URL = "https://ziona.app"
+
+    user = User.objects.create_user(
+        email="noslash@example.com",
+        username="noslash",
+        password="Pass123!",  # pragma: allowlist secret
+    )
+    post = Post.objects.create(user=user, post_type="text", caption="no slash")
+
+    resp = client.get(f"/post/{post.id}")
+
+    assert resp.status_code == 200
+    assert f"ziona://viewer/{post.id}" in resp.content.decode()
 
 
 @pytest.mark.django_db

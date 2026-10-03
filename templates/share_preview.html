@@ -67,7 +67,7 @@
     <img src="{{ preview_image }}" alt="Post preview" style="max-width: 100%; border-radius: 12px;">
     {% endif %}
     <br>
-    <a href="{{ post_url }}" class="cta" id="open-app">Open in {{ app_name }}</a>
+    <a href="{{ deep_link }}" class="cta" id="open-app">Open in {{ app_name }}</a>
 
     <div class="stores">
         <a href="{{ ios_app_store_url }}" class="store-link" id="ios-store">Download on the App Store</a>
@@ -76,17 +76,70 @@
     <p class="hint">Don’t have the app? Install it, then reopen this link.</p>
 
     <script>
-        // If the app is installed, the OS intercepts the https link and this page
-        // never renders. When it DOES render (app missing / desktop), show only the
-        // relevant store on mobile; keep both for desktop and link-preview bots.
+        // If the app is installed AND the OS verified this host's App Links,
+        // the https link never renders this page — the app opens directly.
+        // When this page DOES render (app installed but unverified, desktop,
+        // or an in-app browser that doesn't fire App Links), force the app
+        // open via its custom scheme instead of another https URL (which
+        // would just reload a web page). Falls back to the store if the app
+        // is not installed.
         (function () {
+            var deepLink = "{{ deep_link|escapejs }}";
+            var postId = deepLink.split("/").pop() || "";
+            var scheme = deepLink.split("://")[0] || "ziona";
+            var androidPackage = "{{ android_package|escapejs }}";
             var ua = navigator.userAgent || "";
             var isIOS = /iPad|iPhone|iPod/.test(ua);
             var isAndroid = /Android/.test(ua);
-            var ios = document.getElementById("ios-store");
-            var android = document.getElementById("android-store");
-            if (isIOS && android) { android.style.display = "none"; }
-            if (isAndroid && ios) { ios.style.display = "none"; }
+            var isChrome = /Chrome\//.test(ua);
+            var REDIRECT_TIMEOUT_MS = 1500;
+
+            var iosStore = document.getElementById("ios-store");
+            var androidStore = document.getElementById("android-store");
+            if (isIOS && androidStore) { androidStore.style.display = "none"; }
+            if (isAndroid && iosStore) { iosStore.style.display = "none"; }
+
+            function storeUrl() {
+                if (isIOS && iosStore) return iosStore.href;
+                if (isAndroid && androidStore) return androidStore.href;
+                return androidStore ? androidStore.href : "";
+            }
+
+            function openApp() {
+                var fallbackTimer = window.setTimeout(function () {
+                    var target = storeUrl();
+                    if (target) window.location.replace(target);
+                }, REDIRECT_TIMEOUT_MS);
+
+                try {
+                    document.addEventListener("visibilitychange", function onVis() {
+                        if (document.hidden) window.clearTimeout(fallbackTimer);
+                    });
+                } catch (e) { /* ignore */ }
+
+                if (isAndroid && isChrome) {
+                    // intent:// avoids the disambiguation chooser on Chrome.
+                    window.location.replace(
+                        "intent://viewer/" + postId +
+                        "#Intent;scheme=" + scheme +
+                        ";package=" + androidPackage +
+                        ";S.browser_fallback_url=" + encodeURIComponent(storeUrl()) +
+                        ";end"
+                    );
+                } else {
+                    window.location.replace(deepLink);
+                }
+            }
+
+            // Auto-attempt on load; the visible button retries on tap.
+            openApp();
+            var btn = document.getElementById("open-app");
+            if (btn) {
+                btn.addEventListener("click", function (e) {
+                    e.preventDefault();
+                    openApp();
+                });
+            }
         })();
     </script>
 </body>

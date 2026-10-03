@@ -72,6 +72,9 @@ services:
       # the matching well-known files, or the app is never opened.
       - key: APP_SHARE_BASE_URL
         value: https://staging.ziona.app
+      # Custom scheme the staging mobile build handles (see app.config.js).
+      - key: APP_DEEP_LINK_SCHEME
+        value: zionastaging
       - key: ENSEND_API_KEY
         sync: false
       - key: ENSEND_API_URL
@@ -285,6 +288,9 @@ services:
       # `ziona.app`, and App Links only open for the exact host they verified.
       - key: APP_SHARE_BASE_URL
         value: https://ziona.app
+      # Custom scheme the production mobile build handles (see app.config.js).
+      - key: APP_DEEP_LINK_SCHEME
+        value: ziona
       - key: ENSEND_API_KEY
         sync: false
       - key: ENSEND_API_URL

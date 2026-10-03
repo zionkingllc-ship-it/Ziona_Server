@@ -477,6 +477,11 @@ DEFAULT_FROM_EMAIL = env("DEFAULT_FROM_EMAIL", default="noreply@ziona.app")
 # step with the intent filter's android:host and the AASA's applinks: entry —
 # App Links only open for the exact host that was verified.
 APP_SHARE_BASE_URL = env("APP_SHARE_BASE_URL", default="https://ziona.app")
+# Custom URL scheme the mobile builds handle (prod "ziona", staging
+# "zionastaging"). Used for the "Open in app" fallback button, which must NOT
+# be an https link: in contexts where App Links don't fire (in-app browsers)
+# an https button just reloads a web page instead of opening the app.
+APP_DEEP_LINK_SCHEME = env("APP_DEEP_LINK_SCHEME", default="ziona")
 EMAIL_ASSET_BASE_URL = env(
     "EMAIL_ASSET_BASE_URL",
     default="https://storage.googleapis.com/ziona-media-dev/email-assets",
