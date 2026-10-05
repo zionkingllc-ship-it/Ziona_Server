@@ -5,6 +5,7 @@ The GraphQL resolver is a thin @admin_required wrapper over the service, so thes
 tests exercise the service directly — the established pattern in this codebase.
 """
 
+import re
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -285,3 +286,47 @@ def test_top_level_notification_is_still_present():
     encoded = _encoded()
     assert encoded["notification"]["title"] == "Kammy liked your post"
     assert encoded["notification"]["body"] == "Tap to view"
+
+
+def test_runbook_graphql_example_matches_the_real_schema(settings):
+    """Keep the copy/paste diagnostic valid without executing a real send."""
+    from graphql import parse, validate
+
+    from config.graphql_schema import schema
+
+    runbook = (settings.BASE_DIR / "docs" / "ios-push-triage.md").read_text(encoding="utf-8")
+    examples = re.findall(r"```graphql\n(.*?)\n```", runbook, re.DOTALL)
+    assert len(examples) == 1
+    assert validate(schema._schema, parse(examples[0])) == []
+
+
+@pytest.mark.parametrize(
+    ("exception_name", "code"),
+    [
+        ("SenderIdMismatchError", "PERMISSION_DENIED"),
+        ("ThirdPartyAuthError", "UNAUTHENTICATED"),
+        ("UnregisteredError", "NOT_FOUND"),
+    ],
+)
+def test_debug_results_expose_python_sdk_codes_documented_in_runbook(
+    monkeypatch, settings, exception_name, code
+):
+    """Use actual SDK exceptions; Node/REST aliases hid these failures in docs."""
+    import core.notifications.firebase as fb
+
+    error = getattr(fb.messaging, exception_name)("test FCM failure")
+    monkeypatch.setattr(fb, "initialize_firebase", lambda: None)
+    monkeypatch.setattr(fb, "_firebase_initialized", True)
+    monkeypatch.setattr(
+        fb.messaging,
+        "send_each_for_multicast",
+        lambda message: MagicMock(responses=[MagicMock(success=False, exception=error)]),
+    )
+
+    result = fb.send_fcm_debug(["test-token"], "Title", "Body", {})[0]
+    assert result["success"] is False
+    assert result["error_code"] == code
+    assert result["error_message"] == "test FCM failure"
+    runbook = (settings.BASE_DIR / "docs" / "ios-push-triage.md").read_text(encoding="utf-8")
+    assert f"`{code}`" in runbook
+    assert f"`{exception_name}`" in runbook
