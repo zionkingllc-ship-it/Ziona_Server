@@ -63,6 +63,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Set up Node for rendered share-preview behavior tests
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:

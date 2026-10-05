@@ -72,6 +72,13 @@ services:
       # the matching well-known files, or the app is never opened.
       - key: APP_SHARE_BASE_URL
         value: https://staging.ziona.app
+      # Custom scheme the staging mobile build handles (see app.config.js).
+      - key: APP_DEEP_LINK_SCHEME
+        value: zionastaging
+      # Staging is on a Play internal track: only tester accounts can open
+      # this listing (everyone else gets a 404 — inherent to internal tracks).
+      - key: ANDROID_PLAY_STORE_URL
+        value: https://play.google.com/store/apps/details?id=com.zionking.ziona.staging
       - key: ENSEND_API_KEY
         sync: false
       - key: ENSEND_API_URL
@@ -285,6 +292,9 @@ services:
       # `ziona.app`, and App Links only open for the exact host they verified.
       - key: APP_SHARE_BASE_URL
         value: https://ziona.app
+      # Custom scheme the production mobile build handles (see app.config.js).
+      - key: APP_DEEP_LINK_SCHEME
+        value: ziona
       - key: ENSEND_API_KEY
         sync: false
       - key: ENSEND_API_URL

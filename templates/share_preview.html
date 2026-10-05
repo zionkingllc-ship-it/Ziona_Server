@@ -67,26 +67,47 @@
     <img src="{{ preview_image }}" alt="Post preview" style="max-width: 100%; border-radius: 12px;">
     {% endif %}
     <br>
-    <a href="{{ post_url }}" class="cta" id="open-app">Open in {{ app_name }}</a>
+    <a href="{{ deep_link }}" class="cta" id="open-app">Open in {{ app_name }}</a>
 
     <div class="stores">
         <a href="{{ ios_app_store_url }}" class="store-link" id="ios-store">Download on the App Store</a>
         <a href="{{ android_play_store_url }}" class="store-link" id="android-store">Get it on Google Play</a>
     </div>
-    <p class="hint">Don’t have the app? Install it, then reopen this link.</p>
+    <p class="hint">Tap Open in Ziona to view this post. If your browser blocks it, open this link in your phone’s browser. Don’t have the app? Install it, then reopen this link.</p>
 
     <script>
-        // If the app is installed, the OS intercepts the https link and this page
-        // never renders. When it DOES render (app missing / desktop), show only the
-        // relevant store on mobile; keep both for desktop and link-preview bots.
+        // Verified App/Universal Links can open the app before this page loads.
+        // If the browser shows the preview, launching must follow a user tap:
+        // Chrome can reject a gesture-free intent and go straight to its store
+        // fallback even with the app installed. Keep a usable anchor without JS.
+        // Never infer installation from a timeout: a slow launch or a second
+        // tap must not be interrupted by a pending store redirect.
         (function () {
+            var deepLink = "{{ deep_link|escapejs }}";
+            var postId = deepLink.split("/").pop() || "";
+            var scheme = deepLink.split("://")[0] || "ziona";
+            var androidPackage = "{{ android_package|escapejs }}";
             var ua = navigator.userAgent || "";
             var isIOS = /iPad|iPhone|iPod/.test(ua);
             var isAndroid = /Android/.test(ua);
-            var ios = document.getElementById("ios-store");
-            var android = document.getElementById("android-store");
-            if (isIOS && android) { android.style.display = "none"; }
-            if (isAndroid && ios) { ios.style.display = "none"; }
+            var isChrome = /Chrome\//.test(ua);
+
+            var iosStore = document.getElementById("ios-store");
+            var androidStore = document.getElementById("android-store");
+            if (isIOS && androidStore) { androidStore.style.display = "none"; }
+            if (isAndroid && iosStore) { iosStore.style.display = "none"; }
+
+            var btn = document.getElementById("open-app");
+            if (btn && isAndroid && isChrome) {
+                // Let Chrome resolve the installed package (or its native
+                // fallback) only when the user follows this link.
+                var fallback = androidStore && androidStore.href
+                    ? ";S.browser_fallback_url=" + encodeURIComponent(androidStore.href)
+                    : "";
+                btn.href = "intent://viewer/" + postId +
+                    "#Intent;scheme=" + scheme +
+                    ";package=" + androidPackage + fallback + ";end";
+            }
         })();
     </script>
 </body>
