@@ -282,15 +282,16 @@ def calculate_daily_analytics(self):
     Idempotent: uses update_or_create keyed on date, so retries are safe.
     """
 
-    from django.utils import timezone
-
     from core.admin_dashboard.models import DailyAnalytics
+    from core.authentication.activity import active_users_between
     from core.engagement.models import Comment
     from core.moderation.models import Report, ReportStatus
     from core.posts.models import Post
     from core.users.models import User
 
-    yesterday = timezone.now().date() - timedelta(days=1)
+    # Module-level `timezone` is datetime.timezone: django.utils.timezone has no
+    # `utc` since Django 5, and importing it here made every run crash.
+    yesterday = datetime.now(timezone.utc).date() - timedelta(days=1)
     day_start = datetime.combine(yesterday, datetime.min.time()).replace(tzinfo=timezone.utc)
     day_end = day_start + timedelta(days=1)
 
@@ -305,25 +306,13 @@ def calculate_daily_analytics(self):
         created_at__lt=day_end,
     ).count()
 
-    dau = User.objects.filter(
-        deleted_at__isnull=True,
-        last_login__gte=day_start,
-        last_login__lt=day_end,
-    ).count()
+    dau = active_users_between(day_start, day_end).count()
 
     week_start = day_start - timedelta(days=6)
-    wau = User.objects.filter(
-        deleted_at__isnull=True,
-        last_login__gte=week_start,
-        last_login__lt=day_end,
-    ).count()
+    wau = active_users_between(week_start, day_end).count()
 
     month_start = day_start - timedelta(days=29)
-    mau = User.objects.filter(
-        deleted_at__isnull=True,
-        last_login__gte=month_start,
-        last_login__lt=day_end,
-    ).count()
+    mau = active_users_between(month_start, day_end).count()
 
     posts_count = Post.objects.filter(
         deleted_at__isnull=True,

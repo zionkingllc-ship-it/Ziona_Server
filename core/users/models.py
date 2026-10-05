@@ -303,3 +303,34 @@ class UserInterest(models.Model):
     def __str__(self) -> str:
         """Return string representation."""
         return f"{self.user_id} → {self.interest}"
+
+
+class UserDailyActivity(models.Model):
+    """One row per user per UTC day on which they used the app.
+
+    ``last_login`` only moves at login and token refresh, and an access token
+    lives 24 hours, so a user who opens the app on consecutive days can go
+    unrecorded. It is also overwritten, so it can never answer "which days was
+    this user active" — which average DAU and D7/D30 retention need. This table
+    is that history; written once per user per day by record_daily_activity().
+    """
+
+    id = models.BigAutoField(primary_key=True)
+    user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name="daily_activity",
+    )
+    date = models.DateField()
+
+    class Meta:
+        db_table = "user_daily_activity"
+        constraints = [
+            models.UniqueConstraint(fields=["user", "date"], name="uniq_user_daily_activity"),
+        ]
+        indexes = [
+            models.Index(fields=["date"], name="idx_user_daily_activity_date"),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.user_id} active on {self.date}"

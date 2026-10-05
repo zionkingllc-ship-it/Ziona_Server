@@ -217,6 +217,7 @@ def _time_range_to_days(time_range: str) -> int:
 
 def _daily_analytics_snapshot(day) -> dict:
     """Compute a single day's analytics directly from source tables."""
+    from core.authentication.activity import active_users_between
     from core.engagement.models import Comment
     from core.moderation.models import Report, ReportStatus
     from core.posts.models import Post
@@ -238,21 +239,9 @@ def _daily_analytics_snapshot(day) -> dict:
     week_start = day_start - timedelta(days=6)
     month_start = day_start - timedelta(days=29)
 
-    dau = User.objects.filter(
-        deleted_at__isnull=True,
-        last_login__gte=day_start,
-        last_login__lt=day_end,
-    ).count()
-    wau = User.objects.filter(
-        deleted_at__isnull=True,
-        last_login__gte=week_start,
-        last_login__lt=day_end,
-    ).count()
-    mau = User.objects.filter(
-        deleted_at__isnull=True,
-        last_login__gte=month_start,
-        last_login__lt=day_end,
-    ).count()
+    dau = active_users_between(day_start, day_end).count()
+    wau = active_users_between(week_start, day_end).count()
+    mau = active_users_between(month_start, day_end).count()
 
     posts_count = Post.objects.filter(
         deleted_at__isnull=True,

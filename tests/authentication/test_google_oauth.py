@@ -257,8 +257,10 @@ class TestGoogleOAuth:
         user = User.objects.get(email="pending@gmail.com")
         assert user.google_id == "pending_google_id"
         assert user.is_email_verified is True
-        assert user.has_usable_password() is True
-        assert user.social_auth_provider is None
+        # The signup password was never proven to own this inbox, so it is
+        # dropped; Google is now the only way in until Forgot Password.
+        assert user.has_usable_password() is False
+        assert user.social_auth_provider == "google"
         assert user.full_name == "Pending Google User"
         assert user.avatar_url == "http://example.com/pending.jpg"
 
@@ -338,3 +340,141 @@ class TestGoogleOAuth:
 
         user_b = User.objects.get(email="userB@google.com")
         assert user_b.google_id == "google_id_B"
+
+
+def _apple_registered_user(email: str, *, apple_sub: str = "apple_sub_1") -> User:
+    """An account created by Sign in with Apple: no usable password."""
+    user = User.objects.create_user(
+        email=email,
+        username=f"apple_{apple_sub}",
+        auth_provider="apple",
+        social_auth_provider="apple",
+        apple_sub=apple_sub,
+        is_email_verified=True,
+    )
+    user.set_unusable_password()
+    user.save(update_fields=["password"])
+    return user
+
+
+@pytest.mark.django_db
+class TestGoogleLinksAppleAccount:
+    """A user who registered with Apple can later sign in with Google."""
+
+    url = reverse("authentication:google-oauth")
+
+    def _sign_in(self, api_client, mock_google_verify, *, email, sub, verified=True):
+        mock_google_verify.return_value = {
+            "aud": settings.GOOGLE_CLIENT_ID,
+            "email": email,
+            "sub": sub,
+            "email_verified": verified,
+        }
+        return api_client.post(
+            self.url,
+            data=json.dumps({"id_token": "mock_token"}),
+            content_type="application/json",
+        )
+
+    def test_verified_google_email_links_to_apple_account(self, api_client, mock_google_verify):
+        apple_user = _apple_registered_user("both@example.com")
+
+        response = self._sign_in(
+            api_client, mock_google_verify, email="both@example.com", sub="google_both"
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["success"] is True
+        assert data["data"]["isNewUser"] is False
+        assert User.objects.filter(email="both@example.com").count() == 1
+
+        user = User.objects.get(pk=apple_user.pk)
+        assert user.google_id == "google_both"
+        assert user.apple_sub == "apple_sub_1"
+        # The sign-up provider is history, not "last used" — it must not flip.
+        assert user.social_auth_provider == "apple"
+        assert user.auth_provider == "apple"
+
+    def test_provider_does_not_flip_on_later_google_sign_ins(self, api_client, mock_google_verify):
+        apple_user = _apple_registered_user("repeat@example.com")
+
+        for _ in range(2):
+            response = self._sign_in(
+                api_client, mock_google_verify, email="repeat@example.com", sub="google_repeat"
+            )
+            assert response.status_code == 200
+
+        user = User.objects.get(pk=apple_user.pk)
+        assert user.social_auth_provider == "apple"
+        assert user.auth_provider == "apple"
+
+    def test_unverified_google_email_cannot_join_apple_account(
+        self, api_client, mock_google_verify
+    ):
+        apple_user = _apple_registered_user("victim@example.com")
+
+        response = self._sign_in(
+            api_client,
+            mock_google_verify,
+            email="victim@example.com",
+            sub="attacker_google",
+            verified=False,
+        )
+
+        assert response.status_code == 400
+        assert response.json()["error"]["code"] == "EMAIL_REGISTERED_WITH_DIFFERENT_PROVIDER"
+        assert User.objects.get(pk=apple_user.pk).google_id is None
+
+    def test_google_account_mismatch_still_enforced_on_linked_apple_account(
+        self, api_client, mock_google_verify
+    ):
+        apple_user = _apple_registered_user("linked@example.com")
+        User.objects.filter(pk=apple_user.pk).update(google_id="google_original")
+
+        response = self._sign_in(
+            api_client, mock_google_verify, email="linked@example.com", sub="google_other"
+        )
+
+        assert response.status_code == 400
+        assert response.json()["error"]["code"] == "GOOGLE_ACCOUNT_MISMATCH"
+        assert User.objects.get(pk=apple_user.pk).google_id == "google_original"
+
+    def test_private_relay_apple_account_is_not_matched(self, api_client, mock_google_verify):
+        """Hide My Email addresses never equal the Google email — a new account results."""
+        relay_user = _apple_registered_user("x7k2@privaterelay.appleid.com")
+
+        response = self._sign_in(
+            api_client, mock_google_verify, email="real.person@gmail.com", sub="google_real"
+        )
+
+        assert response.status_code == 200
+        assert response.json()["data"]["isNewUser"] is True
+        assert User.objects.get(pk=relay_user.pk).google_id is None
+
+    def test_unverified_google_cannot_join_unverified_password_account(
+        self, api_client, mock_google_verify
+    ):
+        """Neither side has proven the inbox, so nothing links.
+
+        The old rule refused only when the password account was verified, so
+        unverified + unverified slipped through and linked.
+        """
+        password_user = User.objects.create_user(
+            email="nobody.verified@example.com",
+            username="nobody_verified",
+            password="StrongPassword123!",  # pragma: allowlist secret
+            is_email_verified=False,
+        )
+
+        response = self._sign_in(
+            api_client,
+            mock_google_verify,
+            email="nobody.verified@example.com",
+            sub="unverified_google",
+            verified=False,
+        )
+
+        assert response.status_code == 400
+        assert response.json()["error"]["code"] == "EMAIL_REGISTERED_WITH_PASSWORD"
+        assert User.objects.get(pk=password_user.pk).google_id is None

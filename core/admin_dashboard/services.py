@@ -40,6 +40,7 @@ class DashboardService:
         if cached:
             return cached
 
+        from core.authentication.activity import active_users_between
         from core.engagement.models import Comment, Like
         from core.moderation.models import Report, ReportStatus
         from core.posts.models import Post
@@ -88,9 +89,7 @@ class DashboardService:
         engagement_change = _calc_percentage_change(engagement_yesterday, engagement_today)
 
         # Engagement rate — share of today's active users who engaged (0–100%).
-        active_users_today = User.objects.filter(
-            deleted_at__isnull=True, last_login__gte=today_start
-        ).count()
+        active_users_today = active_users_between(today_start).count()
         liker_ids = (
             Like.objects.filter(created_at__gte=today_start)
             .values_list("user_id", flat=True)
@@ -145,31 +144,22 @@ class DashboardService:
 
         from django.db.models import Avg, DurationField, ExpressionWrapper, F
 
+        from core.authentication.activity import active_users_between
         from core.moderation.models import Report, ReportStatus
-        from core.users.models import User
 
         now = datetime.now(timezone.utc)
         today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
 
-        # DAU — users with any activity today (approximated by last_login)
-        dau = User.objects.filter(
-            deleted_at__isnull=True,
-            last_login__gte=today_start,
-        ).count()
+        # DAU — users with any activity today
+        dau = active_users_between(today_start).count()
 
         # WAU
         week_ago = today_start - timedelta(days=7)
-        wau = User.objects.filter(
-            deleted_at__isnull=True,
-            last_login__gte=week_ago,
-        ).count()
+        wau = active_users_between(week_ago).count()
 
         # MAU
         month_ago = today_start - timedelta(days=30)
-        mau = User.objects.filter(
-            deleted_at__isnull=True,
-            last_login__gte=month_ago,
-        ).count()
+        mau = active_users_between(month_ago).count()
 
         # Avg resolution time for reports resolved in last 30 days.
         # Keep this in the database so the dashboard card stays O(1) as reports grow.
