@@ -132,3 +132,26 @@ def test_staging_and_production_do_not_share_signing_keys(settings):
     assert not (
         staging & production
     ), f"shared signing key between environments: {staging & production}"
+
+
+def test_share_fallback_identity_matches_each_mobile_build(settings):
+    """A staging button must not open/download the production Android app."""
+    import yaml
+
+    blueprint = yaml.safe_load((settings.BASE_DIR / "render.yaml").read_text(encoding="utf-8"))
+    for service_name, scheme, package, domain in [
+        (
+            "ziona-api-staging",
+            "zionastaging",
+            "com.zionking.ziona.staging",
+            "https://staging.ziona.app",
+        ),
+        ("ziona-api-prod", "ziona", "com.zionking.ziona", "https://ziona.app"),
+    ]:
+        service = _service(blueprint, service_name)
+        assert _env_value(service, "APP_DEEP_LINK_SCHEME") == scheme
+        assert _env_value(service, "ANDROID_APP_PACKAGE_NAME") == package
+        assert _env_value(service, "APP_SHARE_BASE_URL") == domain
+        # Production inherits the base setting; staging explicitly overrides it.
+        store_url = _env_value(service, "ANDROID_PLAY_STORE_URL") or settings.ANDROID_PLAY_STORE_URL
+        assert store_url == ("https://play.google.com/store/apps/details?id=" + package)

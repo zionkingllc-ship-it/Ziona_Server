@@ -1,6 +1,14 @@
 """Deep-link well-known files + share-preview store fallback (Ticket 12)."""
 
+import json
+import shutil
+import subprocess
+from html.parser import HTMLParser
+from pathlib import Path
+from uuid import uuid4
+
 import pytest
+from django.utils import timezone
 
 from core.posts.models import Post
 from core.users.models import User
@@ -185,3 +193,100 @@ def test_share_base_url_defaults_to_the_serving_host_not_a_redirecting_one(setti
     guards against it drifting back to a host the app does not claim.
     """
     assert settings.APP_SHARE_BASE_URL == "https://ziona.app"
+
+
+class _PreviewParser(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.links = {}
+        self.scripts = []
+        self.in_script = False
+
+    def handle_starttag(self, tag, attrs):
+        attrs = dict(attrs)
+        if tag == "a" and "id" in attrs:
+            self.links[attrs["id"]] = attrs.get("href", "")
+        if tag == "script":
+            self.in_script = True
+            self.scripts.append("")
+
+    def handle_endtag(self, tag):
+        if tag == "script":
+            self.in_script = False
+
+    def handle_data(self, data):
+        if self.in_script:
+            self.scripts[-1] += data
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("staging", [False, True], ids=["production", "staging"])
+def test_rendered_share_preview_browser_behavior(client, settings, staging):
+    """Execute the actual rendered JS, not a reimplementation of its logic.
+
+    Node is test-only (CI installs it explicitly); no npm/browser dependencies.
+    The harness checks page-load effects and link targets, not OS app launching.
+    """
+    settings.APP_DEEP_LINK_SCHEME = "zionastaging" if staging else "ziona"
+    settings.ANDROID_APP_PACKAGE_NAME = "com.zionking.ziona" + (".staging" if staging else "")
+    settings.APP_SHARE_BASE_URL = "https://staging.ziona.app" if staging else "https://ziona.app"
+    settings.IOS_APP_STORE_URL = "https://apps.apple.com/app/id123456789"
+    settings.ANDROID_PLAY_STORE_URL = (
+        "https://play.google.com/store/apps/details?id="
+        + settings.ANDROID_APP_PACKAGE_NAME
+        + "&hl=en"
+    )
+    user = User.objects.create_user(email="browser@example.com", username="browser")
+    caption = '<script>alert("caption")</script> & a post'
+    post = Post.objects.create(user=user, post_type="text", caption=caption)
+    response = client.get(f"/post/{post.id}")
+    assert response.status_code == 200
+    html = response.content.decode()
+    assert '<meta property="og:url" content="' + settings.APP_SHARE_BASE_URL in html
+    assert "&lt;script&gt;" in html
+    parser = _PreviewParser()
+    parser.feed(html)
+    assert len(parser.scripts) == 1, "User content must not inject executable scripts"
+    deep_link = f"{settings.APP_DEEP_LINK_SCHEME}://viewer/{post.id}"
+    # Progressive enhancement: before any JS, the CTA and stores are real links.
+    assert parser.links["open-app"] == deep_link
+    assert parser.links["ios-store"] == settings.IOS_APP_STORE_URL
+    assert parser.links["android-store"] == settings.ANDROID_PLAY_STORE_URL
+    node = shutil.which("node")
+    assert node, "Install Node.js 20+ to run share-preview behavior tests (no npm install needed)"
+    result = subprocess.run(
+        [node, str(Path(__file__).with_name("share_preview_harness.cjs"))],  # noqa: S603 - trusted harness, no shell
+        input=json.dumps(
+            {
+                "script": parser.scripts[0],
+                "links": parser.links,
+                "deepLink": deep_link,
+                "packageName": settings.ANDROID_APP_PACKAGE_NAME,
+            }
+        ),
+        capture_output=True,
+        text=True,
+        timeout=15,
+        check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("suffix", ["", "/"])
+def test_share_preview_rejects_missing_invalid_and_deleted_posts(client, suffix):
+    assert client.get(f"/post/not-a-uuid{suffix}").status_code == 404
+    assert client.get(f"/post/{uuid4()}{suffix}").status_code == 404
+    user = User.objects.create_user(email="deletedshare@example.com", username="deletedshare")
+    post = Post.objects.create(
+        user=user, post_type="text", caption="deleted", deleted_at=timezone.now()
+    )
+    assert client.get(f"/post/{post.id}{suffix}").status_code == 404
+
+
+@pytest.mark.django_db
+def test_profile_share_preview_serves_slashless_url_without_redirect(client):
+    user = User.objects.create_user(email="profilelink@example.com", username="profilelink")
+    response = client.get(f"/profile/{user.id}")
+    assert response.status_code == 200
+    assert "Location" not in response
