@@ -547,6 +547,15 @@ ANDROID_SHA256_CERT_FINGERPRINTS = env.list(
         "53:5B:CE:7A:2F:80:80:F4:2C:66:77:6E:9E:C7:E9:15:72:79:D5:52:73:1A:58:B1:81:6A:B7:26:23:1C:72:68",
     ],
 )
+# Keep confirmed release certificates even when deployment env lists predate them.
+_confirmed_android_certificates = {
+    "com.zionking.ziona": "ED:9D:BD:54:63:28:CC:7A:AE:44:F9:59:04:AA:67:FC:56:0C:76:2C:18:69:BA:15:3A:0E:3F:35:59:F8:39:30",
+    "com.zionking.ziona.staging": "B6:E0:F5:F2:C4:CC:04:44:13:67:46:2A:73:5E:4B:70:58:0E:A0:CB:FE:11:30:5A:E7:EF:52:28:84:9A:F6:51",
+}
+_confirmed_certificate = _confirmed_android_certificates.get(ANDROID_APP_PACKAGE_NAME)
+if _confirmed_certificate and _confirmed_certificate not in ANDROID_SHA256_CERT_FINGERPRINTS:
+    ANDROID_SHA256_CERT_FINGERPRINTS.append(_confirmed_certificate)
+
 # Apple Team ID for the Universal Links appID (f"{TEAM_ID}.{bundle_id}"). Public
 # by design — it ships in the world-readable apple-app-site-association file.
 APPLE_TEAM_ID = env("APPLE_TEAM_ID", default="RLL2NX9J5Z")

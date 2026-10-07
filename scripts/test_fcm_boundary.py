@@ -1,10 +1,11 @@
 """Offline FCM boundary regression checks; no credentials, database, or sends."""
 import importlib.util
-from pathlib import Path
 import sys
-from types import ModuleType, SimpleNamespace
 import unittest
+from pathlib import Path
+from types import ModuleType, SimpleNamespace
 from unittest.mock import MagicMock, patch
+
 
 class UnregisteredError(Exception):
     code = "NOT_FOUND"

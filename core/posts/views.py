@@ -172,6 +172,7 @@ def profile_share_preview(request: HttpRequest, user_id: str) -> HttpResponse:
         "display_name": display_name,
         "description": description,
         "profile_url": build_profile_share_url(settings.APP_SHARE_BASE_URL, user_id),
+        "deep_link": f"{settings.APP_DEEP_LINK_SCHEME}://profile/{user_id}",
         "preview_image": user.avatar_url or None,
         "app_name": "Ziona",
         "ios_app_store_url": settings.IOS_APP_STORE_URL,

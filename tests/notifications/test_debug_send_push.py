@@ -336,6 +336,7 @@ def test_debug_results_expose_python_sdk_codes_documented_in_runbook(
 ])
 def test_production_sender_preserves_tokens_except_unregistered(monkeypatch, user, error_kind, deactivated):
     from firebase_admin import exceptions, messaging
+
     import core.notifications.firebase as fb
 
     errors = {
