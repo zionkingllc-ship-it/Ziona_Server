@@ -40,6 +40,7 @@ def test_android_assetlinks_default_matches_release_fingerprints(client):
     assert entry["target"]["sha256_cert_fingerprints"] == [
         "B6:A8:22:F3:C7:E0:71:56:6B:24:93:C4:57:6A:85:D9:81:01:65:3D:BD:CB:70:D2:0E:34:23:4B:5D:45:6B:52",
         "53:5B:CE:7A:2F:80:80:F4:2C:66:77:6E:9E:C7:E9:15:72:79:D5:52:73:1A:58:B1:81:6A:B7:26:23:1C:72:68",
+        "ED:9D:BD:54:63:28:CC:7A:AE:44:F9:59:04:AA:67:FC:56:0C:76:2C:18:69:BA:15:3A:0E:3F:35:59:F8:39:30",
     ]
     assert entry["relation"] == [
         "delegate_permission/common.handle_all_urls",
@@ -290,3 +291,11 @@ def test_profile_share_preview_serves_slashless_url_without_redirect(client):
     response = client.get(f"/profile/{user.id}")
     assert response.status_code == 200
     assert "Location" not in response
+
+@pytest.mark.parametrize("scheme", ["ziona", "zionastaging"])
+def test_profile_open_button_uses_environment_scheme(client, settings, create_user, scheme):
+    settings.APP_DEEP_LINK_SCHEME = scheme
+    user = create_user()
+    response = client.get(f"/profile/{user.id}")
+    assert response.status_code == 200
+    assert f'href="{scheme}://profile/{user.id}"' in response.content.decode()

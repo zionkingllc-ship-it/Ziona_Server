@@ -122,11 +122,13 @@ def send_fcm_notification(
 
     if firebase_admin is None:
         logger.error("Cannot send FCM message: firebase-admin package not installed.")
+        summary["failure_count"] = len(tokens)
         return summary
 
     initialize_firebase()
     if not _firebase_initialized:
         logger.error("Cannot send FCM message: Firebase not initialized.")
+        summary["failure_count"] = len(tokens)
         return summary
 
     # Ensure data values are strings as required by FCM
@@ -160,14 +162,19 @@ def send_fcm_notification(
                 for i, result in enumerate(response.responses):
                     if not result.success:
                         err_code = getattr(result.exception, "code", "UNKNOWN")
-                        if err_code in [
-                            "NOT_FOUND",
-                            "INVALID_ARGUMENT",
+                        logger.error(
+                            "fcm_token_send_failed",
+                            extra={"error_code": err_code,
+                                   "error_type": type(result.exception).__name__,
+                                   "server_project_id": get_fcm_project_id()},
+                        )
+                        # Generic INVALID_ARGUMENT can describe the payload, not the token.
+                        if isinstance(result.exception, messaging.UnregisteredError) or err_code in [
                             "messaging/invalid-registration-token",
                             "messaging/registration-token-not-registered",
                         ]:
                             all_invalid_tokens.append(chunk[i])
-                        elif err_code in _CREDENTIAL_MISMATCH_CODES:
+                        elif isinstance(result.exception, messaging.SenderIdMismatchError) or err_code in _CREDENTIAL_MISMATCH_CODES:
                             # The token is fine — this server is authenticated to
                             # the wrong Firebase project. Deactivating here would
                             # destroy good tokens, so log loudly instead: without
@@ -186,6 +193,7 @@ def send_fcm_notification(
                             )
 
         except Exception as e:
+            summary["failure_count"] += len(chunk)
             logger.error(
                 f"Failed to send FCM chunk [{chunk_start}:{chunk_start + len(chunk)}]: {e}",
                 exc_info=True,

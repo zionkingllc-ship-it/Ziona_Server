@@ -330,3 +330,42 @@ def test_debug_results_expose_python_sdk_codes_documented_in_runbook(
     runbook = (settings.BASE_DIR / "docs" / "ios-push-triage.md").read_text(encoding="utf-8")
     assert f"`{code}`" in runbook
     assert f"`{exception_name}`" in runbook
+
+@pytest.mark.parametrize("error_kind, deactivated", [
+    ("payload", False), ("project", False), ("apns", False), ("unregistered", True),
+])
+def test_production_sender_preserves_tokens_except_unregistered(monkeypatch, user, error_kind, deactivated):
+    from firebase_admin import exceptions, messaging
+
+    import core.notifications.firebase as fb
+
+    errors = {
+        "payload": exceptions.InvalidArgumentError("Invalid payload"),
+        "project": messaging.SenderIdMismatchError("Wrong project"),
+        "apns": messaging.ThirdPartyAuthError("Invalid APNs credentials"),
+        "unregistered": messaging.UnregisteredError("App uninstalled"),
+    }
+    token = _token(user, "test-fcm-registration-token")
+    monkeypatch.setattr(fb, "initialize_firebase", lambda: None)
+    monkeypatch.setattr(fb, "_firebase_initialized", True)
+    monkeypatch.setattr(fb, "get_fcm_project_id", lambda: "test-project")
+    monkeypatch.setattr(messaging, "send_each_for_multicast", lambda message: MagicMock(
+        success_count=0, failure_count=1,
+        responses=[MagicMock(success=False, exception=errors[error_kind])],
+    ))
+    summary = fb.send_fcm_notification([token.token], "Title", "Body", {})
+    token.refresh_from_db()
+    assert token.is_active is (not deactivated)
+    assert summary == {"success_count": 0, "failure_count": 1, "invalid_token_count": int(deactivated)}
+
+
+def test_production_sender_counts_transport_failure(monkeypatch):
+    import core.notifications.firebase as fb
+    monkeypatch.setattr(fb, "initialize_firebase", lambda: None)
+    monkeypatch.setattr(fb, "_firebase_initialized", True)
+    def fail(message):
+        raise RuntimeError("Network unavailable")
+    monkeypatch.setattr(fb.messaging, "send_each_for_multicast", fail)
+    assert fb.send_fcm_notification(["one", "two"], "Title", "Body", {}) == {
+        "success_count": 0, "failure_count": 2, "invalid_token_count": 0,
+    }
