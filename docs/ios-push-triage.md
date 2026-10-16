@@ -9,7 +9,9 @@ or incorrectly scoped production APNs credential.
 This is an operational checklist, not a claim that the deployed secrets or
 installed builds have been verified. Do not change working Google sign-in/OAuth
 configuration as part of push triage. Do not rotate keys or deactivate token
-rows until the diagnostic evidence identifies the cause.
+rows until the diagnostic evidence identifies the cause. Confirm the deployed
+commit first: the FCM token-handling changes described below apply only after
+this PR reaches both the API and worker.
 
 ## Environment and build identity
 
@@ -117,10 +119,13 @@ SDK tables alone are insufficient. Inspect both fields before deciding a fix.
 | `FIREBASE_NOT_INITIALIZED` / `SDK_NOT_INSTALLED` | Check the deployed SDK, credential path, file readability, and initialization logs. |
 | `SEND_FAILED` / `UNKNOWN` / other codes | Preserve the redacted error message; check transport, quota, transient service failures, and initialization rather than guessing. |
 
-The existing production sender deactivates tokens for `NOT_FOUND` and
-`INVALID_ARGUMENT`; the debug sender does not. If many rows became inactive,
-investigate historical payload/errors and registration before retrying a real
-event. This runbook does not change that runtime behavior.
+On this branch, the normal sender deactivates only `UnregisteredError` or the
+SDK's explicit invalid/unregistered-token codes. A generic `INVALID_ARGUMENT`,
+a project mismatch, or an APNs authentication failure preserves the token. The
+debug sender never deactivates tokens. Until this branch is deployed, the older
+production sender can still deactivate on generic `INVALID_ARGUMENT`; investigate
+historical inactive rows and arrange deliberate re-registration instead of
+bulk-reactivating them.
 
 ## 3. Verify both API and worker on Render
 
@@ -152,13 +157,15 @@ An operator with access must check **`ziona-api-prod` and `ziona-worker-prod`**:
 - Correlate UTC timestamps and the affected account across API and worker logs:
   `debug_push_sent`, `push_notification_dispatch_started`,
   `push_notification_dispatch_finished`, `push_notification_task_failed`,
-  `push_notification_skipped_no_tokens`, `fcm_invalid_tokens_deactivated`, and
+  `push_notification_skipped_no_tokens`, `fcm_invalid_tokens_deactivated`,
+  `fcm_token_send_failed`, `fcm_sender_id_mismatch`, and
   `device_token_rejected_unsupported_kind`. Also inspect initialization failures
   and `Cannot send FCM message` messages. A finished task/dispatch log alone is
   not delivery proof; check counts and device receipt.
-- Do not require `fcm_sender_id_mismatch` as evidence: the current production
-  code checks named REST/Node codes, so Python's `PERMISSION_DENIED` may not
-  produce that log. Its absence does not rule out a sender mismatch.
+- After this PR is deployed, Python `SenderIdMismatchError` should emit
+  `fcm_sender_id_mismatch`. Its absence still does not rule out a project or
+  permission problem: a different exception may be raised, or no send may have
+  occurred. Read the per-token `errorCode` and `errorMessage` together.
 
 ## 4. Verify the production APNs chain and device
 
@@ -205,17 +212,21 @@ and `ziona://viewer/{id}` (staging: `zionastaging://viewer/{id}`) unchanged.
 Verified App/Universal Links can open directly. If the preview appears, opening
 the app requires tapping its button; there is no timed automatic store redirect.
 Test Chrome/Safari/in-app browsers, installed/uninstalled states, repeated taps,
-and cold/warm launches. Desktop previews must remain readable. Profile sharing
-is not upgraded to a custom-scheme fallback by this change.
+and cold/warm launches. Desktop previews must remain readable. This PR adds an
+explicit `Open Profile` custom-scheme fallback: `ziona://profile/{id}` in
+production and `zionastaging://profile/{id}` in staging. Test it on a mobile
+build that handles that route; it is independent of push delivery.
 
-The reviewed mobile association file lists a staging EAS certificate beginning
-`5B:5B` and ending `C8:8B` that was absent from both live staging hosts on
-2026-10-05. This PR does not authorize a new certificate. Confirm the actual
-APK signing SHA-256 with the mobile release owner, then append the verified
-fingerprint to staging's `ANDROID_SHA256_CERT_FINGERPRINTS` and deliberately
-update its deployment test. Preserve existing authorized entries until reviewed.
-Recheck `/.well-known/assetlinks.json` on both `staging.ziona.app` and
-`api.staging.ziona.app` and reverify links on the affected device.
+The [release fingerprint record](android-release-fingerprints.md) lists the
+additional staging and production SHA-256 values supplied for this rollout.
+`render.yaml` now includes them explicitly alongside the existing values;
+settings do not append certificates when an environment supplies its own list.
+The separate staging EAS fingerprint beginning `5B:5B` and ending `C8:8B`
+remains outside those lists; include it only if a supported installed build
+actually uses it. SHA-1 values in that record are not App Links fingerprints.
+After deployment, verify the exact package and SHA-256 list at
+`/.well-known/assetlinks.json` on each matching share and API host, then test
+links on the affected installed build.
 
 ## References
 
