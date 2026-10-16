@@ -571,7 +571,11 @@ class Command(BaseCommand):
     def _upsert_circles(self, admin: User) -> dict[str, Circle]:
         circles = {}
         for data in CIRCLES:
-            circle, _ = Circle.objects.update_or_create(
+            # all_objects, not objects: the defaults revive soft-deleted rows
+            # (deleted_at=None), which objects cannot see. objects also filters
+            # through a nullable created_by join, and update_or_create locks
+            # with FOR UPDATE — which Postgres refuses across an outer join.
+            circle, _ = Circle.all_objects.update_or_create(
                 name=data["name"],
                 defaults={
                     "description": data["description"],
@@ -684,7 +688,8 @@ class Command(BaseCommand):
             "expires_at": expires_at,
             "deleted_at": None,
         }
-        anchor, _ = Anchor.objects.update_or_create(
+        # all_objects for the same reasons as _upsert_circles.
+        anchor, _ = Anchor.all_objects.update_or_create(
             circle=circle,
             title=data["title"],
             defaults=defaults,

@@ -50,7 +50,26 @@ jobs:
   test:
     name: Test Suite
     runs-on: ubuntu-latest
+    env:
+      # Tests run on PostgreSQL, the database production runs on. SQLite skips
+      # whole classes of production failure: it ignores max_length, and it
+      # accepts SELECT ... FOR UPDATE across an outer join, which Postgres
+      # rejects. Trust auth keeps credentials out of the file; the database
+      # only exists inside this job.
+      DATABASE_URL: postgres://postgres@localhost:5432/ziona_ci
     services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_DB: ziona_ci
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
       redis:
         image: redis:7.2-alpine
         ports:
