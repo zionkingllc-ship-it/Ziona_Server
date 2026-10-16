@@ -14,14 +14,17 @@ from django.db.models import (
     Case,
     Count,
     Exists,
-    ExpressionWrapper,
     F,
+    Func,
     IntegerField,
+    Max,
     OuterRef,
     Q,
+    Subquery,
     Value,
     When,
 )
+from django.db.models.functions import Coalesce
 from django.utils import timezone
 
 from core.follows.models import Follow
@@ -51,6 +54,39 @@ GUEST_POPULAR_SLOT_RATIO = 0.6
 
 # A creator above this follower count no longer needs the reserved slots.
 FRESH_FOLLOWER_CEILING = 50
+
+# Upper bound on one suggestions request. ``limit`` arrives from the client — on
+# the guest path from an anonymous one — and every distinct value is its own
+# cache entry, so it is clamped rather than trusted. Matches search_creators.
+MAX_SUGGESTED_CREATORS = 50
+
+# Creator rankings count several one-to-many relations: followers, posts, and
+# the likes, comments and shares on those posts. Joined into one query they
+# multiply rows per creator — followers × posts × likes × ... — and
+# distinct=True keeps the totals right while the row volume keeps growing with
+# the product of every creator's activity. So none of them is joined: each total
+# is a per-creator subquery or a grouped query of its own.
+
+
+def _count_per_creator(queryset, creator_field: str):
+    """Count ``queryset`` rows belonging to the outer creator, as a subquery.
+
+    A bare COUNT with no GROUP BY — one index lookup per creator. Grouping
+    inside the subquery measured several times slower on Postgres.
+    """
+    rows = (
+        queryset.filter(**{creator_field: OuterRef("pk")})
+        .order_by()
+        .annotate(total=Func(F("pk"), function="COUNT"))
+        .values("total")
+    )
+    return Coalesce(Subquery(rows, output_field=IntegerField()), 0, output_field=IntegerField())
+
+
+def _totals_by_creator(queryset, creator_field: str, aggregate) -> dict:
+    """``{creator_id: aggregate}`` in one grouped query — creators with no rows are absent."""
+    rows = queryset.order_by().values(creator_field).annotate(total=aggregate)
+    return {row[creator_field]: row["total"] for row in rows}
 
 
 class FollowService:
@@ -359,6 +395,7 @@ class FollowService:
         the only difference between them today: guests never see accounts under
         a moderation warning.
         """
+        from core.posts.models import Post
         from core.users.models import User, UserRole
 
         return (
@@ -368,18 +405,19 @@ class FollowService:
             .exclude(username="")
             .exclude(id__in=exclude_ids)
             .annotate(
-                followers_count=Count(
-                    "follower_set",
-                    filter=Q(
-                        follower_set__follower__deleted_at__isnull=True,
-                        follower_set__follower__lifecycle_state="active",
+                followers_count=_count_per_creator(
+                    Follow.objects.filter(
+                        follower__deleted_at__isnull=True,
+                        follower__lifecycle_state="active",
                     ),
-                    distinct=True,
+                    "following_id",
                 ),
-                posts_count=Count(
-                    "posts",
-                    filter=Q(posts__deleted_at__isnull=True),
-                    distinct=True,
+                # all_objects: this was a reverse-relation join, which applies
+                # no custom manager, and Post.objects also hides posts by
+                # inactive authors. The creator's own state is filtered above.
+                posts_count=_count_per_creator(
+                    Post.all_objects.filter(deleted_at__isnull=True),
+                    "user_id",
                 ),
             )
         )
@@ -409,6 +447,7 @@ class FollowService:
         Signed in: ranked on the viewer's interests and follow graph.
         Guest: one shared list — see _guest_suggested_creators.
         """
+        limit = max(1, min(limit, MAX_SUGGESTED_CREATORS))
         if not user_id:
             return FollowService._guest_suggested_creators(limit)
         return FollowService._personalised_suggested_creators(user_id, limit)
@@ -492,66 +531,48 @@ class FollowService:
 
     @staticmethod
     def _build_guest_suggestions(limit: int) -> list[dict]:
-        from django.db.models import Max
+        from core.engagement.models import Comment, Like, Share
+        from core.posts.models import Post
 
-        # Stage 1 — narrow to a bounded pool before touching engagement. The
-        # engagement annotations join three multi-valued relations through
-        # posts; running them across the whole user table would not scale.
-        pool_ids = list(
+        # Stage 1 — narrow to a bounded pool, so engagement is only ever
+        # totalled for at most CANDIDATE_POOL_SIZE creators.
+        scored = list(
             FollowService._creator_candidate_queryset(
                 exclude_ids=set(),
                 allowed_statuses=["active"],
             )
             # An empty profile wastes a slot and makes a poor first impression.
             .filter(posts_count__gt=0)
-            .order_by("-followers_count", "-created_at")
-            .values_list("id", flat=True)[:CANDIDATE_POOL_SIZE]
+            .order_by("-followers_count", "-created_at")[:CANDIDATE_POOL_SIZE]
         )
-        if not pool_ids:
+        if not scored:
             return []
 
-        # Stage 2 — score only the pool. distinct=True on every Count: three
-        # multi-valued joins off `posts` otherwise multiply each other, and a
-        # creator with 2 posts and 2 likes would score as though they had 4.
-        scored = list(
-            FollowService._creator_candidate_queryset(
-                exclude_ids=set(),
-                allowed_statuses=["active"],
-            )
-            .filter(id__in=pool_ids)
-            .annotate(
-                likes_total=Count(
-                    "posts__likes",
-                    filter=Q(posts__deleted_at__isnull=True),
-                    distinct=True,
-                ),
-                comments_total=Count(
-                    "posts__comments",
-                    filter=Q(
-                        posts__deleted_at__isnull=True,
-                        posts__comments__deleted_at__isnull=True,
-                    ),
-                    distinct=True,
-                ),
-                shares_total=Count(
-                    "posts__shares",
-                    filter=Q(posts__deleted_at__isnull=True),
-                    distinct=True,
-                ),
-                last_post_at=Max(
-                    "posts__created_at",
-                    filter=Q(posts__deleted_at__isnull=True),
-                ),
-            )
-            .annotate(
-                # Same weighting as the feed's engagement_score, so "engaging
-                # creator" and "engaging post" cannot mean two different things.
-                engagement_score=ExpressionWrapper(
-                    F("likes_total") + (F("comments_total") * 2) + (F("shares_total") * 3),
-                    output_field=IntegerField(),
-                )
-            )
+        # Stage 2 — total the pool's engagement on live posts: one grouped
+        # query per kind, each reading its own table once.
+        pool_ids = [user.id for user in scored]
+        live_posts = {"post__user_id__in": pool_ids, "post__deleted_at__isnull": True}
+        likes = _totals_by_creator(Like.objects.filter(**live_posts), "post__user_id", Count("pk"))
+        comments = _totals_by_creator(
+            Comment.all_objects.filter(deleted_at__isnull=True, **live_posts),
+            "post__user_id",
+            Count("pk"),
         )
+        shares = _totals_by_creator(
+            Share.objects.filter(**live_posts), "post__user_id", Count("pk")
+        )
+        last_posted = _totals_by_creator(
+            Post.all_objects.filter(user_id__in=pool_ids, deleted_at__isnull=True),
+            "user_id",
+            Max("created_at"),
+        )
+        for user in scored:
+            # Same weighting as the feed's engagement_score, so "engaging
+            # creator" and "engaging post" cannot mean two different things.
+            user.engagement_score = (
+                likes.get(user.id, 0) + comments.get(user.id, 0) * 2 + shares.get(user.id, 0) * 3
+            )
+            user.last_post_at = last_posted.get(user.id)
 
         popular_slots = max(1, round(limit * GUEST_POPULAR_SLOT_RATIO))
         by_engagement = sorted(
