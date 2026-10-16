@@ -4,6 +4,7 @@ import logging
 from datetime import timedelta
 
 from celery import shared_task
+from celery.exceptions import SoftTimeLimitExceeded
 from django.conf import settings
 from django.db import transaction
 from django.db.models import F, Q
@@ -14,25 +15,47 @@ from core.shared.logging import log_security_event
 logger = logging.getLogger("core.users")
 
 
-@shared_task(name="core.users.tasks.purge_due_account_deletions")
+@shared_task(
+    name="core.users.tasks.purge_due_account_deletions", soft_time_limit=240, time_limit=300
+)
 def purge_due_account_deletions(batch_size: int = 20) -> dict:
-    """Claim and purge due deletion requests in a small idempotent batch."""
-    request_ids = _claim_due_requests(max(1, min(batch_size, 100)))
+    """Purge up to ``batch_size`` due deletion requests, claiming each just before it runs.
+
+    Claiming one at a time — rather than the whole batch up front — is what makes
+    a run that hits the soft time limit safe to stop. A claimed request sits in
+    PURGING until it completes or fails, and a stale PURGING claim is reclaimed
+    with a retry counted against it. Had the batch been claimed up front, every
+    request not yet started would be stranded and penalised for a timeout it had
+    nothing to do with. Only the request in flight is ever left behind.
+    """
+    limit = max(1, min(batch_size, 100))
+    attempted: list[str] = []
     completed = 0
     failed = 0
 
-    for request_id in request_ids:
+    while len(attempted) < limit:
+        # Excluding this run's attempts keeps a failed request from being
+        # reclaimed straight back in the same run.
+        claimed = _claim_due_requests(1, exclude_ids=attempted)
+        if not claimed:
+            break
+        request_id = claimed[0]
+        attempted.append(request_id)
         try:
             _purge_account_deletion(request_id)
             completed += 1
+        except SoftTimeLimitExceeded:
+            # Out of time — not this request's failure. It stays PURGING and
+            # is reclaimed like any interrupted purge (purges are idempotent).
+            raise
         except Exception as exc:  # noqa: BLE001
             failed += 1
             _record_purge_failure(request_id, exc)
 
-    return {"claimed": len(request_ids), "completed": completed, "failed": failed}
+    return {"claimed": len(attempted), "completed": completed, "failed": failed}
 
 
-def _claim_due_requests(batch_size: int) -> list[str]:
+def _claim_due_requests(batch_size: int, exclude_ids=()) -> list[str]:
     from core.users.models import AccountDeletionRequest, AccountDeletionStatus
 
     now = timezone.now()
@@ -55,6 +78,7 @@ def _claim_due_requests(batch_size: int) -> list[str]:
                     retry_count__lt=retry_limit,
                 )
             )
+            .exclude(id__in=list(exclude_ids))
             .order_by("scheduled_for")[:batch_size]
         )
         for deletion_request in requests:

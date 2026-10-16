@@ -7,7 +7,7 @@ from celery import shared_task
 logger = logging.getLogger("core.landing")
 
 
-@shared_task(bind=True, max_retries=3, default_retry_delay=60, soft_time_limit=120)
+@shared_task(bind=True, max_retries=3, default_retry_delay=60, soft_time_limit=120, time_limit=180)
 def refresh_company_stats(self) -> None:
     """Refresh company stats from live DB counts. Runs hourly via Celery Beat."""
     try:
