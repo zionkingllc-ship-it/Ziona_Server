@@ -47,7 +47,7 @@ def expire_old_anchors():
     return f"Processed {len(recently_expired)} expired anchors"
 
 
-@shared_task(name="circles.purge_expired_anchors")
+@shared_task(name="circles.purge_expired_anchors", soft_time_limit=240, time_limit=300)
 def purge_expired_anchors():
     """
     Run nightly at 02:00 UTC via Celery Beat.

@@ -301,7 +301,7 @@ class FollowQueries:
 
         **Authentication:** Optional
         **Parameters:**
-        - limit (Int, optional) - maximum number of creators to return
+        - limit (Int, optional) - maximum number of creators to return, capped at 50
         **Returns:** SuggestedCreatorType nodes; an empty list if none qualify.
         """
         from core.follows.services import FollowService

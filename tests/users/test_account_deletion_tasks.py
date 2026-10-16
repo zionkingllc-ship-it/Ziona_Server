@@ -187,3 +187,64 @@ def test_stale_purging_excluded_once_retries_exhausted(create_user, settings):
 
     # A crash-looping purge that hit the cap is not reclaimed again (no infinite loop).
     assert str(req.id) not in _claim_due_requests(20)
+
+
+def _due_deletion(create_user, name: str, minutes_ago: int):
+    user = create_user(email=f"{name}@example.com", username=name)
+    user.lifecycle_state = UserLifecycleState.PENDING_DELETION
+    user.is_active = False
+    user.save(update_fields=["lifecycle_state", "is_active", "updated_at"])
+    return AccountDeletionRequest.objects.create(
+        user=user,
+        status=AccountDeletionStatus.PENDING,
+        requested_at=timezone.now() - timedelta(days=31),
+        scheduled_for=timezone.now() - timedelta(minutes=minutes_ago),
+    )
+
+
+@pytest.mark.django_db
+def test_soft_time_limit_strands_only_the_purge_in_flight(create_user, monkeypatch):
+    """Requests not yet started stay PENDING, with no retry charged against them.
+
+    The batch used to be claimed up front, so a timeout left every unstarted
+    request in PURGING, to be reclaimed later as a crash with a retry counted.
+    """
+    from celery.exceptions import SoftTimeLimitExceeded
+
+    in_flight = _due_deletion(create_user, "first", minutes_ago=30)
+    untouched = _due_deletion(create_user, "second", minutes_ago=10)
+
+    def out_of_time(_user):
+        raise SoftTimeLimitExceeded()
+
+    monkeypatch.setattr("core.users.account_lifecycle.delete_user_gcs_objects", out_of_time)
+
+    with pytest.raises(SoftTimeLimitExceeded):
+        purge_due_account_deletions.run()
+
+    in_flight.refresh_from_db()
+    untouched.refresh_from_db()
+    assert in_flight.status == AccountDeletionStatus.PURGING  # reclaimed as interrupted
+    assert untouched.status == AccountDeletionStatus.PENDING
+    assert untouched.retry_count == 0
+
+
+@pytest.mark.django_db
+def test_a_failed_purge_is_not_retried_again_in_the_same_run(create_user, monkeypatch):
+    failing = _due_deletion(create_user, "failing", minutes_ago=30)
+    healthy = _due_deletion(create_user, "healthy", minutes_ago=10)
+
+    def storage(user):
+        if user.id == failing.user_id:
+            raise ConnectionError("temporary storage outage")
+        return 0
+
+    monkeypatch.setattr("core.users.account_lifecycle.delete_user_gcs_objects", storage)
+
+    result = purge_due_account_deletions.run()
+
+    assert result == {"claimed": 2, "completed": 1, "failed": 1}
+    failing.refresh_from_db()
+    healthy.refresh_from_db()
+    assert failing.retry_count == 1
+    assert healthy.status == AccountDeletionStatus.COMPLETED

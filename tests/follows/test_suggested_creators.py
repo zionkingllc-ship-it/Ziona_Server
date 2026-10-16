@@ -289,3 +289,80 @@ def test_reserved_slot_goes_to_the_most_recent_poster(db):
     assert ranked[0] == "star"
     assert ranked[1] == fresh.username
     assert not any(name.startswith("stale") for name in ranked)
+
+
+# ---------------------------------------------------------------------------
+# Bounds
+# ---------------------------------------------------------------------------
+
+
+def test_guest_limit_is_capped_and_shares_one_cache_entry(db):
+    """An anonymous caller cannot mint a cache entry per arbitrary limit."""
+    from core.follows.services import GUEST_SUGGESTIONS_CACHE_KEY, MAX_SUGGESTED_CREATORS
+
+    for index in range(MAX_SUGGESTED_CREATORS + 5):
+        _creator(f"bulk{index}")
+
+    suggestions = FollowService.get_suggested_creators(None, limit=10_000)
+
+    assert len(suggestions) == MAX_SUGGESTED_CREATORS
+    assert cache.get(f"{GUEST_SUGGESTIONS_CACHE_KEY}:{MAX_SUGGESTED_CREATORS}") is not None
+    assert cache.get(f"{GUEST_SUGGESTIONS_CACHE_KEY}:10000") is None
+
+
+@pytest.mark.parametrize("limit", [0, -5])
+def test_non_positive_limit_returns_one_instead_of_failing(db, limit):
+    """Slicing a queryset with a negative bound raises — the signed-in path used to."""
+    viewer = _creator("viewer")
+    _creator("someone")
+    _creator("another")
+
+    assert len(FollowService.get_suggested_creators(str(viewer.id), limit=limit)) == 1
+    assert len(FollowService.get_suggested_creators(None, limit=limit)) == 1
+
+
+def _outer_query(sql: str) -> str:
+    """``sql`` with every parenthesised subquery removed, wherever it appears."""
+    kept, depth, index = [], 0, 0
+    while index < len(sql):
+        if depth == 0 and sql.startswith("(SELECT", index):
+            depth = 1
+            index += len("(SELECT")
+            continue
+        if depth:
+            depth += {"(": 1, ")": -1}.get(sql[index], 0)
+        else:
+            kept.append(sql[index])
+        index += 1
+    return "".join(kept)
+
+
+def test_no_query_joins_more_than_one_one_to_many_relation(db):
+    """A creator's followers, posts, likes, comments and shares are never joined together.
+
+    Each is one-to-many. Two in the same query multiply rows per creator —
+    followers × posts × likes × comments × shares — and distinct=True hides it
+    in the totals while the row volume keeps growing. One join is fine; every
+    other total has to be a subquery or a query of its own.
+    """
+    import re
+
+    one_to_many = {"follows", "posts", "likes", "comments", "shares"}
+
+    creator = _creator("busy", posts=2)
+    fan = _creator("fan")
+    Follow.objects.create(follower=fan, following=creator)
+    for post in Post.objects.filter(user=creator):
+        Like.objects.create(user=fan, post=post)
+        Comment.objects.create(user=fan, post=post, text="Amen")
+
+    with CaptureQueriesContext(connection) as ctx:
+        FollowService._build_guest_suggestions(10)
+        FollowService._personalised_suggested_creators(str(fan.id), 10)
+
+    for query in ctx.captured_queries:
+        sql = query["sql"]
+        if not re.search(r'FROM "users"', sql):
+            continue  # a per-relation grouped total, not a creator ranking query
+        joined = set(re.findall(r'JOIN "(\w+)"', _outer_query(sql))) & one_to_many
+        assert len(joined) <= 1, f"joins {sorted(joined)}: {sql}"

@@ -2,6 +2,7 @@ import logging
 from datetime import timedelta
 
 from celery import shared_task
+from celery.exceptions import SoftTimeLimitExceeded
 from django.utils import timezone
 
 from core.circles.models import Anchor, CircleMembership, CirclePost
@@ -30,7 +31,7 @@ def send_push_notification_task(self, user_id, title: str, body: str, data: dict
         raise self.retry(exc=exc) from exc
 
 
-@shared_task(bind=True, max_retries=3, default_retry_delay=60, soft_time_limit=300)
+@shared_task(bind=True, max_retries=3, default_retry_delay=60, soft_time_limit=300, time_limit=360)
 def enqueue_circle_post_fanout(self, circle_post_id):
     """Fan out a new CirclePost notification after its DB transaction commits."""
     try:
@@ -84,7 +85,7 @@ def enqueue_circle_post_fanout(self, circle_post_id):
         raise self.retry(exc=exc, countdown=60 * (2**self.request.retries)) from exc
 
 
-@shared_task(bind=True, max_retries=3, default_retry_delay=60, soft_time_limit=300)
+@shared_task(bind=True, max_retries=3, default_retry_delay=60, soft_time_limit=300, time_limit=360)
 def send_admin_announcement_push_batch(
     self,
     user_ids: list[str],
@@ -105,7 +106,7 @@ def send_admin_announcement_push_batch(
         raise self.retry(exc=exc, countdown=60 * (2**self.request.retries)) from exc
 
 
-@shared_task(bind=True, max_retries=3, default_retry_delay=60, soft_time_limit=120)
+@shared_task(bind=True, max_retries=3, default_retry_delay=60, soft_time_limit=120, time_limit=180)
 def send_daily_anchor_notifications(self):
     """
     Daily task to batch all new anchors from the last 24 hours
@@ -175,6 +176,8 @@ def send_daily_anchor_notifications(self):
                     reference_type="circle_batch",
                     message=message,
                 )
+            except SoftTimeLimitExceeded:
+                raise  # out of time: stop, don't log it as one user's failure
             except Exception as e:
                 logger.error(
                     f"Failed to create daily anchor notification for user {uid}: {e}", exc_info=True
@@ -191,7 +194,7 @@ def send_daily_anchor_notifications(self):
         raise self.retry(exc=exc, countdown=60 * (2**self.request.retries)) from exc
 
 
-@shared_task(bind=True, max_retries=3, default_retry_delay=60, soft_time_limit=60)
+@shared_task(bind=True, max_retries=3, default_retry_delay=60, soft_time_limit=60, time_limit=120)
 def cleanup_old_notifications(self):
     """Delete soft-deleted notifications older than 90 days."""
     try:
@@ -208,7 +211,7 @@ def cleanup_old_notifications(self):
         raise self.retry(exc=exc, countdown=60 * (2**self.request.retries)) from exc
 
 
-@shared_task(bind=True, max_retries=3, default_retry_delay=120, soft_time_limit=600)
+@shared_task(bind=True, max_retries=3, default_retry_delay=120, soft_time_limit=600, time_limit=660)
 def send_daily_notification_digest(self):
     """Send daily notification digest emails to eligible users.
 
@@ -222,7 +225,6 @@ def send_daily_notification_digest(self):
 
     Processing:
       - Uses iterator(chunk_size=100) to avoid loading full queryset into memory
-      - select_related("notification_preferences") eliminates N+1 on pref check
       - Fetches undigested notifications from the last 24 h per user
       - Sends digest only when at least 1 activity exists
       - Bulk-updates digest_sent=True after successful dispatch
@@ -245,7 +247,9 @@ def send_daily_notification_digest(self):
                 last_login__gte=thirty_days_ago,
                 notification_preferences__digest_email_enabled=True,
             )
-            .select_related("notification_preferences")
+            # Eligibility is the filter above; preferences are never read per
+            # user. select_related() here, alongside only(), made Django refuse
+            # the query outright, so the digest had never run successfully.
             .only("id", "username", "email")
         )
 
@@ -259,6 +263,11 @@ def send_daily_notification_digest(self):
                     total_sent += 1
                 else:
                     total_skipped += 1
+            except SoftTimeLimitExceeded:
+                # Out of time. Let it reach the retry below: each user's
+                # notifications are marked digest_sent as they go, so the retry
+                # resumes with the users this run did not reach.
+                raise
             except Exception as user_exc:
                 # Per-user failures must never abort the entire batch
                 logger.error(

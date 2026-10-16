@@ -98,6 +98,20 @@ class Command(BaseCommand):
                 + ", ".join(missing_checks_pass)
             )
 
+        # Only the web services migrate (pre-deploy); workers deploy alongside
+        # them and must not run new code on the old schema.
+        unguarded_workers = sorted(
+            name
+            for name in re.findall(r"(?m)^  - type: worker\n    name: (\S+)$", text)
+            if "startCommand: python manage.py wait_for_migrations "
+            not in _service_block(text, name)
+        )
+        if unguarded_workers:
+            raise CommandError(
+                "render.yaml workers must start with `python manage.py wait_for_migrations`: "
+                + ", ".join(unguarded_workers)
+            )
+
         if "ziona-beat-prod" in text:
             raise CommandError("render.yaml must use Render cron jobs, not ziona-beat-prod")
 

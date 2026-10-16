@@ -188,6 +188,8 @@ def expire_anchor(self, anchor_id: str):
     bind=True,
     max_retries=1,
     acks_late=True,
+    soft_time_limit=240,
+    time_limit=300,
 )
 def check_scheduled_anchors(self):
     """Beat task (every minute): find and post overdue scheduled anchors.
@@ -275,6 +277,8 @@ def check_scheduled_anchors(self):
     default_retry_delay=120,
     autoretry_for=(Exception,),
     acks_late=True,
+    soft_time_limit=240,
+    time_limit=300,
 )
 def calculate_daily_analytics(self):
     """Beat task (00:05 UTC daily): aggregate previous day's metrics.
@@ -374,7 +378,7 @@ def calculate_daily_analytics(self):
     )
 
 
-@shared_task(bind=True, max_retries=1, acks_late=True)
+@shared_task(bind=True, max_retries=1, acks_late=True, soft_time_limit=240, time_limit=300)
 def refresh_dashboard_cache(self):
     """Beat task (every 5 min): pre-warm dashboard cache keys.
 

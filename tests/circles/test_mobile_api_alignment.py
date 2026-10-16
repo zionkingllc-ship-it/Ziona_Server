@@ -907,6 +907,19 @@ def test_seed_circle_sample_data_is_idempotent():
     assert Circle.objects.get(name="Faith, Work & Purpose").display_member_count == 1247
 
 
+@pytest.mark.django_db
+def test_seed_circle_sample_data_revives_a_soft_deleted_circle():
+    """The seed restores a soft-deleted sample circle in place — no duplicate row."""
+    call_command("seed_circle_sample_data")
+    circle = Circle.objects.get(name="Faith, Work & Purpose")
+    Circle.all_objects.filter(pk=circle.pk).update(deleted_at=timezone.now())
+
+    call_command("seed_circle_sample_data")
+
+    assert Circle.all_objects.filter(name="Faith, Work & Purpose").count() == 1
+    assert Circle.objects.get(name="Faith, Work & Purpose").pk == circle.pk
+
+
 def call_command_circles():
     from core.circles.management.commands.seed_circle_sample_data import CIRCLES
 
