@@ -292,6 +292,7 @@ def test_profile_share_preview_serves_slashless_url_without_redirect(client):
     assert response.status_code == 200
     assert "Location" not in response
 
+
 @pytest.mark.parametrize("scheme", ["ziona", "zionastaging"])
 def test_profile_open_button_uses_environment_scheme(client, settings, create_user, scheme):
     settings.APP_DEEP_LINK_SCHEME = scheme

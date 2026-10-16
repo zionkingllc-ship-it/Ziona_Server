@@ -164,17 +164,24 @@ def send_fcm_notification(
                         err_code = getattr(result.exception, "code", "UNKNOWN")
                         logger.error(
                             "fcm_token_send_failed",
-                            extra={"error_code": err_code,
-                                   "error_type": type(result.exception).__name__,
-                                   "server_project_id": get_fcm_project_id()},
+                            extra={
+                                "error_code": err_code,
+                                "error_type": type(result.exception).__name__,
+                                "server_project_id": get_fcm_project_id(),
+                            },
                         )
                         # Generic INVALID_ARGUMENT can describe the payload, not the token.
-                        if isinstance(result.exception, messaging.UnregisteredError) or err_code in [
+                        if isinstance(
+                            result.exception, messaging.UnregisteredError
+                        ) or err_code in [
                             "messaging/invalid-registration-token",
                             "messaging/registration-token-not-registered",
                         ]:
                             all_invalid_tokens.append(chunk[i])
-                        elif isinstance(result.exception, messaging.SenderIdMismatchError) or err_code in _CREDENTIAL_MISMATCH_CODES:
+                        elif (
+                            isinstance(result.exception, messaging.SenderIdMismatchError)
+                            or err_code in _CREDENTIAL_MISMATCH_CODES
+                        ):
                             # The token is fine — this server is authenticated to
                             # the wrong Firebase project. Deactivating here would
                             # destroy good tokens, so log loudly instead: without

@@ -84,9 +84,19 @@ def test_app_link_fingerprints_are_well_formed_per_environment(settings):
 
     blueprint = yaml.safe_load((settings.BASE_DIR / "render.yaml").read_text(encoding="utf-8"))
 
-    for service_name, package, expected_count in [
-        ("ziona-api-staging", "com.zionking.ziona.staging", 4),
-        ("ziona-api-prod", "com.zionking.ziona", 2),
+    for service_name, package, expected_count, release_certificate in [
+        (
+            "ziona-api-staging",
+            "com.zionking.ziona.staging",
+            5,
+            "B6:E0:F5:F2:C4:CC:04:44:13:67:46:2A:73:5E:4B:70:58:0E:A0:CB:FE:11:30:5A:E7:EF:52:28:84:9A:F6:51",
+        ),
+        (
+            "ziona-api-prod",
+            "com.zionking.ziona",
+            3,
+            "ED:9D:BD:54:63:28:CC:7A:AE:44:F9:59:04:AA:67:FC:56:0C:76:2C:18:69:BA:15:3A:0E:3F:35:59:F8:39:30",
+        ),
     ]:
         service = _service(blueprint, service_name)
         assert _env_value(service, "ANDROID_APP_PACKAGE_NAME") == package
@@ -100,6 +110,7 @@ def test_app_link_fingerprints_are_well_formed_per_environment(settings):
             f"changes — update it deliberately, do not delete the assertion."
         )
         assert len(set(fingerprints)) == len(fingerprints), f"{service_name} has a duplicate"
+        assert release_certificate in fingerprints, f"{service_name} omits its release key"
 
         for fingerprint in fingerprints:
             octets = fingerprint.split(":")

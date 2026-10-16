@@ -12,4 +12,15 @@ SHA-256: ED:9D:BD:54:63:28:CC:7A:AE:44:F9:59:04:AA:67:FC:56:0C:76:2C:18:69:BA:15
 
 App Links use SHA-256 only. SHA-1 is recorded for separate Firebase/Google OAuth console configuration, which has not been changed.
 
-Deploy the mobile public association JSON files to the matching web hosts and deploy the server changes to both API environments. Each host must serve /.well-known/assetlinks.json directly. Staging must set ANDROID_APP_PACKAGE_NAME=com.zionking.ziona.staging and its existing staging fingerprint list; production must set com.zionking.ziona. Confirmed certificates are appended to the configured list without removing existing certificates.
+## Deployment
+
+Keep the approved SHA-256 lists explicit in both `render.yaml` and the matching
+Render API service's `ANDROID_SHA256_CERT_FINGERPRINTS` value. Preserve existing
+approved certificates; settings do not append keys to an explicit environment
+list. Staging uses `ANDROID_APP_PACKAGE_NAME=com.zionking.ziona.staging`;
+production uses `ANDROID_APP_PACKAGE_NAME=com.zionking.ziona`.
+
+Deploy the mobile public association files to their matching share hosts and
+deploy each API environment. Every host must serve `/.well-known/assetlinks.json`
+directly. After deployment, verify the package and full certificate list on
+both the share host and API host before testing the installed app.
