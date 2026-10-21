@@ -64,8 +64,8 @@ class OAuthService:
 
             if google_user_info.get("aud") not in allowed_client_ids:
                 logger.warning(
-                    "Google token rejected due to unexpected audience",
-                    extra={"audience": google_user_info.get("aud")},
+                    "Google token rejected due to unexpected audience: %s",
+                    google_user_info.get("aud"),
                 )
                 raise AuthenticationError(
                     "Invalid Google token audience",
