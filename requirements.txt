@@ -42,7 +42,9 @@ google-cloud-storage==2.14.0
 
 # Media Processing (bundles a static FFmpeg binary via pip — no OS install needed)
 imageio-ffmpeg==0.5.1
-Pillow==12.3.0
+# 13.0.0 fixes ~30 CVEs in 12.3.0's image decoders — this service decodes
+# untrusted uploads. Requires Python >= 3.11 (Render and CI run 3.12).
+Pillow==13.0.0
 
 # ASGI Server
 uvicorn[standard]==0.27.0
