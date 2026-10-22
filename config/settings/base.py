@@ -467,6 +467,21 @@ EMAIL_BACKEND = "core.shared.email_backends.ensend.EnsendEmailBackend"
 ENSEND_API_KEY = env("ENSEND_API_KEY", default="")
 ENSEND_API_URL = env("ENSEND_API_URL", default="https://api.smtpexpress.com/send")
 ENSEND_SENDER_NAME = env("ENSEND_SENDER_NAME", default="Ziona Team")
+# ── For You feed: per-open variety ──
+# Each app open (a first page, no cursor) starts a session with its own shuffle,
+# and posts already served to the user rank lower. Tunable per environment
+# without a code change; each setting at its "off" value restores the plain
+# ranked order.
+#   STRENGTH — how far the shuffle can move a post's score: ×(1 ± strength).
+#              0 = off, 0.5 = medium. Capped at 0.9 so ranking still matters.
+FEED_SHUFFLE_STRENGTH = env.float("FEED_SHUFFLE_STRENGTH", default=0.5)
+#   PENALTY  — score multiplier for posts served in the window. 1.0 = off.
+FEED_SEEN_PENALTY = env.float("FEED_SEEN_PENALTY", default=0.25)
+#   WINDOW   — how long a served post counts as "already shown".
+FEED_SEEN_WINDOW_HOURS = env.int("FEED_SEEN_WINDOW_HOURS", default=24)
+#   RUN      — most posts of one kind (video/image/text) in a row. 0 = off.
+FEED_MAX_SAME_KIND_RUN = env.int("FEED_MAX_SAME_KIND_RUN", default=2)
+
 DEFAULT_FROM_EMAIL = env("DEFAULT_FROM_EMAIL", default="noreply@ziona.app")
 # Deep-link/share domain. Must be the host that SERVES the site (not a host that
 # redirects): Apple/Google refuse to verify a Universal/App Link domain whose

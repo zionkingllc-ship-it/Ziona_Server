@@ -5,6 +5,8 @@ Defines the Post and PostMedia models for content creation —
 supporting image, video, and text post types.
 """
 
+import secrets
+
 from django.db import models
 
 from core.shared.models import (
@@ -31,6 +33,11 @@ class PostCategory(models.TextChoices):
     WORSHIP = "worship", "Worship"
     PATIENCE = "patience", "Patience"
     PRAYER = "prayer", "Prayer"
+
+
+def new_shuffle_key() -> float:
+    """A uniform random float in [0, 1) — see ``Post.shuffle_key``."""
+    return secrets.randbelow(2**52) / 2**52
 
 
 class Post(SoftDeleteModel):
@@ -83,6 +90,12 @@ class Post(SoftDeleteModel):
     scripture_verse_start = models.IntegerField(blank=True, null=True)
     scripture_verse_end = models.IntegerField(blank=True, null=True)
     scripture_translation = models.CharField(max_length=10, default="KJV")
+
+    # Fixed random number per post. The For You feed derives each session's
+    # shuffle from it with plain arithmetic (see ranking._with_feed_score), so
+    # the database can order a whole session deterministically — which keyset
+    # pagination requires — without hashing or a per-session table.
+    shuffle_key = models.FloatField(default=new_shuffle_key, editable=False)
 
     objects = ActiveUserContentManager()
     all_objects = AllObjectsManager()

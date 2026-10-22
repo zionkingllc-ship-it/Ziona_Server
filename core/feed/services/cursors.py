@@ -13,6 +13,7 @@ from django.db.models import (
 from django.utils.dateparse import parse_datetime
 
 from core.posts.models import Post
+from core.shared.utils import parse_uuid
 
 logger = logging.getLogger("core.feed")
 
@@ -76,27 +77,6 @@ class FeedCursor:
             logger.debug("invalid cursor format — falling back to legacy uuid")
         # Backward-compatible: treat as raw post UUID from older clients.
         return {"id": cursor, "algo": None, "ts": None, "tier": None}
-
-
-def _ranked_cursor_payload(post, fallback: dict | None = None) -> dict:
-    """Build a nested ranked cursor payload, preserving prior state if no post was used."""
-    if not post:
-        return fallback or {}
-    return {
-        "id": str(post.id),
-        "score": float(getattr(post, "final_score", 0) or 0),
-        "ts": post.created_at.isoformat(),
-    }
-
-
-def _chronological_cursor_payload(post, fallback: dict | None = None) -> dict:
-    """Build a nested chronological cursor payload, preserving prior state if no post was used."""
-    if not post:
-        return fallback or {}
-    return {
-        "id": str(post.id),
-        "ts": post.created_at.isoformat(),
-    }
 
 
 def _apply_cursor(qs, cursor_post_id: str):
@@ -241,3 +221,63 @@ def _apply_following_cursor(
     except Exception:  # noqa: BLE001
         logger.debug("Failed to apply following feed cursor: invalid cursor_id")
     return qs
+
+
+# ---------------------------------------------------------------------------
+# For You sessions (see core.feed.services.session)
+# ---------------------------------------------------------------------------
+# A session stream's position is the last post it consumed. The next page takes
+# everything strictly after it in the stream's order. Positions arrive from the
+# client inside the cursor, so they are validated; an unusable one restarts that
+# stream, which can only affect the caller's own session.
+
+
+def _position_parts(position) -> tuple | None:
+    if not isinstance(position, dict):
+        return None
+    post_id = parse_uuid(position.get("id"))
+    created_at = parse_datetime(str(position.get("ts") or ""))
+    if post_id is None or created_at is None:
+        return None
+    return post_id, created_at
+
+
+def _session_ranked_position(post) -> dict:
+    return {"id": str(post.id), "score": float(post.feed_score), "ts": post.created_at.isoformat()}
+
+
+def _session_followed_position(post) -> dict:
+    return {"id": str(post.id), "seen": int(post.seen_rank), "ts": post.created_at.isoformat()}
+
+
+def _apply_session_ranked_cursor(qs, position):
+    """Continue an order of (feed_score DESC, created_at DESC, id DESC)."""
+    parts = _position_parts(position)
+    if parts is None:
+        return qs
+    post_id, created_at = parts
+    try:
+        score = float(position["score"])
+    except (KeyError, TypeError, ValueError):
+        return qs
+    return qs.filter(
+        Q(feed_score__lt=score)
+        | Q(feed_score=score, created_at__lt=created_at)
+        | Q(feed_score=score, created_at=created_at, id__lt=post_id)
+    )
+
+
+def _apply_session_followed_cursor(qs, position):
+    """Continue an order of (seen_rank ASC, created_at DESC, id DESC)."""
+    parts = _position_parts(position)
+    if parts is None:
+        return qs
+    post_id, created_at = parts
+    seen = position.get("seen")
+    if seen not in (0, 1):
+        return qs
+    return qs.filter(
+        Q(seen_rank__gt=seen)
+        | Q(seen_rank=seen, created_at__lt=created_at)
+        | Q(seen_rank=seen, created_at=created_at, id__lt=post_id)
+    )
