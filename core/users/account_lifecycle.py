@@ -13,6 +13,15 @@ from django.db.models import Q
 
 from core.users.models import UserLifecycleState, UserRole, UserStatus
 
+# Permanently deleted accounts keep their row as an anonymized tombstone whose
+# email moves to this reserved domain. It is how anonymization is recognised.
+ANONYMIZED_EMAIL_DOMAIN = "deleted.ziona.local"
+
+
+def is_anonymized(user) -> bool:
+    """True once permanent deletion has anonymized the account — nothing left to restore."""
+    return (user.email or "").endswith(f"@{ANONYMIZED_EMAIL_DOMAIN}")
+
 
 def revoke_user_sessions(user_id, *, delete_device_tokens: bool) -> None:
     """Revoke refresh tokens and deactivate/delete push device tokens."""
@@ -147,7 +156,7 @@ def remove_or_hide_user_data(user, now: datetime) -> None:
     if identity is not None:
         # normalized_email is unique + non-null; use a per-identity tombstone so two
         # scrubbed identities can never collide.
-        identity.normalized_email = f"deleted-{identity.id.hex}@deleted.ziona.local"
+        identity.normalized_email = f"deleted-{identity.id.hex}@{ANONYMIZED_EMAIL_DOMAIN}"
         identity.contact_email = ""
         identity.display_name = ""
         identity.save(
@@ -188,7 +197,7 @@ def anonymize_user_for_permanent_delete(user, now: datetime) -> None:
     user_id = str(user.id)
     id_token = user.id.hex if hasattr(user.id, "hex") else user_id.replace("-", "")
 
-    user.email = f"deleted-{id_token}@deleted.ziona.local"[:255]
+    user.email = f"deleted-{id_token}@{ANONYMIZED_EMAIL_DOMAIN}"[:255]
     user.username = f"deleted_{id_token[:22]}"
     user.full_name = ""
     user.bio = ""

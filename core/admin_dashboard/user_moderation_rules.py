@@ -62,7 +62,7 @@ def _available_actions(user) -> list[str]:
     if getattr(user, "is_admin", False):
         return []
     if getattr(user, "deleted_at", None):
-        return []
+        return _deleted_account_actions(user)
     if user.lifecycle_state == UserLifecycleState.PENDING_DELETION:
         return []
     if not getattr(user, "is_active", True):
@@ -72,6 +72,30 @@ def _available_actions(user) -> list[str]:
     if user.status == UserStatus.WARNED:
         return ["suspend", "delete"]
     return ["warn", "suspend", "delete"]
+
+
+def _is_admin_soft_deleted(user) -> bool:
+    """Deleted by an admin's plain Delete — the account and its content are intact.
+
+    Excludes anonymized tombstones (permanent deletion, or a completed
+    user-requested deletion) and accounts in a user-requested deletion grace
+    period or deactivation, which the user reverses themselves.
+    """
+    from core.users.account_lifecycle import is_anonymized
+    from core.users.models import UserLifecycleState
+
+    return (
+        getattr(user, "deleted_at", None) is not None
+        and user.lifecycle_state == UserLifecycleState.DELETED
+        and not is_anonymized(user)
+    )
+
+
+def _deleted_account_actions(user) -> list[str]:
+    """A soft-deleted account can be brought back, or finished off."""
+    if _is_admin_soft_deleted(user):
+        return ["restore", "permanently_delete"]
+    return []
 
 
 def _account_state(user) -> str:

@@ -13,6 +13,7 @@ from django.db.models.functions import Coalesce
 
 from core.admin_dashboard.permissions import log_admin_action
 from core.shared.exceptions import AdminError, ErrorCode
+from core.shared.utils import parse_uuid
 
 logger = logging.getLogger("core.admin_dashboard")
 
@@ -26,6 +27,7 @@ from core.admin_dashboard.user_moderation_rules import (  # noqa: E402,F401
     _account_state,
     _available_actions,
     _ensure_action_available,
+    _is_admin_soft_deleted,
     _user_to_dict,
     _validate_reason,
 )
@@ -408,7 +410,7 @@ class UserManagementService:
         constraints remain valid, but the old email/login identity can no longer
         authenticate or be recovered.
         """
-        from core.users.models import User
+        from core.users.models import User, UserLifecycleState
 
         reason = _validate_reason(reason)
 
@@ -424,9 +426,20 @@ class UserManagementService:
                 code=ErrorCode.VALIDATION_ERROR,
             )
 
-        user = User.objects.select_for_update().filter(id=user_id, deleted_at__isnull=True).first()
-
-        if not user:
+        # Live accounts as before, plus accounts an admin soft-deleted: a mistaken
+        # Delete must be finishable without first restoring the account. Every
+        # other non-live state (deactivated, pending deletion, anonymized) stays
+        # out of reach, exactly as it was.
+        user = (
+            User.all_objects.select_for_update().filter(id=user_id).first()
+            if parse_uuid(user_id)
+            else None
+        )
+        soft_deleted = user is not None and _is_admin_soft_deleted(user)
+        if user is None or (
+            not soft_deleted
+            and (user.deleted_at is not None or user.lifecycle_state != UserLifecycleState.ACTIVE)
+        ):
             raise AdminError(
                 message="User not found.",
                 code=ErrorCode.USER_NOT_FOUND,
@@ -438,7 +451,7 @@ class UserManagementService:
                 code=ErrorCode.PERMISSION_DENIED,
             )
 
-        _ensure_action_available(user, "delete")
+        _ensure_action_available(user, "permanently_delete" if soft_deleted else "delete")
 
         # Validate against the locked current email before any anonymization.
         if confirmation_text != user.email:
@@ -487,6 +500,81 @@ class UserManagementService:
         )
 
         return {"success": True}
+
+    @staticmethod
+    @transaction.atomic
+    def restore_user(user_id: str, admin_user, reason: str = "", ip_address: str = "") -> dict:
+        """Undo an admin's plain Delete: the account comes back exactly as it was.
+
+        Soft deletion only flags the account, so restoring brings back its posts,
+        follows and login unchanged. Its moderation status is left as it was — a
+        user suspended before the delete is still suspended after the restore.
+        Sessions and device tokens revoked by the delete stay revoked: the user
+        signs in again, and the app re-registers for push on its next launch.
+
+        Raises:
+            AdminError: USER_NOT_FOUND, USER_NOT_RESTORABLE (permanently deleted),
+                PERMISSION_DENIED (administrator), or VALIDATION_ERROR (the
+                account is not soft-deleted).
+        """
+        from django.core.cache import cache
+
+        from core.admin_dashboard.models import ModerationAction, ModerationActionType
+        from core.users.account_lifecycle import is_anonymized
+        from core.users.models import User
+
+        user = (
+            User.all_objects.select_for_update().filter(id=user_id).first()
+            if parse_uuid(user_id)
+            else None
+        )
+        if user is None:
+            raise AdminError(message="User not found.", code=ErrorCode.USER_NOT_FOUND)
+
+        if user.is_admin:
+            raise AdminError(
+                message="Cannot apply moderation actions to an administrator account.",
+                code=ErrorCode.PERMISSION_DENIED,
+            )
+
+        if is_anonymized(user):
+            raise AdminError(
+                message="This account was permanently deleted and cannot be restored.",
+                code=ErrorCode.USER_NOT_RESTORABLE,
+            )
+
+        _ensure_action_available(user, "restore")
+
+        deleted_at = user.deleted_at.isoformat()
+        user.restore()
+
+        reason = (reason or "").strip() or "Restored by admin"
+        details = {"reason": reason, "restored_from_deleted_at": deleted_at, "status": user.status}
+        ModerationAction.objects.create(
+            user=user,
+            action_type=ModerationActionType.REACTIVATED,
+            reason=reason,
+            admin_user=admin_user,
+            metadata=details.copy(),
+        )
+        log_admin_action(
+            admin_user=admin_user,
+            action="USER_RESTORED",
+            target_type="User",
+            target_id=str(user.id),
+            details=details.copy(),
+            ip_address=ip_address,
+        )
+
+        user_id_str = str(user.id)
+        transaction.on_commit(lambda: cache.delete(f"user_me_data_{user_id_str}"))
+
+        logger.info(
+            "user_restored",
+            extra={"user_id": user_id_str, "admin_id": str(admin_user.id)},
+        )
+
+        return {"success": True, "user": _user_to_dict(user)}
 
     @staticmethod
     @transaction.atomic

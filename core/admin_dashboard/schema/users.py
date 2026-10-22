@@ -1,4 +1,4 @@
-"""Admin user management (list, warn, suspend, delete, reactivate).
+"""Admin user management (list, warn, suspend, delete, restore, reactivate).
 
 Split from the former core/admin_dashboard/schema.py (no contract change).
 """
@@ -238,6 +238,36 @@ class UsersAdminMutations:
                 ip_address=ip,
             )
             return ModerationActionPayload(success=True)
+        except AdminError as e:
+            return ModerationActionPayload(
+                success=False,
+                error=ErrorType(code=e.code, message=e.message),
+            )
+
+    @strawberry.mutation(
+        name="restoreUser",
+        description=(
+            "Undo a soft delete (admin only): the account, its posts and follows come back "
+            "as they were. Offered when availableActions contains 'restore'. Permanently "
+            "deleted accounts cannot be restored (USER_NOT_RESTORABLE)."
+        ),
+    )
+    @admin_required
+    def restore_user(self, info: Info, user_id: str, reason: str = "") -> ModerationActionPayload:
+        from core.admin_dashboard.user_services import UserManagementService
+        from core.shared.exceptions import AdminError
+
+        admin_user = info.context.admin_user
+        ip = getattr(info.context, "admin_ip", "")
+
+        try:
+            result = UserManagementService.restore_user(
+                user_id=user_id,
+                admin_user=admin_user,
+                reason=reason,
+                ip_address=ip,
+            )
+            return ModerationActionPayload(success=True, user=_map_user(result["user"]))
         except AdminError as e:
             return ModerationActionPayload(
                 success=False,

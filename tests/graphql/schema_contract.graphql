@@ -1634,6 +1634,11 @@ type Mutation {
   resolveHelpConversation(contactId: String!): HelpConversationPayload!
   respondToAnchor(anchorId: String!, content: String!, mediaType: String! = "", mediaUrl: String! = "", responseType: String!): AnchorResponsePayload!
 
+  """
+  Undo a soft delete (admin only): the account, its posts and follows come back as they were. Offered when availableActions contains 'restore'. Permanently deleted accounts cannot be restored (USER_NOT_RESTORABLE).
+  """
+  restoreUser(reason: String! = "", userId: String!): ModerationActionPayload!
+
   """Update specific report processing state dynamically (Admin only)."""
   reviewReport(action: String = null, internalNotes: String = null, reportId: String!, status: String!): ReportPayload!
 
