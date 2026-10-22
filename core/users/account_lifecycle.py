@@ -194,8 +194,13 @@ def delete_user_gcs_objects(user) -> int:
 
 def anonymize_user_for_permanent_delete(user, now: datetime) -> None:
     """Permanently disable and anonymize a user row without hard-deleting it."""
+    from core.users.username_policy import reserve_released_username
+
     user_id = str(user.id)
     id_token = user.id.hex if hasattr(user.id, "hex") else user_id.replace("-", "")
+
+    # Deletion must not make a previously visible @handle immediately claimable.
+    reserve_released_username(user.username, user.id, now=now)
 
     user.email = f"deleted-{id_token}@{ANONYMIZED_EMAIL_DOMAIN}"[:255]
     user.username = f"deleted_{id_token[:22]}"

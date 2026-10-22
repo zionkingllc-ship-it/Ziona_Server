@@ -365,6 +365,10 @@ CELERY_TASK_TIME_LIMIT = env.int("CELERY_TASK_TIME_LIMIT", default=300)
 CELERY_BEAT_SCHEDULER = "django_celery_beat.schedulers:DatabaseScheduler"
 
 CELERY_BEAT_SCHEDULE = {
+    "cleanup-expired-username-reservations": {
+        "task": "core.users.tasks.cleanup_expired_username_reservations",
+        "schedule": crontab(hour=3, minute=0),
+    },
     "send-daily-anchor-notifications": {
         "task": "core.notifications.tasks.send_daily_anchor_notifications",
         "schedule": crontab(hour=18, minute=0),

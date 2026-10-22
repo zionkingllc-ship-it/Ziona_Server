@@ -2,6 +2,7 @@ import uuid
 
 from django.contrib.auth.models import AbstractBaseUser, PermissionsMixin
 from django.db import models
+from django.db.models.functions import Lower
 from django.utils import timezone
 
 from core.shared.models import AllObjectsManager
@@ -50,6 +51,17 @@ def compose_display_name(full_name: str | None, username: str | None) -> str:
     User row — apply exactly the same rule.
     """
     return (full_name or "").strip() or (username or "")
+
+
+class UsernameReservation(models.Model):
+    """A released handle temporarily claimable only by its previous owner."""
+
+    username = models.CharField(max_length=30, unique=True)
+    owner_id = models.UUIDField(db_index=True)
+    expires_at = models.DateTimeField(db_index=True)
+
+    class Meta:
+        db_table = "username_reservations"
 
 
 class User(AbstractBaseUser, PermissionsMixin):
@@ -147,6 +159,7 @@ class User(AbstractBaseUser, PermissionsMixin):
     )
     last_name_change = models.DateTimeField(null=True, blank=True)
     last_username_change = models.DateTimeField(null=True, blank=True)
+    grace_username_changes = models.PositiveSmallIntegerField(default=0)
 
     last_login_ip = models.GenericIPAddressField(null=True, blank=True)
 
@@ -198,6 +211,9 @@ class User(AbstractBaseUser, PermissionsMixin):
             models.Index(fields=["email"], name="idx_user_email"),
             models.Index(fields=["username"], name="idx_user_username"),
             models.Index(fields=["firebase_uid"], name="idx_user_firebase_uid"),
+        ]
+        constraints = [
+            models.UniqueConstraint(Lower("username"), name="unique_user_username_ci"),
         ]
 
     def __str__(self) -> str:

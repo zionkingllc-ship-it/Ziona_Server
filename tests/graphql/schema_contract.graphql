@@ -989,6 +989,8 @@ type CurrentUserResponse {
   profile: UserProfileType!
   stats: ProfileStatsType!
   username: String!
+  usernameEditableUntil: String
+  usernameGraceChangesRemaining: Int!
 }
 
 type DatasetType {
@@ -1750,7 +1752,7 @@ type Mutation {
   updateProfile(avatarUrl: String = null, bio: String = null, bioLink: String = null, fullName: String = null, hideLikeCount: Boolean = null, location: String = null): ProfilePayload!
 
   """
-  Update the authenticated user's username (rate-limited to once every 30 days).
+  Update a username (up to 3 edits in the first 48 hours, then once every 30 days).
   """
   updateUsername(username: String!): UpdateUsernamePayload!
 

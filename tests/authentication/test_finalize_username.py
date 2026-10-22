@@ -176,6 +176,44 @@ def test_finalize_username_clears_needs_username_selection_flag(
     assert user.needs_username_selection is False
 
 
+def test_finalize_username_cannot_be_replayed_to_bypass_limits(
+    client: Client, user: User, access_token: str
+) -> None:
+    url = reverse("authentication:finalize_username")
+    first = client.post(
+        url,
+        {"username": "selected_handle"},
+        content_type="application/json",
+        HTTP_AUTHORIZATION=f"Bearer {access_token}",
+    )
+    assert first.status_code == 200
+    second = client.post(
+        url,
+        {"username": "bypass_handle"},
+        content_type="application/json",
+        HTTP_AUTHORIZATION=f"Bearer {access_token}",
+    )
+    assert second.status_code == 400
+    assert second.json()["error"]["code"] == "USERNAME_ALREADY_SELECTED"
+    user.refresh_from_db()
+    assert user.username == "selected_handle"
+    assert user.grace_username_changes == 0
+
+
+def test_finalize_username_keeps_existing_onboarding_format(
+    client: Client, user: User, access_token: str
+) -> None:
+    response = client.post(
+        reverse("authentication:finalize_username"),
+        {"username": "onboarding_name_"},
+        content_type="application/json",
+        HTTP_AUTHORIZATION=f"Bearer {access_token}",
+    )
+    assert response.status_code == 200
+    user.refresh_from_db()
+    assert user.username == "onboarding_name_"
+
+
 def test_finalize_username_invalidates_user_me_cache(
     client: Client, user: User, access_token: str
 ) -> None:

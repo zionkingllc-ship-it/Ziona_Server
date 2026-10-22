@@ -174,6 +174,8 @@ class CurrentUserResponse:
 
     lastNameChange: str | None = None
     lastUsernameChange: str | None = None
+    usernameEditableUntil: str | None = None
+    usernameGraceChangesRemaining: int = 0
     createdAt: str
 
 
@@ -304,6 +306,8 @@ class UserQueries:
             accountDetails=account_details,
             lastNameChange=data.get("lastNameChange"),
             lastUsernameChange=data.get("lastUsernameChange"),
+            usernameEditableUntil=data.get("usernameEditableUntil"),
+            usernameGraceChangesRemaining=data.get("usernameGraceChangesRemaining", 0),
             createdAt=data["createdAt"],
         )
 
@@ -362,7 +366,7 @@ class UserMutations:
         )
 
     @strawberry.mutation(
-        description="Update the authenticated user's username (rate-limited to once every 30 days)."
+        description="Update a username (up to 3 edits in the first 48 hours, then once every 30 days)."
     )
     def update_username(
         self,
@@ -408,7 +412,7 @@ class UserMutations:
                 suggest_usernames,
             )
 
-            result = _check(username)
+            result = _check(username, owner_id=_get_authenticated_user_id(info))
 
             if result["available"]:
                 return UsernameCheckResult(available=True)

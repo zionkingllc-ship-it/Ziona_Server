@@ -17,6 +17,7 @@ from typing import Any
 
 from django.core.cache import cache
 from django.db import IntegrityError
+from django.utils import timezone
 
 from core.authentication.account_status import (
     build_account_recovery_result,
@@ -33,6 +34,11 @@ from core.authentication.validators import (
 )
 from core.shared.logging import log_security_event, mask_email
 from core.users.models import User
+from core.users.username_policy import (
+    grace_changes_remaining,
+    username_editable_until,
+    username_is_available,
+)
 
 logger = logging.getLogger("core.authentication")
 
@@ -72,7 +78,11 @@ class AuthService:
         cache_key = f"user_me_data_{user_id}"
         cached_data = cache.get(cache_key)
 
-        if cached_data and "accountDetails" in cached_data:
+        if (
+            cached_data
+            and "accountDetails" in cached_data
+            and "usernameEditableUntil" in cached_data
+        ):
             return cached_data
 
         user = User.objects.filter(id=user_id, deleted_at__isnull=True).first()
@@ -84,6 +94,8 @@ class AuthService:
         from core.profiles.services import ProfileService
 
         profile_dto = ProfileService.get_user_profile(user_id, viewer_id=user_id)
+        now = timezone.now()
+        editable_until = username_editable_until(user, now=now)
 
         response_data = {
             "id": str(user.id),
@@ -113,6 +125,8 @@ class AuthService:
             "lastUsernameChange": user.last_username_change.isoformat()
             if user.last_username_change
             else None,
+            "usernameEditableUntil": editable_until.isoformat() if editable_until else None,
+            "usernameGraceChangesRemaining": grace_changes_remaining(user, now=now),
             "createdAt": user.created_at.isoformat(),
             "accountDetails": {
                 "memberSince": user.created_at.strftime("%B %Y"),
@@ -122,7 +136,11 @@ class AuthService:
             },
         }
 
-        cache.set(cache_key, response_data, 300)
+        # Do not serve a stale grace deadline after the 48-hour boundary.
+        cache_seconds = (
+            min(300, max(1, int((editable_until - now).total_seconds()))) if editable_until else 300
+        )
+        cache.set(cache_key, response_data, cache_seconds)
 
         return response_data
 
@@ -166,7 +184,7 @@ class AuthService:
             )
             existing_user.delete()
 
-        if User.all_objects.filter(username=username).exists():
+        if not username_is_available(username):
             raise AuthenticationError(
                 "This username is already taken",
                 code="USERNAME_TAKEN",
@@ -340,7 +358,7 @@ class AuthService:
             seen.add(candidate)
             if len(candidate) < 3:
                 continue
-            if not User.all_objects.filter(username=candidate).exists():
+            if username_is_available(candidate):
                 suggestions.append(candidate)
                 if len(suggestions) >= 4:
                     break
@@ -350,7 +368,7 @@ class AuthService:
             candidate = f"{base_short}{suffix}"[:30]
             if candidate not in seen:
                 seen.add(candidate)
-                if not User.all_objects.filter(username=candidate).exists():
+                if username_is_available(candidate):
                     suggestions.append(candidate)
 
         return suggestions[:4]
@@ -463,20 +481,12 @@ class AuthService:
         ensure_account_can_authenticate(user)
 
         username = username.strip()
-        validate_username(username)
+        from core.users.services import UserService, UserServiceError
 
-        if User.all_objects.filter(username=username).exclude(id=user.id).exists():
-            raise AuthenticationError(
-                "Username already exists",
-                code="USERNAME_TAKEN",
-            )
-
-        user.username = username
-        user.needs_username_selection = False
-        user.save(update_fields=["username", "needs_username_selection", "updated_at"])
-        cache.delete(f"user_me_data_{user.id}")
-
-        return user
+        try:
+            return UserService.set_username(user_id, username, require_initial_selection=True)
+        except UserServiceError as exc:
+            raise AuthenticationError(exc.message, code=exc.code) from exc
 
     @staticmethod
     def add_password(user_id: str, password: str) -> dict[str, Any]:
