@@ -204,7 +204,7 @@ class TestSetUsername:
         with pytest.raises(AuthenticationError) as exc_info:
             AuthService.register(
                 email="new-signup@example.com",
-                password="Password123!",
+                password="Password123!",  # pragma: allowlist secret
                 username="RESERVED_SIGNUP",
                 date_of_birth="2000-01-01",
             )
