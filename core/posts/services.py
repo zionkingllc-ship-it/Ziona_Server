@@ -504,11 +504,7 @@ class PostService:
         Returns:
             Fully populated PostResponseDTO.
         """
-        author = AuthorDTO(
-            id=str(post.user_id),
-            username=post.user.username or "",
-            avatar_url=post.user.avatar_url or None,
-        )
+        author = AuthorDTO.from_user(post.user)
 
         if (post.post_type in [PostType.IMAGE, "image", "image_post"]) and media_items:
             media_items_dto = []

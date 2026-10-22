@@ -36,6 +36,17 @@ class AuthorDTO(CamelCaseModel):
     id: str
     username: str
     avatar_url: str | None = None
+    display_name: str = ""
+
+    @classmethod
+    def from_user(cls, user) -> AuthorDTO:
+        """Build from a User — the one place an author's embedded fields are read."""
+        return cls(
+            id=str(user.id),
+            username=user.username or "",
+            avatar_url=user.avatar_url or None,
+            display_name=user.display_name,
+        )
 
 
 class MediaItemDTO(CamelCaseModel):
@@ -141,6 +152,7 @@ class UserSuggestionDTO(CamelCaseModel):
 
     id: str
     username: str
+    display_name: str = ""
     avatar_url: str | None = None
     bio: str | None = None
     followers_count: int = 0
@@ -334,6 +346,7 @@ class UserProfileDTO(CamelCaseModel):
 
     id: str
     username: str
+    display_name: str = ""
     full_name: str = ""
     bio: str = ""
     bio_link: str | None = None

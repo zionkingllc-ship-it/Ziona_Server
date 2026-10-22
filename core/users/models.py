@@ -42,6 +42,16 @@ class AccountDeletionStatus(models.TextChoices):
     FAILED = "failed", "Failed"
 
 
+def compose_display_name(full_name: str | None, username: str | None) -> str:
+    """The name to show for a person: their trimmed name, or their @username if unset.
+
+    The single definition behind every ``displayName`` in the API. A function
+    rather than only a property so callers holding cached profile data — not a
+    User row — apply exactly the same rule.
+    """
+    return (full_name or "").strip() or (username or "")
+
+
 class User(AbstractBaseUser, PermissionsMixin):
     """Custom User model with email-based authentication.
 
@@ -193,6 +203,16 @@ class User(AbstractBaseUser, PermissionsMixin):
     def __str__(self) -> str:
         """Return string representation."""
         return f"{self.username} ({self.email})"
+
+    @property
+    def display_name(self) -> str:
+        """The name to show for this person: their name, or their @username if unset.
+
+        Never empty for a usable account — about a quarter of accounts have no
+        name (email sign-up does not ask for one) — and trimmed, so stray
+        whitespace typed into a name never reaches the screen.
+        """
+        return compose_display_name(self.full_name, self.username)
 
     @property
     def is_admin(self) -> bool:

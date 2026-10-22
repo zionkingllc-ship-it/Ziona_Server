@@ -165,7 +165,7 @@ def profile_share_preview(request: HttpRequest, user_id: str) -> HttpResponse:
     if not user:
         return HttpResponse("Profile not found", status=404)
 
-    display_name = user.full_name or user.username or "Ziona creator"
+    display_name = user.display_name or "Ziona creator"
     description = user.bio or f"View {display_name}'s profile on Ziona."
     context = {
         "profile_user": user,

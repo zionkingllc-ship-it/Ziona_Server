@@ -38,6 +38,13 @@ class FollowUserType:
 
     id: str
     username: str
+    display_name: str = strawberry.field(
+        name="displayName",
+        description=(
+            "Name to show for this person: their name, or their @username if they have "
+            "not set one. Never empty; trimmed."
+        ),
+    )
     avatar_url: str | None = None
     is_following: bool = False
 
@@ -66,6 +73,13 @@ class SuggestedCreatorType:
 
     id: str
     username: str
+    display_name: str = strawberry.field(
+        name="displayName",
+        description=(
+            "Name to show for this person: their name, or their @username if they have "
+            "not set one. Never empty; trimmed."
+        ),
+    )
     avatar_url: str | None = None
     bio: str | None = None
     stats: ProfileStatsType | None = None
@@ -77,6 +91,13 @@ class CreatorSearchResultType:
 
     id: str
     username: str
+    display_name: str = strawberry.field(
+        name="displayName",
+        description=(
+            "Name to show for this person: their name, or their @username if they have "
+            "not set one. Never empty; trimmed."
+        ),
+    )
     avatar_url: str | None = None
     bio: str | None = None
     stats: ProfileStatsType | None = None
@@ -224,6 +245,7 @@ class FollowQueries:
                 FollowUserType(
                     id=u["user"].id,
                     username=u["user"].username,
+                    display_name=u["user"].display_name,
                     avatar_url=u["user"].avatar_url,
                     is_following=u["is_following"],
                 )
@@ -272,6 +294,7 @@ class FollowQueries:
                 FollowUserType(
                     id=u["user"].id,
                     username=u["user"].username,
+                    display_name=u["user"].display_name,
                     avatar_url=u["user"].avatar_url,
                     is_following=u["is_following"],
                 )
@@ -312,6 +335,7 @@ class FollowQueries:
             SuggestedCreatorType(
                 id=s["user"].id,
                 username=s["user"].username,
+                display_name=s["user"].display_name,
                 avatar_url=s["user"].avatar_url,
                 bio=s.get("bio"),
                 stats=ProfileStatsType(
@@ -360,6 +384,7 @@ class FollowQueries:
                 CreatorSearchResultType(
                     id=c["user"].id,
                     username=c["user"].username,
+                    display_name=c["user"].display_name,
                     avatar_url=c["user"].avatar_url,
                     bio=c.get("bio"),
                     stats=ProfileStatsType(

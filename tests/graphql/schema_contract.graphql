@@ -541,6 +541,11 @@ type AuthenticatedUserType {
   bio: String!
   bioLink: String
   createdAt: String!
+
+  """
+  Name to show for this person: their name, or their @username if they have not set one. Never empty; trimmed.
+  """
+  displayName: String!
   email: String!
   fullName: String!
   id: String!
@@ -700,6 +705,11 @@ type CirclePostAnchorReferenceType {
 type CirclePostAuthorType {
   avatar: String
   avatarUrl: String
+
+  """
+  Name to show for this person: their name, or their @username if they have not set one. Never empty; trimmed.
+  """
+  displayName: String!
   id: String!
   name: String
   username: String
@@ -833,6 +843,11 @@ type CircleType {
 
 type CommentAuthor {
   avatarUrl: String
+
+  """
+  Name to show for this person: their name, or their @username if they have not set one. Never empty; trimmed.
+  """
+  displayName: String!
   id: String!
   username: String!
 }
@@ -948,6 +963,11 @@ type CreatorSearchResponse {
 type CreatorSearchResultType {
   avatarUrl: String
   bio: String
+
+  """
+  Name to show for this person: their name, or their @username if they have not set one. Never empty; trimmed.
+  """
+  displayName: String!
   id: String!
   isFollowing: Boolean!
   stats: ProfileStatsType
@@ -1011,6 +1031,11 @@ type DeleteFolderPayload {
 type DiscoverCreatorResult {
   avatarUrl: String
   bio: String
+
+  """
+  Name to show for this person: their name, or their @username if they have not set one. Never empty; trimmed.
+  """
+  displayName: String!
   id: String!
   isFollowing: Boolean!
   stats: DiscoverCreatorStats
@@ -1102,6 +1127,11 @@ type FeedPost {
 
 type FeedPostAuthor {
   avatarUrl: String
+
+  """
+  Name to show for this person: their name, or their @username if they have not set one. Never empty; trimmed.
+  """
+  displayName: String!
   id: String!
   username: String!
 }
@@ -1172,6 +1202,11 @@ type FollowPayload {
 
 type FollowUserType {
   avatarUrl: String
+
+  """
+  Name to show for this person: their name, or their @username if they have not set one. Never empty; trimmed.
+  """
+  displayName: String!
   id: String!
   isFollowing: Boolean!
   username: String!
@@ -1179,6 +1214,11 @@ type FollowUserType {
 
 type FriendType {
   avatarUrl: String
+
+  """
+  Name to show for this person: their name, or their @username if they have not set one. Never empty; trimmed.
+  """
+  displayName: String!
   fullName: String!
   id: String!
   username: String!
@@ -1868,6 +1908,11 @@ type Post {
 
 type PostAuthor {
   avatarUrl: String
+
+  """
+  Name to show for this person: their name, or their @username if they have not set one. Never empty; trimmed.
+  """
+  displayName: String!
   id: String!
   username: String!
 }
@@ -2395,6 +2440,11 @@ type SuccessResponse {
 type SuggestedCreatorType {
   avatarUrl: String
   bio: String
+
+  """
+  Name to show for this person: their name, or their @username if they have not set one. Never empty; trimmed.
+  """
+  displayName: String!
   id: String!
   stats: ProfileStatsType
   username: String!
@@ -2413,6 +2463,11 @@ scalar Upload
 
 type UserMiniType {
   avatarUrl: String!
+
+  """
+  Name to show for this person: their name, or their @username if they have not set one. Never empty; trimmed.
+  """
+  displayName: String!
   id: String!
   username: String!
   viewerState: UserMiniViewerState!
@@ -2429,6 +2484,11 @@ type UserProfileType {
   bio: String!
   bioLink: String
   createdAt: String!
+
+  """
+  Name to show for this person: their name, or their @username if they have not set one. Never empty; trimmed.
+  """
+  displayName: String!
   fullName: String!
   hideLikeCount: Boolean!
   id: String!
@@ -2443,6 +2503,11 @@ type UserProfileType {
 type UserSuggestion {
   avatarUrl: String
   bio: String
+
+  """
+  Name to show for this person: their name, or their @username if they have not set one. Never empty; trimmed.
+  """
+  displayName: String!
   followersCount: Int!
   id: String!
   username: String!
@@ -2464,6 +2529,11 @@ type UserType {
   bio: String!
   bioLink: String
   createdAt: String!
+
+  """
+  Name to show for this person: their name, or their @username if they have not set one. Never empty; trimmed.
+  """
+  displayName: String!
   fullName: String!
   id: String!
   isEarlySupporter: Boolean!

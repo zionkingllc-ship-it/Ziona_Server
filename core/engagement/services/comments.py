@@ -514,11 +514,7 @@ def _build_comment_dto(
         id=str(comment.id),
         post_id=str(comment.post_id),
         parent_comment_id=(str(comment.parent_comment_id) if comment.parent_comment_id else None),
-        user=AuthorDTO(
-            id=str(comment.user.id),
-            username=comment.user.username or "",
-            avatar_url=comment.user.avatar_url or None,
-        ),
+        user=AuthorDTO.from_user(comment.user),
         text=comment.text,
         stats=stats,
         viewer_state=viewer_state,

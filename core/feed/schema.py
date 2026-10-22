@@ -70,6 +70,13 @@ class FeedPostAuthor:
 
     id: str
     username: str
+    display_name: str = strawberry.field(
+        name="displayName",
+        description=(
+            "Name to show for this person: their name, or their @username if they have "
+            "not set one. Never empty; trimmed."
+        ),
+    )
     avatar_url: str | None = None
 
 
@@ -269,6 +276,13 @@ class UserSuggestion:
 
     id: str
     username: str
+    display_name: str = strawberry.field(
+        name="displayName",
+        description=(
+            "Name to show for this person: their name, or their @username if they have "
+            "not set one. Never empty; trimmed."
+        ),
+    )
     avatar_url: str | None = None
     bio: str | None = None
     followers_count: int = 0
@@ -315,6 +329,13 @@ class DiscoverCreatorResult:
 
     id: str
     username: str
+    display_name: str = strawberry.field(
+        name="displayName",
+        description=(
+            "Name to show for this person: their name, or their @username if they have "
+            "not set one. Never empty; trimmed."
+        ),
+    )
     avatar_url: str | None = None
     bio: str | None = None
     stats: DiscoverCreatorStats | None = None
@@ -406,6 +427,7 @@ def _dto_to_feed_post(dto) -> FeedPost:
         author=FeedPostAuthor(
             id=dto.author.id,
             username=dto.author.username,
+            display_name=dto.author.display_name,
             avatar_url=dto.author.avatar_url,
         ),
         stats=FeedPostStats(
@@ -533,6 +555,7 @@ class FeedQueries:
                         UserSuggestion(
                             id=s.id,
                             username=s.username,
+                            display_name=s.display_name,
                             avatar_url=s.avatar_url,
                             bio=s.bio,
                             followers_count=s.followers_count,
@@ -587,6 +610,7 @@ class FeedQueries:
                         UserSuggestion(
                             id=s.id,
                             username=s.username,
+                            display_name=s.display_name,
                             avatar_url=s.avatar_url,
                             bio=s.bio,
                             followers_count=s.followers_count,
@@ -639,6 +663,7 @@ class FeedQueries:
                         UserSuggestion(
                             id=s.id,
                             username=s.username,
+                            display_name=s.display_name,
                             avatar_url=s.avatar_url,
                             bio=s.bio,
                             followers_count=s.followers_count,
@@ -684,6 +709,7 @@ class FeedQueries:
                         UserSuggestion(
                             id=s.id,
                             username=s.username,
+                            display_name=s.display_name,
                             avatar_url=s.avatar_url,
                             bio=s.bio,
                             followers_count=s.followers_count,
@@ -740,6 +766,7 @@ class FeedQueries:
             DiscoverCreatorResult(
                 id=c["user"].id,
                 username=c["user"].username,
+                display_name=c["user"].display_name,
                 avatar_url=c["user"].avatar_url,
                 bio=c.get("bio"),
                 stats=DiscoverCreatorStats(
@@ -763,6 +790,7 @@ class FeedQueries:
                     UserSuggestion(
                         id=s.id,
                         username=s.username,
+                        display_name=s.display_name,
                         avatar_url=s.avatar_url,
                         bio=s.bio,
                         followers_count=s.followers_count,

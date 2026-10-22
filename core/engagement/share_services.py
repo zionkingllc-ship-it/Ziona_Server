@@ -168,11 +168,7 @@ class ShareService:
 
         return [
             {
-                "user": AuthorDTO(
-                    id=str(u.id),
-                    username=u.username or "",
-                    avatar_url=u.avatar_url or None,
-                ),
+                "user": AuthorDTO.from_user(u),
                 "full_name": u.full_name or "",
             }
             for u in qs[:limit]

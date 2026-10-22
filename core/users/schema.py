@@ -2,9 +2,11 @@ import logging
 from typing import Annotated
 
 import strawberry
+from django.conf import settings
 
 from core.shared.types import ErrorType
-from core.users.models import User
+from core.shared.utils import build_profile_share_url
+from core.users.models import User, compose_display_name
 
 logger = logging.getLogger("core.users")
 
@@ -24,6 +26,13 @@ class UserType:
 
     id: str
     username: str | None
+    display_name: str = strawberry.field(
+        name="displayName",
+        description=(
+            "Name to show for this person: their name, or their @username if they have "
+            "not set one. Never empty; trimmed."
+        ),
+    )
     full_name: str
     bio: str
     bio_link: str | None = None
@@ -39,6 +48,7 @@ class UserType:
         return cls(
             id=str(user.id),
             username=user.username,
+            display_name=user.display_name,
             full_name=user.full_name,
             bio=user.bio,
             bio_link=user.bio_link or None,
@@ -62,6 +72,13 @@ class AuthenticatedUserType:
     id: str
     email: str
     username: str | None
+    display_name: str = strawberry.field(
+        name="displayName",
+        description=(
+            "Name to show for this person: their name, or their @username if they have "
+            "not set one. Never empty; trimmed."
+        ),
+    )
     full_name: str
     bio: str
     bio_link: str | None = None
@@ -80,6 +97,7 @@ class AuthenticatedUserType:
             id=str(user.id),
             email=user.email,
             username=user.username,
+            display_name=user.display_name,
             full_name=user.full_name,
             bio=user.bio,
             bio_link=user.bio_link or None,
@@ -256,7 +274,11 @@ class UserQueries:
             profile=UserProfileType(
                 id=data["id"],
                 username=data["username"],
+                display_name=compose_display_name(data["displayName"], data["username"]),
                 full_name=data["displayName"],
+                # Required by UserProfileType since shareUrl was added (2026-08-20);
+                # omitting it made every `me { profile { ... } }` request fail.
+                share_url=build_profile_share_url(settings.APP_SHARE_BASE_URL, data["id"]),
                 bio=data["profile"]["bio"],
                 bio_link=data["profile"].get("bioLink"),
                 avatar_url=data["profile"]["avatarUrl"],

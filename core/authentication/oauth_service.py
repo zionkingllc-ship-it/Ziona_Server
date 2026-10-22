@@ -93,7 +93,7 @@ class OAuthService:
         if not existing_user:
             existing_user = User.all_objects.filter(email=email).first()
         is_new_user = False
-        name = google_user_info.get("name", "")
+        name = (google_user_info.get("name") or "").strip()
         picture = google_user_info.get("picture", "")
 
         if existing_user:

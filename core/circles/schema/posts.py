@@ -92,6 +92,14 @@ class CirclePostAuthorType:
     id: str
     username: str | None = None
     name: str | None = None
+    display_name: str = strawberry.field(
+        name="displayName",
+        default="",
+        description=(
+            "Name to show for this person: their name, or their @username if they have "
+            "not set one. Never empty; trimmed."
+        ),
+    )
     avatar_url: str | None = strawberry.field(name="avatarUrl", default=None)
 
     @strawberry.field
@@ -102,7 +110,9 @@ class CirclePostAuthorType:
     def from_user(cls, user) -> "CirclePostAuthorType":
         instance = cls(id=str(user.id))
         instance.username = getattr(user, "username", None) or ""
-        instance.name = getattr(user, "full_name", None) or getattr(user, "username", None) or ""
+        # `name` predates displayName and means the same thing; one rule feeds both.
+        instance.display_name = user.display_name
+        instance.name = instance.display_name
         instance.avatar_url = getattr(user, "avatar_url", None)
         return instance
 

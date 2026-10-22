@@ -283,11 +283,7 @@ class FollowService:
             user = f.follower
             users.append(
                 {
-                    "user": AuthorDTO(
-                        id=str(user.id),
-                        username=user.username or "",
-                        avatar_url=user.avatar_url or None,
-                    ),
+                    "user": AuthorDTO.from_user(user),
                     # Use str-normalised set for type-safe membership test.
                     "is_following": str(user.id) in mutual_ids,
                 }
@@ -370,11 +366,7 @@ class FollowService:
             user = f.following
             users.append(
                 {
-                    "user": AuthorDTO(
-                        id=str(user.id),
-                        username=user.username or "",
-                        avatar_url=user.avatar_url or None,
-                    ),
+                    "user": AuthorDTO.from_user(user),
                     # Always reflect true live state — never hardcode True.
                     "is_following": str(user.id) in mutual_ids,
                 }
@@ -425,11 +417,7 @@ class FollowService:
     @staticmethod
     def _suggestion_dict(user) -> dict:
         return {
-            "user": AuthorDTO(
-                id=str(user.id),
-                username=user.username or "",
-                avatar_url=user.avatar_url or None,
-            ),
+            "user": AuthorDTO.from_user(user),
             "bio": user.bio or None,
             "followers_count": user.followers_count,
             # Already annotated by _creator_candidate_queryset; it used to be
@@ -690,11 +678,7 @@ class FollowService:
 
         creators = [
             {
-                "user": AuthorDTO(
-                    id=str(user.id),
-                    username=user.username or "",
-                    avatar_url=user.avatar_url or None,
-                ),
+                "user": AuthorDTO.from_user(user),
                 "bio": user.bio or None,
                 "followers_count": user.followers_count,
                 "posts_count": user.posts_count,
