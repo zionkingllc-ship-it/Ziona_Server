@@ -297,7 +297,7 @@ class OAuthService:
 def _get_google_client_ids() -> list[str]:
     """Return configured first-party Google client IDs accepted by the backend."""
     client_ids = getattr(settings, "GOOGLE_CLIENT_IDS", None)
-    if client_ids:
+    if client_ids is not None:
         return [client_id for client_id in client_ids if client_id]
 
     legacy_client_id = getattr(settings, "GOOGLE_CLIENT_ID", "")

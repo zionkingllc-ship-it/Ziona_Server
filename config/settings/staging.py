@@ -7,22 +7,6 @@ from sentry_sdk.integrations.redis import RedisIntegration
 
 from .base import *  # noqa: F401, F403
 
-# First-party Google OAuth audiences for the staging app and the development
-# build, which intentionally shares the staging Firebase/Google project. Client
-# IDs are public identifiers, not secrets. Union with the environment value so a
-# Render GOOGLE_CLIENT_IDS that predates the staging OAuth project migration
-# cannot break dev sign-in. Production keeps its own allowlist.
-GOOGLE_CLIENT_IDS = list(  # noqa: F405
-    dict.fromkeys(
-        [
-            *GOOGLE_CLIENT_IDS,  # noqa: F405
-            "273573551303-lhghjjbh4qa1tad0ml3bat95igggfp18.apps.googleusercontent.com",
-            "273573551303-fpipdq89n28lv7t3la0bsh1n5do0bp89.apps.googleusercontent.com",
-            "273573551303-bafar3va69072q29jbcgp2l4aivs7mol.apps.googleusercontent.com",
-        ]
-    )
-)
-
 DEBUG = False
 
 ALLOWED_HOSTS = env.list(  # noqa: F405
