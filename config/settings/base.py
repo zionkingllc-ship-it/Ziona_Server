@@ -593,18 +593,20 @@ GOOGLE_CLIENT_ID = env("GOOGLE_CLIENT_ID", default=env("GOOGLE_OAUTH_CLIENT_ID",
 
 
 def _google_client_ids() -> list[str]:
-    """Return the explicit allowlist of first-party Google OAuth client IDs."""
-    configured_ids = env.list("GOOGLE_CLIENT_IDS", default=[])
-    legacy_ids = [
-        GOOGLE_CLIENT_ID,
-        env("GOOGLE_OAUTH_CLIENT_ID", default=""),
-        env("GOOGLE_IOS_CLIENT_ID", default=""),
-        env("GOOGLE_ANDROID_CLIENT_ID", default=""),
-    ]
+    """Use the explicit audience allowlist, falling back to legacy settings only if unset."""
+    if "GOOGLE_CLIENT_IDS" in os.environ:
+        client_ids = env.list("GOOGLE_CLIENT_IDS")
+    else:
+        client_ids = [
+            GOOGLE_CLIENT_ID,
+            env("GOOGLE_OAUTH_CLIENT_ID", default=""),
+            env("GOOGLE_IOS_CLIENT_ID", default=""),
+            env("GOOGLE_ANDROID_CLIENT_ID", default=""),
+        ]
 
     seen = set()
     result = []
-    for client_id in [*legacy_ids, *configured_ids]:
+    for client_id in client_ids:
         normalized = client_id.strip()
         if normalized and normalized not in seen:
             seen.add(normalized)

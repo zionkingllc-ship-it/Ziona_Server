@@ -5,6 +5,7 @@ import pytest
 from django.conf import settings
 from django.urls import reverse
 
+from core.authentication.oauth_service import _get_google_client_ids
 from core.users.models import User
 
 
@@ -19,6 +20,13 @@ def configure_google_client_ids(settings):
     client_id = "test-web-client.apps.googleusercontent.com"
     settings.GOOGLE_CLIENT_ID = client_id
     settings.GOOGLE_CLIENT_IDS = [client_id]
+
+
+def test_empty_explicit_google_allowlist_does_not_use_legacy_id(settings):
+    settings.GOOGLE_CLIENT_ID = "legacy-client.apps.googleusercontent.com"
+    settings.GOOGLE_CLIENT_IDS = []
+
+    assert _get_google_client_ids() == []
 
 
 @pytest.mark.django_db
