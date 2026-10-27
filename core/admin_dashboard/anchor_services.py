@@ -11,6 +11,13 @@ from datetime import datetime, timedelta, timezone
 from django.db import transaction
 
 from core.admin_dashboard.permissions import log_admin_action
+from core.media.thumbnails import (
+    anchor_thumbnail_candidates,
+    can_generate_anchor_thumbnail,
+    enqueue_anchor_thumbnail,
+    has_usable_anchor_thumbnail,
+    resolve_media_thumbnail_url,
+)
 from core.shared.exceptions import AdminError, ErrorCode
 
 logger = logging.getLogger("core.admin_dashboard")
@@ -150,6 +157,7 @@ class AnchorManagementService:
             published_at=placeholder_time,
             expires_at=placeholder_time + timedelta(hours=ANCHOR_DURATION_HOURS),
         )
+        _schedule_anchor_thumbnail(anchor)
 
         log_admin_action(
             admin_user=admin_user,
@@ -306,6 +314,7 @@ class AnchorManagementService:
                 "updated_at",
             ]
         )
+        _schedule_anchor_thumbnail(anchor)
 
         log_admin_action(
             admin_user=admin_user,
@@ -398,6 +407,7 @@ class AnchorManagementService:
                     update_fields.append(field)
 
         anchor.save(update_fields=update_fields)
+        _schedule_anchor_thumbnail(anchor)
 
         log_admin_action(
             admin_user=admin_user,
@@ -562,12 +572,43 @@ def _normalise_media_fields(
         else:
             media_url = anchor_image or anchor_video or anchor_thumbnail
 
+    if anchor_type in ("image", "image_text", "video"):
+        candidates = anchor_thumbnail_candidates(
+            anchor_type,
+            media_url=media_url,
+            anchor_image=anchor_image,
+            anchor_video=anchor_video,
+        )
+        if not has_usable_anchor_thumbnail(anchor_thumbnail, *candidates):
+            anchor_thumbnail = resolve_media_thumbnail_url(*candidates)
+
     return {
         "media_url": media_url,
         "anchor_image": anchor_image,
         "anchor_video": anchor_video,
         "anchor_thumbnail": anchor_thumbnail,
     }
+
+
+def _schedule_anchor_thumbnail(anchor) -> None:
+    """Queue generation when an image anchor has no usable thumbnail yet."""
+    candidates = anchor_thumbnail_candidates(
+        anchor.anchor_type,
+        media_url=anchor.media_url,
+        anchor_image=anchor.anchor_image,
+        anchor_video=anchor.anchor_video,
+    )
+    if has_usable_anchor_thumbnail(anchor.anchor_thumbnail, *candidates):
+        return
+    if not can_generate_anchor_thumbnail(
+        anchor.anchor_type,
+        media_url=anchor.media_url,
+        anchor_image=anchor.anchor_image,
+    ):
+        return
+
+    anchor_id = str(anchor.id)
+    transaction.on_commit(lambda: enqueue_anchor_thumbnail(anchor_id))
 
 
 def _notify_circle_members(anchor):
