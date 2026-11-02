@@ -49,6 +49,13 @@ class CommentAuthor:
 
     id: str
     username: str
+    display_name: str = strawberry.field(
+        name="displayName",
+        description=(
+            "Name to show for this person: their name, or their @username if they have "
+            "not set one. Never empty; trimmed."
+        ),
+    )
     avatar_url: str | None = None
 
 
@@ -199,6 +206,13 @@ class FriendType:
 
     id: str
     username: str
+    display_name: str = strawberry.field(
+        name="displayName",
+        description=(
+            "Name to show for this person: their name, or their @username if they have "
+            "not set one. Never empty; trimmed."
+        ),
+    )
     avatar_url: str | None = None
     full_name: str = ""
 
@@ -212,6 +226,7 @@ def _dto_to_comment(dto) -> CommentType:
         user=CommentAuthor(
             id=dto.user.id,
             username=dto.user.username,
+            display_name=dto.user.display_name,
             avatar_url=dto.user.avatar_url,
         ),
         text=dto.text,

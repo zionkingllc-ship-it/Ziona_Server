@@ -161,6 +161,7 @@ class EngagementQueries:
             FriendType(
                 id=f["user"].id,
                 username=f["user"].username,
+                display_name=f["user"].display_name,
                 avatar_url=f["user"].avatar_url,
                 full_name=f.get("full_name", ""),
             )

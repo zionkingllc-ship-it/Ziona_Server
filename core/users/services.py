@@ -3,9 +3,19 @@ from datetime import date, datetime, timezone
 
 from cryptography.fernet import Fernet
 from django.conf import settings
+from django.db import IntegrityError, transaction
+from django.utils import timezone as django_timezone
 
 from core.shared.logging import log_security_event
-from core.users.models import User
+from core.users.models import User, UsernameReservation
+from core.users.username_policy import (
+    CHANGE_COOLDOWN,
+    GRACE_PERIOD,
+    grace_changes_remaining,
+    normalized_username,
+    reserve_released_username,
+    username_is_available,
+)
 from core.users.validators import (
     UsernameValidationError,
     validate_username_format,
@@ -34,7 +44,9 @@ class UserService:
     """
 
     @staticmethod
-    def set_username(user_id: str, username: str) -> User:
+    def set_username(
+        user_id: str, username: str, *, require_initial_selection: bool = False
+    ) -> User:
         """Set or update a user's username.
 
         Validates format, checks availability, and updates the user record.
@@ -53,44 +65,91 @@ class UserService:
         username = username.strip()
 
         try:
-            validate_username_format(username)
-            validate_username_not_reserved(username)
-        except UsernameValidationError as e:
-            raise UserServiceError(e.message, code=e.code) from None
-        try:
-            user = User.objects.get(id=user_id)
-        except User.DoesNotExist:
-            raise UserServiceError("User not found", code="USER_NOT_FOUND") from None
+            with transaction.atomic():
+                try:
+                    user = User.objects.select_for_update().get(id=user_id)
+                except User.DoesNotExist:
+                    raise UserServiceError("User not found", code="USER_NOT_FOUND") from None
 
-        if user.username == username:
-            return user
+                if require_initial_selection and not user.needs_username_selection:
+                    raise UserServiceError(
+                        "Username selection has already been completed",
+                        code="USERNAME_ALREADY_SELECTED",
+                    )
 
-        # 30-day limit check
-        if user.last_username_change:
-            from datetime import timedelta
+                initial_selection = user.needs_username_selection
+                if initial_selection:
+                    # Keep onboarding's existing format/error contract for OAuth users.
+                    from core.authentication.validators import validate_username
+                    from core.shared.exceptions import AuthenticationError
 
-            from django.utils import timezone
+                    try:
+                        validate_username(username)
+                    except AuthenticationError as exc:
+                        raise UserServiceError(exc.message, code=exc.code) from exc
+                else:
+                    try:
+                        validate_username_format(username)
+                        validate_username_not_reserved(username)
+                    except UsernameValidationError as exc:
+                        raise UserServiceError(exc.message, code=exc.code) from exc
 
-            days_since_change = (timezone.now() - user.last_username_change).days
-            if days_since_change < 30:
-                next_change = user.last_username_change + timedelta(days=30)
-                raise UserServiceError(
-                    f"You're allowed one username change every 30 days. Next change on {next_change.strftime('%B %d, %Y')}.",
-                    code="RATE_LIMIT_EXCEEDED",
-                )
+                if user.username == username:
+                    if initial_selection:
+                        user.needs_username_selection = False
+                        user.save(update_fields=["needs_username_selection", "updated_at"])
+                        from django.core.cache import cache
 
-        existing = User.all_objects.filter(username=username).exclude(id=user_id)
-        if existing.exists():
-            raise UserServiceError(
-                "This username is already taken",
-                code="USERNAME_TAKEN",
-            )
+                        cache.delete(f"user_me_data_{user_id}")
+                    return user
 
-        from django.utils import timezone
+                now = django_timezone.now()
+                in_grace = now < user.created_at + GRACE_PERIOD
+                if not initial_selection:
+                    if in_grace:
+                        if not grace_changes_remaining(user, now=now):
+                            raise UserServiceError(
+                                "You can change your username at most 3 times in the first 48 hours.",
+                                code="RATE_LIMIT_EXCEEDED",
+                            )
+                    elif (
+                        user.last_username_change
+                        and now < user.last_username_change + CHANGE_COOLDOWN
+                    ):
+                        next_change = user.last_username_change + CHANGE_COOLDOWN
+                        raise UserServiceError(
+                            "You're allowed one username change every 30 days. "
+                            f"Next change on {next_change.strftime('%B %d, %Y')}.",
+                            code="RATE_LIMIT_EXCEEDED",
+                        )
 
-        user.username = username
-        user.last_username_change = timezone.now()
-        user.save(update_fields=["username", "last_username_change", "updated_at"])
+                if not username_is_available(username, owner_id=user.id, now=now):
+                    raise UserServiceError("This username is already taken", code="USERNAME_TAKEN")
+
+                old_username = user.username
+                # The owner may reclaim their reserved handle; expired claims are also removed.
+                UsernameReservation.objects.filter(username=normalized_username(username)).delete()
+                if (
+                    old_username
+                    and not initial_selection
+                    and normalized_username(old_username) != normalized_username(username)
+                ):
+                    reserve_released_username(old_username, user.id, now=now)
+
+                user.username = username
+                update_fields = ["username", "updated_at"]
+                if initial_selection:
+                    user.needs_username_selection = False
+                    update_fields.append("needs_username_selection")
+                elif in_grace:
+                    user.grace_username_changes += 1
+                    update_fields.append("grace_username_changes")
+                else:
+                    user.last_username_change = now
+                    update_fields.append("last_username_change")
+                user.save(update_fields=update_fields)
+        except IntegrityError as exc:
+            raise UserServiceError("This username is already taken", code="USERNAME_TAKEN") from exc
 
         # Invalidate me-data cache so the new username is immediately visible
         # in the authenticated user's me query instead of being stale for 5 min.

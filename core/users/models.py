@@ -2,6 +2,7 @@ import uuid
 
 from django.contrib.auth.models import AbstractBaseUser, PermissionsMixin
 from django.db import models
+from django.db.models.functions import Lower
 from django.utils import timezone
 
 from core.shared.models import AllObjectsManager
@@ -40,6 +41,27 @@ class AccountDeletionStatus(models.TextChoices):
     PURGING = "purging", "Purging"
     COMPLETED = "completed", "Completed"
     FAILED = "failed", "Failed"
+
+
+def compose_display_name(full_name: str | None, username: str | None) -> str:
+    """The name to show for a person: their trimmed name, or their @username if unset.
+
+    The single definition behind every ``displayName`` in the API. A function
+    rather than only a property so callers holding cached profile data — not a
+    User row — apply exactly the same rule.
+    """
+    return (full_name or "").strip() or (username or "")
+
+
+class UsernameReservation(models.Model):
+    """A released handle temporarily claimable only by its previous owner."""
+
+    username = models.CharField(max_length=30, unique=True)
+    owner_id = models.UUIDField(db_index=True)
+    expires_at = models.DateTimeField(db_index=True)
+
+    class Meta:
+        db_table = "username_reservations"
 
 
 class User(AbstractBaseUser, PermissionsMixin):
@@ -137,6 +159,7 @@ class User(AbstractBaseUser, PermissionsMixin):
     )
     last_name_change = models.DateTimeField(null=True, blank=True)
     last_username_change = models.DateTimeField(null=True, blank=True)
+    grace_username_changes = models.PositiveSmallIntegerField(default=0)
 
     last_login_ip = models.GenericIPAddressField(null=True, blank=True)
 
@@ -189,10 +212,23 @@ class User(AbstractBaseUser, PermissionsMixin):
             models.Index(fields=["username"], name="idx_user_username"),
             models.Index(fields=["firebase_uid"], name="idx_user_firebase_uid"),
         ]
+        constraints = [
+            models.UniqueConstraint(Lower("username"), name="unique_user_username_ci"),
+        ]
 
     def __str__(self) -> str:
         """Return string representation."""
         return f"{self.username} ({self.email})"
+
+    @property
+    def display_name(self) -> str:
+        """The name to show for this person: their name, or their @username if unset.
+
+        Never empty for a usable account — about a quarter of accounts have no
+        name (email sign-up does not ask for one) — and trimmed, so stray
+        whitespace typed into a name never reaches the screen.
+        """
+        return compose_display_name(self.full_name, self.username)
 
     @property
     def is_admin(self) -> bool:

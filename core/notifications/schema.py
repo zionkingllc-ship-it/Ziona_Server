@@ -44,6 +44,13 @@ class UserMiniType:
 
     id: str
     username: str
+    display_name: str = strawberry.field(
+        name="displayName",
+        description=(
+            "Name to show for this person: their name, or their @username if they have "
+            "not set one. Never empty; trimmed."
+        ),
+    )
     avatar_url: str = strawberry.field(name="avatarUrl", default="")
     viewer_state: UserMiniViewerState = strawberry.field(name="viewerState")
 
@@ -179,6 +186,7 @@ class NotificationItem:
         return UserMiniType(
             id=str(sender.id),
             username=sender.username or "",
+            display_name=sender.display_name,
             avatar_url=getattr(sender, "avatar_url", None) or "",
             viewer_state=UserMiniViewerState(
                 is_following=bool(getattr(self._instance, "sender_is_following", False)),

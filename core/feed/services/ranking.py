@@ -6,6 +6,7 @@ Split from the former core/feed/services.py (no behavior change).
 import logging
 from datetime import timedelta
 
+from django.conf import settings
 from django.db.models import (
     Case,
     Count,
@@ -19,7 +20,7 @@ from django.db.models import (
     Value,
     When,
 )
-from django.db.models.functions import Coalesce, Greatest
+from django.db.models.functions import Cast, Coalesce, Greatest, Mod
 from django.utils import timezone
 
 from core.engagement.hidden_content import exclude_hidden_posts
@@ -137,6 +138,72 @@ def _ranked_queryset():
         _with_final_score(_base_post_queryset())
         .filter(unique_reports_count__lt=REPORT_SUPPRESSION_THRESHOLD)
         .order_by("-final_score", "-created_at", "-id")
+    )
+
+
+def _clamp(value, low: float, high: float) -> float:
+    return min(max(float(value), low), high)
+
+
+def _with_feed_score(qs, session, seen_ids):
+    """Annotate ``feed_score``: final_score × session shuffle × already-shown penalty.
+
+    The shuffle is ``1 ± strength`` driven by u = frac(shuffle_key × m + o), where
+    ``shuffle_key`` is a fixed random number per post and (m, o) are drawn per
+    session. Each session therefore gets an independent-looking order that is
+    nonetheless a pure function of its parameters — the same on every page, as
+    keyset pagination requires. Being multiplicative, it reorders posts of
+    similar quality while a much stronger post still tends to lead.
+
+    ``seen_ids`` are posts served before the session began; they keep their
+    place in the catalogue but rank lower, so a reopen leads with unseen posts.
+    The list is bounded by ServedHistory.SERVED_HISTORY_MAX.
+    """
+    strength = _clamp(settings.FEED_SHUFFLE_STRENGTH, 0.0, 0.9)
+    penalty = _clamp(settings.FEED_SEEN_PENALTY, 0.01, 1.0)
+
+    shuffle = Value(1.0)
+    if session is not None and strength > 0:
+        unit = Cast(
+            Mod(
+                F("shuffle_key") * Value(float(session.multiplier)) + Value(session.offset),
+                Value(1.0),
+            ),
+            FloatField(),
+        )
+        shuffle = Value(1.0 - strength) + unit * Value(2 * strength)
+
+    seen = Value(1.0)
+    if seen_ids and penalty < 1.0:
+        seen = Case(
+            When(id__in=list(seen_ids), then=Value(penalty)),
+            default=Value(1.0),
+            output_field=FloatField(),
+        )
+
+    return qs.annotate(
+        feed_score=ExpressionWrapper(F("final_score") * shuffle * seen, output_field=FloatField())
+    )
+
+
+def _session_ranked_queryset(session, seen_ids):
+    """The algorithmic feed in session order: feed_score, then created_at, then id."""
+    qs = _with_final_score(_base_post_queryset()).filter(
+        unique_reports_count__lt=REPORT_SUPPRESSION_THRESHOLD
+    )
+    return _with_feed_score(qs, session, seen_ids).order_by("-feed_score", "-created_at", "-id")
+
+
+def _with_seen_rank(qs, seen_ids):
+    """Annotate ``seen_rank``: 1 for posts served before the session, else 0."""
+    if not seen_ids:
+        return qs.annotate(seen_rank=Value(0, output_field=IntegerField()))
+    return qs.annotate(
+        seen_rank=Case(
+            When(id__in=list(seen_ids), then=Value(1)),
+            default=Value(0),
+            output_field=IntegerField(),
+        )
     )
 
 

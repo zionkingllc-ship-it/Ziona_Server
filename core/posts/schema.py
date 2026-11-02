@@ -366,6 +366,13 @@ class PostAuthor:
 
     id: str
     username: str
+    display_name: str = strawberry.field(
+        name="displayName",
+        description=(
+            "Name to show for this person: their name, or their @username if they have "
+            "not set one. Never empty; trimmed."
+        ),
+    )
     avatar_url: str | None = None
 
 
@@ -454,6 +461,7 @@ class Post:
         return PostAuthor(
             id=self._dto.author.id,
             username=self._dto.author.username,
+            display_name=self._dto.author.display_name,
             avatar_url=self._dto.author.avatar_url,
         )
 

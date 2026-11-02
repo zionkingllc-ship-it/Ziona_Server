@@ -26,7 +26,14 @@ def test_returns_at_once_when_the_schema_is_current():
 @pytest.mark.django_db
 def test_sees_a_real_unapplied_migration():
     """Exercises the real migration graph against the database, no mocks."""
-    MigrationRecorder(connection).record_unapplied("users", "0013_user_daily_activity")
+    from django.db.migrations.loader import MigrationLoader
+
+    # The newest users migration, whatever it is — unapplying an earlier one
+    # would leave its dependants applied and the history inconsistent.
+    latest = max(
+        name for app, name in MigrationLoader(connection).graph.leaf_nodes() if app == "users"
+    )
+    MigrationRecorder(connection).record_unapplied("users", latest)
 
     assert Command().pending_migrations("default") == 1
     with pytest.raises(CommandError, match="1 migration\\(s\\) pending"):

@@ -52,6 +52,13 @@ class UserProfileType:
 
     id: str
     username: str
+    display_name: str = strawberry.field(
+        name="displayName",
+        description=(
+            "Name to show for this person: their name, or their @username if they have "
+            "not set one. Never empty; trimmed."
+        ),
+    )
     full_name: str
     bio: str
     bio_link: str | None = None
@@ -102,6 +109,7 @@ def _dto_to_profile(dto) -> UserProfileType:
     return UserProfileType(
         id=dto.id,
         username=dto.username,
+        display_name=dto.display_name,
         full_name=dto.full_name,
         bio=dto.bio,
         bio_link=getattr(dto, "bio_link", None),

@@ -27,6 +27,7 @@ def _get_empty_state_suggestions(
         UserSuggestionDTO(
             id=s["user"].id,
             username=s["user"].username,
+            display_name=s["user"].display_name,
             avatar_url=s["user"].avatar_url,
             bio=s.get("bio"),
             followers_count=s.get("followers_count", 0),

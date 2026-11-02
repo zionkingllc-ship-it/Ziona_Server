@@ -190,14 +190,9 @@ class FeedService:
 
         qs = FeedService._exclude_hidden_posts(qs, user_id)
 
-        if cursor:
-            cursor_data = FeedCursor.decode(cursor)
-            qs = FeedService._apply_ranked_cursor(qs, cursor_data, cursor)
-
-        candidate_limit = max(limit * 3, limit + 10)
-        candidates = list(qs[: candidate_limit + 1])
-        posts = FeedService._apply_creator_diversity(candidates, limit)
-        has_more = len(candidates) > len(posts)
+        posts, has_more, next_cursor = strategies._ranked_page(
+            qs, cursor, limit, "discover", vary_kinds=not media_filter
+        )
 
         if not posts:
             suggestions = FeedService._get_empty_state_suggestions(user_id) if user_id else []
@@ -211,15 +206,6 @@ class FeedService:
             )
 
         post_dtos = FeedService._bulk_build_post_dtos(posts, user_id)
-
-        next_cursor = None
-        if has_more and posts:
-            next_cursor = FeedCursor.encode(
-                post_id=str(posts[-1].id),
-                algo="discover",
-                created_at=posts[-1].created_at,
-                score=getattr(posts[-1], "final_score", 0),
-            )
 
         return FeedResponseDTO(
             posts=post_dtos,
@@ -272,27 +258,13 @@ class FeedService:
 
         qs = FeedService._exclude_hidden_posts(qs, user_id)
 
-        if cursor:
-            cursor_data = FeedCursor.decode(cursor)
-            qs = FeedService._apply_ranked_cursor(qs, cursor_data, cursor)
-
-        candidate_limit = max(limit * 3, limit + 10)
-        candidates = list(qs[: candidate_limit + 1])
-        posts = FeedService._apply_creator_diversity(candidates, limit)
-        has_more = len(candidates) > len(posts)
+        posts, has_more, next_cursor = strategies._ranked_page(
+            qs, cursor, limit, "discover_search", vary_kinds=not media_filter
+        )
 
         suggestions = []
         if not posts and user_id:
             suggestions = FeedService._get_empty_state_suggestions(user_id)
-
-        next_cursor = None
-        if has_more and posts:
-            next_cursor = FeedCursor.encode(
-                post_id=str(posts[-1].id),
-                algo="discover_search",
-                created_at=posts[-1].created_at,
-                score=getattr(posts[-1], "final_score", 0),
-            )
 
         return FeedResponseDTO(
             posts=FeedService._bulk_build_post_dtos(posts, user_id),
@@ -313,8 +285,6 @@ class FeedService:
     _with_final_score = staticmethod(ranking._with_final_score)
     _ranked_queryset = staticmethod(ranking._ranked_queryset)
     _with_creator_affinity = staticmethod(ranking._with_creator_affinity)
-    _ranked_cursor_payload = staticmethod(cursors._ranked_cursor_payload)
-    _chronological_cursor_payload = staticmethod(cursors._chronological_cursor_payload)
     _apply_cursor = staticmethod(cursors._apply_cursor)
     _apply_ranked_cursor = staticmethod(cursors._apply_ranked_cursor)
     _apply_chronological_affinity_cursor = staticmethod(
@@ -326,7 +296,6 @@ class FeedService:
     _new_user_feed = staticmethod(strategies._new_user_feed)
     _returning_user_feed = staticmethod(strategies._returning_user_feed)
     _blend_discovery_and_followed = staticmethod(strategies._blend_discovery_and_followed)
-    _apply_creator_diversity = staticmethod(strategies._apply_creator_diversity)
     _public_discovery_feed = staticmethod(strategies._public_discovery_feed)
 
 

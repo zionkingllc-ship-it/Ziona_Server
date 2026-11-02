@@ -1,7 +1,7 @@
 import re
 import secrets
 
-from core.users.models import User
+from core.users.username_policy import username_is_available
 from core.users.validators import (
     UsernameValidationError,
     validate_username_format,
@@ -9,7 +9,7 @@ from core.users.validators import (
 )
 
 
-def check_username_availability(username: str) -> dict:
+def check_username_availability(username: str, *, owner_id=None) -> dict:
     """Check if a username is available for use.
 
     Args:
@@ -29,7 +29,7 @@ def check_username_availability(username: str) -> dict:
     except UsernameValidationError as e:
         return {"available": False, "reason": e.message}
 
-    if User.all_objects.filter(username=username).exists():
+    if not username_is_available(username, owner_id=owner_id):
         return {"available": False, "reason": "This username is already taken"}
 
     return {"available": True}

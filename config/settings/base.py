@@ -365,6 +365,10 @@ CELERY_TASK_TIME_LIMIT = env.int("CELERY_TASK_TIME_LIMIT", default=300)
 CELERY_BEAT_SCHEDULER = "django_celery_beat.schedulers:DatabaseScheduler"
 
 CELERY_BEAT_SCHEDULE = {
+    "cleanup-expired-username-reservations": {
+        "task": "core.users.tasks.cleanup_expired_username_reservations",
+        "schedule": crontab(hour=3, minute=0),
+    },
     "send-daily-anchor-notifications": {
         "task": "core.notifications.tasks.send_daily_anchor_notifications",
         "schedule": crontab(hour=18, minute=0),
@@ -467,6 +471,21 @@ EMAIL_BACKEND = "core.shared.email_backends.ensend.EnsendEmailBackend"
 ENSEND_API_KEY = env("ENSEND_API_KEY", default="")
 ENSEND_API_URL = env("ENSEND_API_URL", default="https://api.smtpexpress.com/send")
 ENSEND_SENDER_NAME = env("ENSEND_SENDER_NAME", default="Ziona Team")
+# ── For You feed: per-open variety ──
+# Each app open (a first page, no cursor) starts a session with its own shuffle,
+# and posts already served to the user rank lower. Tunable per environment
+# without a code change; each setting at its "off" value restores the plain
+# ranked order.
+#   STRENGTH — how far the shuffle can move a post's score: ×(1 ± strength).
+#              0 = off, 0.5 = medium. Capped at 0.9 so ranking still matters.
+FEED_SHUFFLE_STRENGTH = env.float("FEED_SHUFFLE_STRENGTH", default=0.5)
+#   PENALTY  — score multiplier for posts served in the window. 1.0 = off.
+FEED_SEEN_PENALTY = env.float("FEED_SEEN_PENALTY", default=0.25)
+#   WINDOW   — how long a served post counts as "already shown".
+FEED_SEEN_WINDOW_HOURS = env.int("FEED_SEEN_WINDOW_HOURS", default=24)
+#   RUN      — most posts of one kind (video/image/text) in a row. 0 = off.
+FEED_MAX_SAME_KIND_RUN = env.int("FEED_MAX_SAME_KIND_RUN", default=2)
+
 DEFAULT_FROM_EMAIL = env("DEFAULT_FROM_EMAIL", default="noreply@ziona.app")
 # Deep-link/share domain. Must be the host that SERVES the site (not a host that
 # redirects): Apple/Google refuse to verify a Universal/App Link domain whose
@@ -574,18 +593,20 @@ GOOGLE_CLIENT_ID = env("GOOGLE_CLIENT_ID", default=env("GOOGLE_OAUTH_CLIENT_ID",
 
 
 def _google_client_ids() -> list[str]:
-    """Return the explicit allowlist of first-party Google OAuth client IDs."""
-    configured_ids = env.list("GOOGLE_CLIENT_IDS", default=[])
-    legacy_ids = [
-        GOOGLE_CLIENT_ID,
-        env("GOOGLE_OAUTH_CLIENT_ID", default=""),
-        env("GOOGLE_IOS_CLIENT_ID", default=""),
-        env("GOOGLE_ANDROID_CLIENT_ID", default=""),
-    ]
+    """Use the explicit audience allowlist, falling back to legacy settings only if unset."""
+    if "GOOGLE_CLIENT_IDS" in os.environ:
+        client_ids = env.list("GOOGLE_CLIENT_IDS")
+    else:
+        client_ids = [
+            GOOGLE_CLIENT_ID,
+            env("GOOGLE_OAUTH_CLIENT_ID", default=""),
+            env("GOOGLE_IOS_CLIENT_ID", default=""),
+            env("GOOGLE_ANDROID_CLIENT_ID", default=""),
+        ]
 
     seen = set()
     result = []
-    for client_id in [*legacy_ids, *configured_ids]:
+    for client_id in client_ids:
         normalized = client_id.strip()
         if normalized and normalized not in seen:
             seen.add(normalized)

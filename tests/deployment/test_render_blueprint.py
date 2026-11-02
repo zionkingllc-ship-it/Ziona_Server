@@ -45,6 +45,7 @@ def test_render_cron_task_allowlist_covers_expected_schedules():
         "send-daily-anchor-notifications",
         "cleanup-old-notifications",
         "cleanup-inactive-refresh-tokens",
+        "cleanup-expired-username-reservations",
         "send-daily-notification-digest",
         "calculate-daily-analytics",
         "refresh-dashboard-cache",
@@ -56,6 +57,22 @@ def test_render_cron_task_allowlist_covers_expected_schedules():
     }
 
     assert expected.issubset(SCHEDULED_TASKS)
+
+
+def test_username_reservation_cleanup_has_render_cron(settings):
+    import yaml
+
+    blueprint = yaml.safe_load((settings.BASE_DIR / "render.yaml").read_text(encoding="utf-8"))
+    cron = _service(blueprint, "ziona-cron-username-reservation-cleanup")
+    assert cron["type"] == "cron"
+    assert cron["branch"] == "main"
+    assert cron["schedule"] == "0 3 * * *"
+    assert cron["startCommand"] == (
+        "python manage.py enqueue_scheduled_task cleanup-expired-username-reservations"
+    )
+    task = SCHEDULED_TASKS["cleanup-expired-username-reservations"]
+    assert task["module"] == "core.users.tasks"
+    assert task["attr"] == "cleanup_expired_username_reservations"
 
 
 def _env_value(service: dict, key: str) -> str:

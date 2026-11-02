@@ -199,6 +199,7 @@ class ProfileService:
         return UserProfileDTO(
             id=str(user.id),
             username=user.username or "",
+            display_name=user.display_name,
             full_name=user.full_name or "",
             bio=user.bio or "",
             bio_link=user.bio_link or None,
@@ -264,6 +265,10 @@ class ProfileService:
             user.bio_link = ProfileService._normalize_bio_link(bio_link)
             update_fields.append("bio_link")
 
+        if full_name is not None:
+            # Stray spaces are never intended, and a whitespace-only edit must
+            # not spend the 14-day name-change allowance.
+            full_name = full_name.strip()
         if full_name is not None and full_name != user.full_name:
             if len(full_name) > DISPLAY_NAME_MAX_LENGTH:
                 raise ProfileError(

@@ -19,7 +19,7 @@ strawberry-graphql-django==0.86.0
 # earlier) import ExecutionContext from graphql.execution, which 3.3 removed.
 # Nothing in our code references graphql-core directly; this pin holds a
 # transitive dependency. Lift it together with the strawberry 0.328+ upgrade.
-graphql-core==3.2.8
+graphql-core==3.2.13
 
 # Database
 psycopg2-binary==2.9.9
@@ -42,7 +42,9 @@ google-cloud-storage==2.14.0
 
 # Media Processing (bundles a static FFmpeg binary via pip — no OS install needed)
 imageio-ffmpeg==0.5.1
-Pillow==12.3.0
+# 13.0.0 fixes ~30 CVEs in 12.3.0's image decoders — this service decodes
+# untrusted uploads. Requires Python >= 3.11 (Render and CI run 3.12).
+Pillow==13.0.0
 
 # ASGI Server
 uvicorn[standard]==0.27.0
