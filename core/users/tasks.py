@@ -15,7 +15,11 @@ from core.shared.logging import log_security_event
 logger = logging.getLogger("core.users")
 
 
-@shared_task(name="core.users.tasks.cleanup_expired_username_reservations")
+@shared_task(
+    name="core.users.tasks.cleanup_expired_username_reservations",
+    soft_time_limit=240,
+    time_limit=300,
+)
 def cleanup_expired_username_reservations() -> int:
     """Discard expired claims; availability already ignores them immediately at expiry."""
     from core.users.models import UsernameReservation
