@@ -291,6 +291,14 @@ CELERY_TASK_ROUTES = {
         "queue": CELERY_QUEUE_MEDIA,
         "priority": CELERY_MEDIA_TASK_PRIORITY,
     },
+    "core.media.tasks.generate_anchor_thumbnail": {
+        "queue": CELERY_QUEUE_MEDIA,
+        "priority": CELERY_MEDIA_TASK_PRIORITY,
+    },
+    "core.media.tasks.sync_media_anchor_thumbnails": {
+        "queue": CELERY_QUEUE_MEDIA,
+        "priority": CELERY_MEDIA_TASK_PRIORITY,
+    },
     "core.notifications.tasks.send_daily_anchor_notifications": {
         "queue": CELERY_QUEUE_CRON,
         "priority": CELERY_CRON_TASK_PRIORITY,

@@ -3,6 +3,7 @@
 import logging
 
 from django.conf import settings
+from django.core.cache import cache
 from django.db.models import Q
 from django.utils import timezone
 
@@ -120,14 +121,19 @@ def sync_anchor_thumbnails(media_file: MediaFile) -> int:
         )
     urls.discard("")
 
-    updated = (
+    anchors = (
         Anchor.objects.filter(anchor_type__in=ANCHOR_MEDIA_TYPES)
         .filter(Q(media_url__in=urls) | Q(anchor_image__in=urls) | Q(anchor_video__in=urls))
         .filter(Q(anchor_thumbnail="") | Q(anchor_thumbnail__in=urls))
-        .update(anchor_thumbnail=thumbnail_url, updated_at=timezone.now())
     )
+    circle_ids = list(anchors.values_list("circle_id", flat=True).distinct())
+    updated = anchors.update(anchor_thumbnail=thumbnail_url, updated_at=timezone.now())
 
     if updated:
+        try:
+            cache.delete_many([f"active_anchor:{circle_id}" for circle_id in circle_ids])
+        except Exception:  # noqa: BLE001
+            logger.warning("anchor_thumbnail_cache_invalidation_failed", exc_info=True)
         logger.info(
             "anchor_thumbnails_synced",
             extra={"media_id": str(media_file.id), "count": updated},

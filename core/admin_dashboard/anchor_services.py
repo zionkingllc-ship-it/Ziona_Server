@@ -386,6 +386,7 @@ class AnchorManagementService:
             "style_data",
         }
         update_fields = ["updated_at"]
+        previous_sources = (anchor.media_url, anchor.anchor_image, anchor.anchor_video)
 
         for field, value in updates.items():
             if field in allowed_fields and value is not None:
@@ -394,12 +395,50 @@ class AnchorManagementService:
 
         media_keys = {"media_url", "anchor_image", "anchor_video", "anchor_thumbnail"}
         if media_keys & {field for field, value in updates.items() if value is not None}:
+            # Keep the legacy URL and its typed mirror together when only one
+            # representation is edited. A separate video poster stays separate.
+            if anchor.anchor_type in ("image", "image_text"):
+                if (
+                    updates.get("media_url") is not None
+                    and updates.get("anchor_image") is None
+                    and previous_sources[1] == previous_sources[0]
+                ):
+                    anchor.anchor_image = anchor.media_url
+                elif (
+                    updates.get("anchor_image") is not None
+                    and updates.get("media_url") is None
+                    and previous_sources[0] == previous_sources[1]
+                ):
+                    anchor.media_url = anchor.anchor_image
+            elif anchor.anchor_type == "video":
+                if (
+                    updates.get("media_url") is not None
+                    and updates.get("anchor_video") is None
+                    and previous_sources[2] == previous_sources[0]
+                ):
+                    anchor.anchor_video = anchor.media_url
+                elif (
+                    updates.get("anchor_video") is not None
+                    and updates.get("media_url") is None
+                    and previous_sources[0] == previous_sources[2]
+                ):
+                    anchor.media_url = anchor.anchor_video
+
+            sources_changed = previous_sources != (
+                anchor.media_url,
+                anchor.anchor_image,
+                anchor.anchor_video,
+            )
+            thumbnail = updates.get("anchor_thumbnail")
+            if thumbnail is None:
+                thumbnail = "" if sources_changed else anchor.anchor_thumbnail
+
             media_fields = _normalise_media_fields(
                 anchor_type=anchor.anchor_type,
-                media_url=updates.get("media_url", anchor.media_url),
-                anchor_image=updates.get("anchor_image", anchor.anchor_image),
-                anchor_video=updates.get("anchor_video", anchor.anchor_video),
-                anchor_thumbnail=updates.get("anchor_thumbnail", anchor.anchor_thumbnail),
+                media_url=anchor.media_url,
+                anchor_image=anchor.anchor_image,
+                anchor_video=anchor.anchor_video,
+                anchor_thumbnail=thumbnail,
             )
             for field, value in media_fields.items():
                 setattr(anchor, field, value)

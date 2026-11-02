@@ -20,7 +20,7 @@ class Command(BaseCommand):
     help = "Resolve or generate thumbnails for media anchors that do not have one."
 
     def add_arguments(self, parser):
-        parser.add_argument("--limit", type=int, default=500)
+        parser.add_argument("--limit", type=int, default=50)
         parser.add_argument("--dry-run", action="store_true")
         parser.add_argument("--sync", action="store_true")
 
