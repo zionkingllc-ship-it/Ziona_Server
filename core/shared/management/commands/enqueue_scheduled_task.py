@@ -7,6 +7,11 @@ from django.core.cache import cache
 from django.core.management.base import BaseCommand, CommandError
 
 SCHEDULED_TASKS = {
+    "cleanup-expired-username-reservations": {
+        "module": "core.users.tasks",
+        "attr": "cleanup_expired_username_reservations",
+        "lock_timeout": 2 * 60 * 60,
+    },
     "send-daily-anchor-notifications": {
         "module": "core.notifications.tasks",
         "attr": "send_daily_anchor_notifications",

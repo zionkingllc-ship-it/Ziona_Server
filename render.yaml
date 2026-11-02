@@ -450,6 +450,18 @@ services:
     envVars: *prodEnv
 
   - type: cron
+    name: ziona-cron-username-reservation-cleanup
+    runtime: python
+    region: oregon
+    plan: starter
+    branch: main
+    autoDeployTrigger: checksPass
+    schedule: "0 3 * * *"
+    buildCommand: *buildCommand
+    startCommand: python manage.py enqueue_scheduled_task cleanup-expired-username-reservations
+    envVars: *prodEnv
+
+  - type: cron
     name: ziona-cron-stale-media-cleanup
     runtime: python
     region: oregon
