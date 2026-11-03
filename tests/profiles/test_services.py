@@ -83,6 +83,59 @@ class TestUpdateProfile:
         assert result.location == "New York"
 
 
+@pytest.mark.parametrize("provider", ["email", "google", "apple"])
+def test_display_name_edits_are_free_during_signup_grace(create_user, provider):
+    user = create_user(email=f"{provider}@grace.test", username=f"{provider}_grace")
+    user.auth_provider = provider
+    user.save(update_fields=["auth_provider"])
+
+    ProfileService.update_profile(str(user.id), full_name="Grace 🙏")
+    ProfileService.update_profile(str(user.id), full_name="Ama ✝️❤️")
+    user.refresh_from_db()
+    assert user.full_name == "Ama ✝️❤️"
+    assert user.last_name_change is None
+
+
+def test_grace_name_edit_does_not_block_first_post_grace_edit(create_user):
+    from datetime import timedelta
+
+    from django.utils import timezone
+
+    from core.users.models import User
+
+    user = create_user(email="boundary@grace.test", username="boundary_grace")
+    created_at = timezone.now() - timedelta(hours=49)
+    User.objects.filter(id=user.id).update(
+        created_at=created_at,
+        last_name_change=created_at + timedelta(hours=1),
+        full_name="Old name",
+    )
+
+    ProfileService.update_profile(str(user.id), full_name="New name")
+    user.refresh_from_db()
+    assert user.full_name == "New name"
+    assert user.last_name_change >= created_at + timedelta(hours=48)
+    with pytest.raises(ProfileError):
+        ProfileService.update_profile(str(user.id), full_name="Too soon")
+
+
+def test_recent_post_grace_name_change_still_locks_edits(create_user):
+    from datetime import timedelta
+
+    from django.utils import timezone
+
+    from core.users.models import User
+
+    user = create_user(email="cooldown@grace.test", username="cooldown_grace")
+    User.objects.filter(id=user.id).update(
+        created_at=timezone.now() - timedelta(days=5),
+        last_name_change=timezone.now() - timedelta(days=1),
+        full_name="First name",
+    )
+    with pytest.raises(ProfileError):
+        ProfileService.update_profile(str(user.id), full_name="Second name")
+
+
 class TestGetUserPosts:
     """Tests for get_user_posts pagination."""
 

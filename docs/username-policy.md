@@ -44,3 +44,18 @@ app should compare it with its current time to show the countdown, and use
 or the post-grace cooldown, and `USERNAME_TAKEN` for another user's current or
 reserved handle. Emoji entered in a handle are rejected by username validation;
 emoji entered in `fullName` are allowed and shown through `displayName`.
+
+
+## Editing a display name
+
+- `fullName` is freely editable during the first 48 hours from `createdAt`,
+  including for Google and Apple signups. These edits do not start the later
+  14-day cooldown. Whitespace-only no-ops never spend an edit.
+- After 48 hours, the first actual change starts the 14-day cooldown. A name
+  change made during signup grace is ignored by that later rule, even if it was
+  saved before this policy was deployed.
+- `me.displayNameEditableUntil` is the ISO-8601 grace deadline while the
+  window remains open, otherwise `null`. `me.lastNameChange` reports only a
+  post-grace name change. Refresh `me` after an edit and use these server fields
+  instead of a device-local timer.
+- Emoji are allowed in `fullName`; handles continue to reject them.

@@ -7,11 +7,14 @@ and profile updates with validation.
 
 import logging
 import re
+from datetime import timedelta
 from urllib.parse import urlparse
 
 from django.core.exceptions import ValidationError
 from django.core.validators import URLValidator
+from django.db import transaction
 from django.db.models import Count, Q
+from django.utils import timezone
 
 from core.follows.selectors import FollowSelector
 from core.media.ordering import ordered_post_media_prefetch
@@ -22,6 +25,7 @@ from core.shared.dtos import (
 )
 from core.shared.exceptions import ErrorCode, ProfileError
 from core.shared.utils import parse_uuid
+from core.users.username_policy import GRACE_PERIOD
 
 logger = logging.getLogger("core.profiles")
 
@@ -215,6 +219,7 @@ class ProfileService:
         )
 
     @staticmethod
+    @transaction.atomic
     def update_profile(
         user_id: str,
         bio: str | None = None,
@@ -242,7 +247,7 @@ class ProfileService:
         """
         from core.users.models import User
 
-        user = User.objects.filter(id=user_id, deleted_at__isnull=True).first()
+        user = User.objects.select_for_update().filter(id=user_id, deleted_at__isnull=True).first()
 
         if not user:
             raise ProfileError(
@@ -276,26 +281,33 @@ class ProfileService:
                     code=ErrorCode.VALIDATION_ERROR,
                 )
 
-            # 14-day limit check
-            if user.last_name_change:
-                from datetime import timedelta
-
-                from django.utils import timezone
-
-                days_since_change = (timezone.now() - user.last_name_change).days
-                if days_since_change < 14:
-                    next_change = user.last_name_change + timedelta(days=14)
-                    raise ProfileError(
-                        message=f"You're allowed one name change every 14 days. Next change on {next_change.strftime('%B %d, %Y')}.",
-                        code=ErrorCode.VALIDATION_ERROR,
-                    )
-
-            from django.utils import timezone
+            now = timezone.now()
+            grace_end = user.created_at + GRACE_PERIOD
+            if now >= grace_end:
+                # A name chosen or changed during signup grace never starts the
+                # later 14-day cooldown, including edits made before this rule.
+                last_counted_change = user.last_name_change
+                if last_counted_change and last_counted_change >= grace_end:
+                    next_change = last_counted_change + timedelta(days=14)
+                    if now < next_change:
+                        raise ProfileError(
+                            message=(
+                                "You're allowed one name change every 14 days. "
+                                f"Next change on {next_change.strftime('%B %d, %Y')}."
+                            ),
+                            code=ErrorCode.VALIDATION_ERROR,
+                        )
 
             user.full_name = full_name
-            user.last_name_change = timezone.now()
             update_fields.append("full_name")
-            update_fields.append("last_name_change")
+            # Grace edits do not consume the post-grace allowance.
+            if now < grace_end:
+                if user.last_name_change is not None:
+                    user.last_name_change = None
+                    update_fields.append("last_name_change")
+            else:
+                user.last_name_change = now
+                update_fields.append("last_name_change")
 
         if avatar_url is not None:
             ProfileService._validate_avatar_url(avatar_url)

@@ -15,6 +15,7 @@ deterministic order that keyset pagination can walk without repeats or gaps:
 from __future__ import annotations
 
 import logging
+import math
 import secrets
 import time
 from dataclasses import dataclass
@@ -30,6 +31,10 @@ logger = logging.getLogger("core.feed")
 # how long served-history entries outlive the "already shown" window, so a
 # session's frozen view of that history cannot change underneath it.
 SESSION_MAX_AGE_SECONDS = 6 * 60 * 60
+SESSION_PAYLOAD_VERSION = 2  # v1 cursors used a different ranked ordering.
+TOP_HISTORY_MAX = 20
+TOP_HISTORY_TTL_SECONDS = 24 * 60 * 60
+_TOP_KEY = "feed:top:v1:{user_id}"
 
 # Shuffle multiplier bounds — see ranking._with_feed_score. Large enough that
 # frac(shuffle_key * multiplier + offset) behaves as a fresh permutation per
@@ -67,7 +72,7 @@ class FeedSession:
         The cursor comes from the client, so every field is validated. A bad
         value only ever costs the caller their own session: a fresh one starts.
         """
-        if not isinstance(payload, dict):
+        if not isinstance(payload, dict) or payload.get("v") != SESSION_PAYLOAD_VERSION:
             return None
         try:
             multiplier = int(payload["m"])
@@ -85,7 +90,69 @@ class FeedSession:
         return cls(multiplier=multiplier, offset=offset, started_at=started_at)
 
     def to_payload(self) -> dict:
-        return {"m": self.multiplier, "o": self.offset, "t": self.started_at}
+        return {
+            "v": SESSION_PAYLOAD_VERSION,
+            "m": self.multiplier,
+            "o": self.offset,
+            "t": self.started_at,
+        }
+
+
+def choose_session_lead(candidates, session: FeedSession, user_id: str | None, *, limit: int):
+    """Pick a first post from the best-scoring unseen quality band.
+
+    Only inspect a prefix that can fit in the cursor carry. A promoted post's
+    predecessors are consumed and carried rather than skipped. Repeated leads
+    are avoided for signed-in users when another qualified candidate exists.
+    Guests have no persistent identity, so their selection is best-effort.
+    """
+    prefix = list(candidates[:limit])
+    if not prefix:
+        return None
+    best_seen = min(int(getattr(post, "seen_rank", 0)) for post in prefix)
+    unseen_first = [post for post in prefix if int(getattr(post, "seen_rank", 0)) == best_seen]
+    ranked = sorted(unseen_first, key=lambda post: float(post.final_score), reverse=True)
+    top_count = min(len(ranked), max(2, math.ceil(len(ranked) * 0.2)))
+    best_score = float(ranked[0].final_score)
+    band = [post for post in ranked[:top_count] if float(post.final_score) >= best_score * 0.8]
+    if user_id:
+        recent_ids = _recent_top_ids(user_id)
+        fresh = [post for post in band if str(post.id) not in recent_ids]
+        if fresh:
+            band = fresh
+    return band[min(int(session.offset * len(band)), len(band) - 1)]
+
+
+def _recent_top_ids(user_id: str) -> list[str]:
+    try:
+        stored = cache.get(_TOP_KEY.format(user_id=user_id))
+        if not isinstance(stored, dict) or not isinstance(stored.get("ids"), list):
+            return []
+        age = _now() - float(stored.get("at"))
+        if not 0 <= age < TOP_HISTORY_TTL_SECONDS:
+            return []
+        return [str(value) for value in stored["ids"][:TOP_HISTORY_MAX]]
+    except (TypeError, ValueError):
+        return []
+    except Exception:  # noqa: BLE001
+        logger.warning("feed_top_history_read_failed", exc_info=True)
+        return []
+
+
+def record_session_lead(user_id: str | None, post_id) -> None:
+    if not user_id:
+        return
+    key = _TOP_KEY.format(user_id=user_id)
+    recent = _recent_top_ids(user_id)
+    recent = [str(post_id), *(value for value in recent if value != str(post_id))]
+    try:
+        cache.set(
+            key,
+            {"ids": recent[:TOP_HISTORY_MAX], "at": _now()},
+            timeout=TOP_HISTORY_TTL_SECONDS,
+        )
+    except Exception:  # noqa: BLE001
+        logger.warning("feed_top_history_write_failed", exc_info=True)
 
 
 def _now() -> float:

@@ -181,8 +181,18 @@ def _with_feed_score(qs, session, seen_ids):
             output_field=FloatField(),
         )
 
+    seen_rank = (
+        Case(
+            When(id__in=list(seen_ids), then=Value(1)),
+            default=Value(0),
+            output_field=IntegerField(),
+        )
+        if seen_ids
+        else Value(0, output_field=IntegerField())
+    )
     return qs.annotate(
-        feed_score=ExpressionWrapper(F("final_score") * shuffle * seen, output_field=FloatField())
+        feed_score=ExpressionWrapper(F("final_score") * shuffle * seen, output_field=FloatField()),
+        seen_rank=seen_rank,
     )
 
 
@@ -191,7 +201,9 @@ def _session_ranked_queryset(session, seen_ids):
     qs = _with_final_score(_base_post_queryset()).filter(
         unique_reports_count__lt=REPORT_SUPPRESSION_THRESHOLD
     )
-    return _with_feed_score(qs, session, seen_ids).order_by("-feed_score", "-created_at", "-id")
+    return _with_feed_score(qs, session, seen_ids).order_by(
+        "seen_rank", "-feed_score", "-created_at", "-id"
+    )
 
 
 def _with_seen_rank(qs, seen_ids):

@@ -40,10 +40,15 @@ from core.feed.services.ranking import (  # noqa: E402
     _base_post_queryset,
     _exclude_hidden_posts,
     _session_ranked_queryset,
-    _with_engagement_counts,
+    _with_final_score,
     _with_seen_rank,
 )
-from core.feed.services.session import FeedSession, ServedHistory  # noqa: E402
+from core.feed.services.session import (  # noqa: E402
+    FeedSession,
+    ServedHistory,
+    choose_session_lead,
+    record_session_lead,
+)
 
 BLEND_PERIOD = DISCOVERY_BLEND_SIZE + FOLLOWED_BLEND_SIZE
 
@@ -95,7 +100,7 @@ def _encode_session_cursor(algo: str, session: FeedSession, last_post, **state) 
     )
 
 
-def _ranked_session_page(qs, state: dict, limit: int):
+def _ranked_session_page(qs, state: dict, limit: int, session: FeedSession, user_id=None):
     """One page of a single ranked stream (new-user and guest feeds).
 
     Returns (assembled page, has_more, next ranked position).
@@ -107,7 +112,14 @@ def _ranked_session_page(qs, state: dict, limit: int):
     window = max(limit * 3, limit + 10)
     fetched = list(stream[: window + 1])
 
-    assembled = assemble_page(carried, fetched[:window], limit)
+    lead = (
+        choose_session_lead(fetched[:window], session, user_id, limit=MAX_CARRY + 1)
+        if not state
+        else None
+    )
+    assembled = assemble_page(
+        carried, fetched[:window], limit, lead_id=str(lead.id) if lead else None
+    )
     consumed = fetched[: assembled.consumed]
     position = _session_ranked_position(consumed[-1]) if consumed else state.get("ranked")
     has_more = bool(assembled.carry) or assembled.consumed < len(fetched)
@@ -182,7 +194,7 @@ def _new_user_feed(
 
     qs = _exclude_hidden_posts(qs, user_id)
 
-    assembled, has_more, position = _ranked_session_page(qs, state, limit)
+    assembled, has_more, position = _ranked_session_page(qs, state, limit, session, user_id)
     posts = assembled.posts
 
     if not posts:
@@ -197,6 +209,8 @@ def _new_user_feed(
         )
 
     history.record((post.id for post in posts), session)
+    if not state:
+        record_session_lead(user_id, posts[0].id)
     post_dtos = _bulk_build_post_dtos(posts, user_id)
 
     next_cursor = None
@@ -243,9 +257,9 @@ def _returning_user_feed(
         discovery_qs = discovery_qs.exclude(user_id__in=following_ids_set)
     discovery_qs = _exclude_hidden_posts(discovery_qs, user_id)
 
-    followed_qs = _with_engagement_counts(
-        _base_post_queryset().filter(user_id__in=following_ids)
-    ).filter(unique_reports_count__lt=REPORT_SUPPRESSION_THRESHOLD)
+    followed_qs = _with_final_score(_base_post_queryset().filter(user_id__in=following_ids)).filter(
+        unique_reports_count__lt=REPORT_SUPPRESSION_THRESHOLD
+    )
     followed_qs = _with_seen_rank(_exclude_hidden_posts(followed_qs, user_id), seen_ids)
     followed_qs = followed_qs.order_by("seen_rank", "-created_at", "-id")
 
@@ -274,7 +288,10 @@ def _returning_user_feed(
         target_count=max(limit * 3, limit + 10),
         start_slot=start_slot,
     )
-    assembled = assemble_page(carried, blended, limit)
+    lead = (
+        choose_session_lead(blended, session, user_id, limit=MAX_CARRY + 1) if not state else None
+    )
+    assembled = assemble_page(carried, blended, limit, lead_id=str(lead.id) if lead else None)
     posts = assembled.posts
 
     has_more = bool(assembled.carry) or assembled.consumed < (
@@ -293,6 +310,8 @@ def _returning_user_feed(
         )
 
     history.record((post.id for post in posts), session)
+    if not state:
+        record_session_lead(user_id, posts[0].id)
     post_dtos = _bulk_build_post_dtos(posts, user_id)
 
     # Each stream continues after the last post this page consumed from it.
@@ -357,30 +376,34 @@ def _blend_discovery_and_followed(
             )
         )
 
-        added = False
+        # Each source is ordered unseen-first. Prefer any unseen head over a
+        # seen head, even when the 3:1 recipe currently favors the latter.
+        # Within the same seen tier, keep the existing blend preference.
+        heads = []
         for pool, pool_name in pools:
             index = followed_index if pool_name == "followed" else discovery_index
             while index < len(pool) and str(pool[index].id) in seen:
                 index += 1
-            if index >= len(pool):
-                if pool_name == "followed":
-                    followed_index = index
-                else:
-                    discovery_index = index
-                continue
-
-            post = pool[index]
-            result.append(post)
-            seen.add(str(post.id))
-            added = True
             if pool_name == "followed":
-                followed_index = index + 1
+                followed_index = index
             else:
-                discovery_index = index + 1
-            break
+                discovery_index = index
+            if index < len(pool):
+                heads.append((pool, pool_name, index))
 
-        if not added:
+        if not heads:
             break
+        best_seen = min(int(getattr(pool[index], "seen_rank", 0)) for pool, _, index in heads)
+        pool, pool_name, index = next(
+            head for head in heads if int(getattr(head[0][head[2]], "seen_rank", 0)) == best_seen
+        )
+        post = pool[index]
+        result.append(post)
+        seen.add(str(post.id))
+        if pool_name == "followed":
+            followed_index = index + 1
+        else:
+            discovery_index = index + 1
         slot += 1
 
     return result
@@ -398,7 +421,7 @@ def _public_discovery_feed(
     session, state = _resume_session(cursor)
     qs = _session_ranked_queryset(session, seen_ids=())
 
-    assembled, has_more, position = _ranked_session_page(qs, state, limit)
+    assembled, has_more, position = _ranked_session_page(qs, state, limit, session)
     posts = assembled.posts
 
     post_dtos = _bulk_build_post_dtos(posts, viewer_id=None)

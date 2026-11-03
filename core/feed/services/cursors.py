@@ -243,7 +243,12 @@ def _position_parts(position) -> tuple | None:
 
 
 def _session_ranked_position(post) -> dict:
-    return {"id": str(post.id), "score": float(post.feed_score), "ts": post.created_at.isoformat()}
+    return {
+        "id": str(post.id),
+        "seen": int(post.seen_rank),
+        "score": float(post.feed_score),
+        "ts": post.created_at.isoformat(),
+    }
 
 
 def _session_followed_position(post) -> dict:
@@ -251,19 +256,23 @@ def _session_followed_position(post) -> dict:
 
 
 def _apply_session_ranked_cursor(qs, position):
-    """Continue an order of (feed_score DESC, created_at DESC, id DESC)."""
+    """Continue (seen_rank ASC, feed_score DESC, created_at DESC, id DESC)."""
     parts = _position_parts(position)
     if parts is None:
         return qs
     post_id, created_at = parts
+    seen = position.get("seen")
+    if seen not in (0, 1):
+        return qs
     try:
         score = float(position["score"])
     except (KeyError, TypeError, ValueError):
         return qs
     return qs.filter(
-        Q(feed_score__lt=score)
-        | Q(feed_score=score, created_at__lt=created_at)
-        | Q(feed_score=score, created_at=created_at, id__lt=post_id)
+        Q(seen_rank__gt=seen)
+        | Q(seen_rank=seen, feed_score__lt=score)
+        | Q(seen_rank=seen, feed_score=score, created_at__lt=created_at)
+        | Q(seen_rank=seen, feed_score=score, created_at=created_at, id__lt=post_id)
     )
 
 

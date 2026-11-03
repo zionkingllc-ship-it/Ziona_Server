@@ -59,7 +59,7 @@ def _fits(page: list, post, max_kind_run: int) -> bool:
 
 
 def assemble_page(
-    carried: list, fresh: list, limit: int, *, vary_kinds: bool = True
+    carried: list, fresh: list, limit: int, *, vary_kinds: bool = True, lead_id: str | None = None
 ) -> AssembledPage:
     """Fill a page from ``carried`` (offered first) then ``fresh``, in rank order.
 
@@ -76,6 +76,14 @@ def assemble_page(
     page: list = []
     waiting: list = list(carried)
     consumed = 0
+    if lead_id is not None and not carried:
+        lead_index = next(
+            (i for i, post in enumerate(fresh[: MAX_CARRY + 1]) if str(post.id) == lead_id), None
+        )
+        if lead_index is not None:
+            page.append(fresh[lead_index])
+            waiting.extend(fresh[:lead_index])
+            consumed = lead_index + 1
 
     def take(rule_kind_run: int) -> bool:
         choice = next((post for post in waiting if _fits(page, post, rule_kind_run)), None)

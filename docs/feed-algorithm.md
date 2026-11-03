@@ -1,40 +1,43 @@
-# Feed Algorithm
+# Feed algorithm
 
-## Overview
+## For You sessions
 
-Ziona uses three feed strategies: **For You**, **Following**, and **Discover**.
+A request without a cursor opens a new session. The session fixes shuffle
+parameters and the previously served set; subsequent pages carry that state in
+an opaque cursor for up to six hours. The app must send no cursor on refresh and
+replace its old list with the new first page. This service cannot control the
+mobile refresh spinner or cache.
 
-## For You Feed
+Eligible posts receive a final quality score based on engagement, freshness, and
+report penalties. New and returning users see unseen posts before previously
+served posts. Returning users blend discovery and followed creators 3:1 within
+each seen tier; followed posts remain chronological within their tier. Posts
+hidden by the user or over the report suppression threshold are excluded.
 
-### New Users (< 7 days)
-- Filters by user's selected interest categories
-- Ranks by **engagement score**: `likes + (comments × 2) + (shares × 3)`
-- Falls back to chronological if no interests set
+On the first page, the lead is chosen from at most `MAX_CARRY + 1` candidates:
 
-### Returning Users
-- Mixes content from followed creators (weighted higher) with discovery content
-- Followed creators' posts appear first, then chronological fallback
-- Uses `is_following` annotation for priority ordering
+1. Choose the best available seen tier (unseen whenever available).
+2. Keep the top 20% by final quality score, at least two candidates where
+   possible, and require at least 80% of the best score.
+3. For a signed-in user, prefer candidates absent from their last 20 first
+   posts (stored for 24 hours). Select within the band using the session's
+   randomized offset. If no alternative passes the gate, the prior lead may
+   repeat.
 
-## Following Feed
-- **Chronological** posts from followed users
-- Empty state shows suggested creators (interest-based + follower count)
-- Cursor-based pagination using `created_at`
+Any candidate passed over before the lead is consumed into the cursor carry,
+not skipped. Later pages use the frozen ordering and keyset positions, preserving
+no repeats or gaps. A replayed cursor gives the same page while its underlying
+posts and permissions remain unchanged. An old session cursor from before the
+unseen-first ordering starts a fresh session.
 
-## Discover Feed
-- All non-own posts, optionally filtered by `PostCategory`
-- Ordered chronologically
-- Supports category parameter for browsing specific content types
+Guests have no stable identity. Each new guest session randomizes within the
+quality band, but repeated slot 0 is possible, especially when only one post
+passes the gate. Guaranteed guest rotation would require a persistent anonymous
+identity. No ranking rule can guarantee a new post when the eligible catalogue
+has not changed.
 
-## Caching Strategy
+## Following and Discover
 
-| Cache Key                   | TTL   | Invalidated By           |
-|-----------------------------|-------|--------------------------|
-| `feed:following:{user_id}`  | 5 min | New post by followed user|
-| `feed:for_you:{user_id}`    | 5 min | Post create/delete       |
-| `followers:{user_id}`       | 5 min | Follow/unfollow          |
-| `following:{user_id}`       | 5 min | Follow/unfollow          |
-| `is_following:{a}:{b}`      | 5 min | Follow/unfollow          |
-
-## Pagination
-All feeds use **cursor-based pagination** with post IDs as cursors. The `created_at` timestamp of the cursor post determines the page boundary.
+Following is chronological for followed creators. Its top post may remain the
+same until a newer followed post appears. Discover is a separate ranked listing
+with its own cursor. Neither uses the For You lead-history rule.

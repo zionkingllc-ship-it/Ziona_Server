@@ -143,17 +143,20 @@ def _first_page(user_id, session: FeedSession, monkeypatch) -> list[str]:
     return [str(post.id) for post in page.posts]
 
 
-def test_each_open_gets_its_own_order(catalogue, create_user, settings, monkeypatch):
-    settings.FEED_SEEN_PENALTY = 1.0  # isolate the shuffle from the seen penalty
-    viewer = _make_user(create_user, "opener")
+def test_guest_session_parameters_determine_the_order(catalogue, settings, monkeypatch):
+    settings.FEED_SEEN_PENALTY = 1.0
     now = timezone.now().timestamp()
 
-    first = _first_page(viewer.id, FeedSession(31_337, 0.25, now), monkeypatch)
-    again = _first_page(viewer.id, FeedSession(31_337, 0.25, now), monkeypatch)
-    other = _first_page(viewer.id, FeedSession(77_001, 0.71, now), monkeypatch)
+    def guest_page(session):
+        monkeypatch.setattr(FeedSession, "start", classmethod(lambda cls: session))
+        return [str(post.id) for post in FeedService.get_feed(None, None, PAGE_SIZE * 2).posts]
 
-    assert first == again, "the same session parameters must give the same order"
-    assert first != other, "a new open must not repeat the previous line-up"
+    first = guest_page(FeedSession(31_337, 0.25, now))
+    again = guest_page(FeedSession(31_337, 0.25, now))
+    other = guest_page(FeedSession(77_001, 0.71, now))
+
+    assert first == again, "guest order with identical session parameters must be deterministic"
+    assert first != other, "different session parameters should vary the guest line-up"
 
 
 def test_reopening_leads_with_posts_not_already_shown(catalogue, create_user, settings):
@@ -179,6 +182,12 @@ def test_shown_posts_recover_after_the_seen_window(catalogue, create_user, setti
     settings.FEED_SEEN_PENALTY = 0.01
     settings.FEED_SEEN_WINDOW_HOURS = 24
     viewer = _make_user(create_user, "returner")
+    # Hold the shuffle/lead choice fixed so this checks history expiry alone.
+    monkeypatch.setattr(
+        FeedSession,
+        "start",
+        classmethod(lambda cls: FeedSession(31_337, 0.0, session_module._now())),
+    )
 
     first = [str(p.id) for p in FeedService.get_for_you_feed(str(viewer.id), None, PAGE_SIZE).posts]
     later = real_time.time() + 25 * 60 * 60
@@ -456,3 +465,164 @@ def test_assembly_still_fills_a_page_from_a_single_creator():
 
     assert [post.id for post in assembled.posts] == [0, 1, 2, 3]
     assert assembled.carry == []
+
+
+# ---------------------------------------------------------------------------
+# Quality-gated first slot and strict unseen ordering
+# ---------------------------------------------------------------------------
+
+
+def test_seen_post_cannot_lead_when_unseen_posts_exist(catalogue, create_user, settings):
+    settings.FEED_SHUFFLE_STRENGTH = 0
+    settings.FEED_SEEN_PENALTY = 1  # hard unseen ordering must work without a score penalty
+    viewer = _make_user(create_user, "unseenfirst")
+
+    first = FeedService.get_for_you_feed(str(viewer.id), None, 5)
+    second = FeedService.get_for_you_feed(str(viewer.id), None, 5)
+    first_ids = {str(post.id) for post in first.posts}
+    second_ids = {str(post.id) for post in second.posts}
+
+    assert len(first_ids) == len(second_ids) == 5
+    assert first_ids.isdisjoint(second_ids)
+
+
+def test_two_qualified_posts_rotate_even_without_seen_history(create_user, settings, monkeypatch):
+    from core.posts.models import Post
+
+    settings.FEED_SHUFFLE_STRENGTH = 0
+    settings.FEED_SEEN_WINDOW_HOURS = 0
+    viewer = _make_user(create_user, "topviewer")
+    for i in range(2):
+        author = _make_user(create_user, f"topauthor{i}")
+        Post.objects.create(user=author, post_type="text", caption=f"post {i}")
+    monkeypatch.setattr(
+        FeedSession,
+        "start",
+        classmethod(lambda cls: FeedSession(31_337, 0.0, timezone.now().timestamp())),
+    )
+
+    first = FeedService.get_for_you_feed(str(viewer.id), None, 1)
+    second = FeedService.get_for_you_feed(str(viewer.id), None, 1)
+
+    assert first.posts[0].id != second.posts[0].id
+
+
+def test_guest_lead_varies_when_two_posts_share_quality_band(create_user, settings, monkeypatch):
+    from core.posts.models import Post
+
+    settings.FEED_SHUFFLE_STRENGTH = 0
+    for i in range(2):
+        author = _make_user(create_user, f"guestauthor{i}")
+        Post.objects.create(user=author, post_type="text", caption=f"post {i}")
+
+    def first_id(offset):
+        monkeypatch.setattr(
+            FeedSession,
+            "start",
+            classmethod(lambda cls: FeedSession(31_337, offset, timezone.now().timestamp())),
+        )
+        return FeedService.get_feed(None, None, 1).posts[0].id
+
+    assert first_id(0.0) != first_id(0.99)
+
+
+def test_quality_gate_keeps_dominant_post_above_low_quality_alternative(
+    create_user, settings, monkeypatch
+):
+    from core.engagement.models import Like
+    from core.posts.models import Post
+
+    settings.FEED_SHUFFLE_STRENGTH = 0
+    strong_author = _make_user(create_user, "strongauthor")
+    weak_author = _make_user(create_user, "weakauthor")
+    strong = Post.objects.create(user=strong_author, post_type="text", caption="strong")
+    Post.objects.create(user=weak_author, post_type="text", caption="weak")
+    for i in range(8):
+        voter = _make_user(create_user, f"qualityvoter{i}")
+        Like.objects.create(user=voter, post=strong)
+    monkeypatch.setattr(
+        FeedSession,
+        "start",
+        classmethod(lambda cls: FeedSession(31_337, 0.99, timezone.now().timestamp())),
+    )
+
+    assert FeedService.get_feed(None, None, 1).posts[0].id == str(strong.id)
+
+
+def test_unseen_followed_post_precedes_seen_discovery_post(create_user, settings, monkeypatch):
+    from core.follows.models import Follow
+    from core.posts.models import Post
+
+    settings.FEED_SHUFFLE_STRENGTH = 0
+    settings.FEED_SEEN_PENALTY = 1
+    viewer = _make_user(create_user, "blendviewer")
+    discovery_author = _make_user(create_user, "discoveryauthor")
+    followed_author = _make_user(create_user, "followedauthor")
+    discovery = Post.objects.create(user=discovery_author, post_type="text", caption="discovery")
+    followed = Post.objects.create(user=followed_author, post_type="text", caption="followed")
+    Follow.objects.create(follower=viewer, following=followed_author)
+    monkeypatch.setattr(
+        FeedSession,
+        "start",
+        classmethod(lambda cls: FeedSession(31_337, 0.0, timezone.now().timestamp())),
+    )
+
+    first = FeedService.get_for_you_feed(str(viewer.id), None, 1)
+    second = FeedService.get_for_you_feed(str(viewer.id), None, 1)
+
+    assert first.posts[0].id == str(discovery.id)
+    assert second.posts[0].id == str(followed.id)
+
+
+def test_rotated_lead_preserves_cursor_replay_and_complete_scroll(
+    catalogue, create_user, settings, monkeypatch
+):
+    settings.FEED_SHUFFLE_STRENGTH = 0
+    settings.FEED_SEEN_WINDOW_HOURS = 0
+    viewer = _make_user(create_user, "longscroll")
+    monkeypatch.setattr(
+        FeedSession,
+        "start",
+        classmethod(lambda cls: FeedSession(31_337, 0.99, timezone.now().timestamp())),
+    )
+    first = FeedService.get_for_you_feed(str(viewer.id), None, 1)
+    assert first.next_cursor
+    assert len(first.next_cursor) < 2048
+    replay_a = FeedService.get_for_you_feed(str(viewer.id), first.next_cursor, 1)
+    replay_b = FeedService.get_for_you_feed(str(viewer.id), first.next_cursor, 1)
+    assert [p.id for p in replay_a.posts] == [p.id for p in replay_b.posts]
+    assert replay_a.next_cursor == replay_b.next_cursor
+
+    shown = [str(first.posts[0].id)]
+    cursor = first.next_cursor
+    for _ in range(40):
+        page = FeedService.get_for_you_feed(str(viewer.id), cursor, 1)
+        shown.extend(str(post.id) for post in page.posts)
+        if not page.has_more:
+            assert page.next_cursor is None
+            break
+        cursor = page.next_cursor
+        assert len(cursor) < 2048
+    else:
+        pytest.fail("feed never ended")
+    _assert_exactly_once(shown, {str(post.id) for post in catalogue["posts"]})
+
+
+@pytest.mark.parametrize("count", [1, 2])
+def test_sparse_catalogue_rotates_without_duplicates(create_user, count):
+    from core.posts.models import Post
+
+    viewer = _make_user(create_user, f"sparseviewer{count}")
+    expected = set()
+    for i in range(count):
+        author = _make_user(create_user, f"sparseauthor{count}{i}")
+        post = Post.objects.create(user=author, post_type="text", caption=f"post {i}")
+        expected.add(str(post.id))
+
+    first = FeedService.get_for_you_feed(str(viewer.id), None, 1)
+    second = FeedService.get_for_you_feed(str(viewer.id), None, 1)
+    assert first.posts and second.posts
+    if count == 2:
+        assert first.posts[0].id != second.posts[0].id
+    shown = _scroll(lambda cursor: FeedService.get_for_you_feed(str(viewer.id), cursor, 1))
+    _assert_exactly_once(shown, expected)

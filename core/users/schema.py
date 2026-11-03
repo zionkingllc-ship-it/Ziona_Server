@@ -175,6 +175,7 @@ class CurrentUserResponse:
     lastNameChange: str | None = None
     lastUsernameChange: str | None = None
     usernameEditableUntil: str | None = None
+    displayNameEditableUntil: str | None = None
     usernameGraceChangesRemaining: int = 0
     createdAt: str
 
@@ -307,6 +308,7 @@ class UserQueries:
             lastNameChange=data.get("lastNameChange"),
             lastUsernameChange=data.get("lastUsernameChange"),
             usernameEditableUntil=data.get("usernameEditableUntil"),
+            displayNameEditableUntil=data.get("displayNameEditableUntil"),
             usernameGraceChangesRemaining=data.get("usernameGraceChangesRemaining", 0),
             createdAt=data["createdAt"],
         )

@@ -35,6 +35,7 @@ from core.authentication.validators import (
 from core.shared.logging import log_security_event, mask_email
 from core.users.models import User
 from core.users.username_policy import (
+    GRACE_PERIOD,
     grace_changes_remaining,
     username_editable_until,
     username_is_available,
@@ -82,6 +83,7 @@ class AuthService:
             cached_data
             and "accountDetails" in cached_data
             and "usernameEditableUntil" in cached_data
+            and "displayNameEditableUntil" in cached_data
         ):
             return cached_data
 
@@ -96,6 +98,13 @@ class AuthService:
         profile_dto = ProfileService.get_user_profile(user_id, viewer_id=user_id)
         now = timezone.now()
         editable_until = username_editable_until(user, now=now)
+        name_grace_end = user.created_at + GRACE_PERIOD
+        name_editable_until = name_grace_end if now < name_grace_end else None
+        counted_name_change = (
+            user.last_name_change
+            if user.last_name_change and user.last_name_change >= name_grace_end
+            else None
+        )
 
         response_data = {
             "id": str(user.id),
@@ -121,7 +130,10 @@ class AuthService:
                 "followersCount": profile_dto.stats.followers_count,
                 "followingCount": profile_dto.stats.following_count,
             },
-            "lastNameChange": user.last_name_change.isoformat() if user.last_name_change else None,
+            "lastNameChange": counted_name_change.isoformat() if counted_name_change else None,
+            "displayNameEditableUntil": (
+                name_editable_until.isoformat() if name_editable_until else None
+            ),
             "lastUsernameChange": user.last_username_change.isoformat()
             if user.last_username_change
             else None,
@@ -137,8 +149,9 @@ class AuthService:
         }
 
         # Do not serve a stale grace deadline after the 48-hour boundary.
+        deadlines = [deadline for deadline in (editable_until, name_editable_until) if deadline]
         cache_seconds = (
-            min(300, max(1, int((editable_until - now).total_seconds()))) if editable_until else 300
+            min(300, max(1, int((min(deadlines) - now).total_seconds()))) if deadlines else 300
         )
         cache.set(cache_key, response_data, cache_seconds)
 
