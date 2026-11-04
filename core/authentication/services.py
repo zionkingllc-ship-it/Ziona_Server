@@ -210,7 +210,7 @@ class AuthService:
             mask_email(email),
         )
         log_security_event(
-            "auth.register.success",
+            "auth.register.created",
             user_id=str(user.id),
             ip_address=ip_address,
             metadata={"email": mask_email(email), "username": username},
@@ -218,7 +218,23 @@ class AuthService:
 
         message = "Registration successful. Check your email for verification code."
 
-        OTPService._send_otp(user.email, str(user.id), purpose="verify")
+        try:
+            OTPService._send_otp(user.email, str(user.id), purpose="verify")
+        except AuthenticationError as exc:
+            log_security_event(
+                "auth.register.verification_unavailable",
+                user_id=str(user.id),
+                ip_address=ip_address,
+                metadata={"code": exc.code},
+            )
+            raise
+
+        log_security_event(
+            "auth.register.success",
+            user_id=str(user.id),
+            ip_address=ip_address,
+            metadata={"email": mask_email(email), "username": username},
+        )
 
         return {
             "user": user,

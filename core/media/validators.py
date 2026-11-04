@@ -123,7 +123,9 @@ def validate_magic_bytes(file_content: bytes, declared_type: str) -> bool:
     expected_signatures = MAGIC_BYTES[declared_type]
 
     for signature in expected_signatures:
-        if declared_type == "video/mp4":
+        if declared_type in {"video/mp4", "video/quicktime"}:
+            # ISO base-media containers put the four-byte box size before ftyp.
+            # This is only a header check; processing still validates the video stream.
             if len(file_content) >= 8 and signature in file_content[4:8]:
                 return True
         elif declared_type == "image/webp":

@@ -5,6 +5,18 @@ from django.test import Client
 
 
 @pytest.mark.django_db
+def test_guest_unread_count_returns_typed_auth_error():
+    response = Client().post(
+        "/graphql/",
+        data=json.dumps({"query": "query { unreadNotificationCount }"}),
+        content_type="application/json",
+    )
+    content = response.json()
+    assert content["errors"][0]["extensions"]["code"] == "UNAUTHENTICATED"
+    assert content.get("data") is None
+
+
+@pytest.mark.django_db
 def test_notification_preferences_accepts_bearer_token(authenticated_user):
     client = Client()
     client.defaults["HTTP_AUTHORIZATION"] = f"Bearer {authenticated_user['access_token']}"
