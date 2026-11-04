@@ -103,6 +103,17 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
+      - name: Verify Celery Redis transport starts
+        run: |
+          python - <<'PYCODE'
+          import os
+          from kombu import Connection
+
+          with Connection(os.environ['REDIS_URL']) as connection:
+              channel = connection.channel()
+              channel.close()
+          PYCODE
+
       - name: Run migrations
         run: python manage.py migrate --noinput
 
