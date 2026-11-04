@@ -35,6 +35,8 @@ cryptography==50.0.0
 redis==5.0.1
 django-redis==5.4.0
 celery==5.3.4
+# Kombu 5.7 requires redis-py >= 6.1; upgrade both together after testing the Redis server.
+kombu==5.6.0
 django-celery-beat==2.9.0
 
 # GCP Storage

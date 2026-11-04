@@ -2,6 +2,7 @@ from enum import Enum
 
 import strawberry
 from django.utils import timezone
+from graphql import GraphQLError
 from strawberry.types import Info
 
 from core.admin_dashboard.permissions import admin_required
@@ -119,14 +120,16 @@ def _default_notification_title(notification_type: str) -> str:
 def _get_authenticated_notification_user(info: Info):
     user_id = _get_authenticated_user_id(info)
     if not user_id:
-        raise Exception("Authentication required")
+        raise GraphQLError("Authentication required", extensions={"code": "UNAUTHENTICATED"})
 
     from core.users.models import User
 
     try:
         return User.objects.get(id=user_id)
     except User.DoesNotExist:
-        raise Exception("Authentication required") from None
+        raise GraphQLError(
+            "Authentication required", extensions={"code": "UNAUTHENTICATED"}
+        ) from None
 
 
 @strawberry.type

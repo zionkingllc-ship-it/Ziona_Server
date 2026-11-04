@@ -11,7 +11,10 @@ logger = logging.getLogger(__name__)
 
 
 def track_notification_sent(notification_type: str):
-    """Increment sent_count for today."""
+    """Count one notification event accepted by FCM for at least one device today.
+
+    Provider acceptance does not guarantee that a device displayed the alert.
+    """
     try:
         today = timezone.localdate()
         metrics, _ = NotificationMetrics.objects.get_or_create(

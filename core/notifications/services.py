@@ -636,19 +636,35 @@ def send_push_notification(user_id: int, title: str, body: str, data: dict[str, 
     )
 
     summary = send_fcm_notification(tokens, title, body, data) or {}
+    success_count = summary.get("success_count", 0)
+    failure_count = summary.get("failure_count", 0)
+    invalid_token_count = summary.get("invalid_token_count", 0)
     logger.info(
         "push_notification_dispatch_finished",
         extra={
             "user_id": str(user_id),
             "token_count": len(tokens),
-            "success_count": summary.get("success_count", 0),
-            "failure_count": summary.get("failure_count", 0),
-            "invalid_token_count": summary.get("invalid_token_count", 0),
+            "success_count": success_count,
+            "failure_count": failure_count,
+            "invalid_token_count": invalid_token_count,
         },
     )
 
-    # Track analytics
-    if data and "type" in data:
+    if success_count == 0:
+        logger.warning(
+            "push_notification_dispatch_no_success",
+            extra={
+                "user_id": str(user_id),
+                "notification_type": (data or {}).get("type"),
+                "token_count": len(tokens),
+                "success_count": success_count,
+                "failure_count": failure_count,
+                "invalid_token_count": invalid_token_count,
+            },
+        )
+
+    # Count notification events accepted by FCM, not individual device tokens.
+    if success_count > 0 and data and "type" in data:
         track_notification_sent(data["type"])
 
 

@@ -8,6 +8,7 @@ from django.utils import timezone
 from core.notifications.models import (
     DeviceToken,
     Notification,
+    NotificationMetrics,
     NotificationMutedUser,
     NotificationPreference,
     NotificationType,
@@ -193,6 +194,7 @@ def test_muted_sender_push_is_suppressed(db, user, other_user, monkeypatch):
     )
 
     assert calls == []
+    assert not NotificationMetrics.objects.exists()
 
 
 def test_notification_category_filtering(db, user, other_user):
@@ -539,6 +541,139 @@ def test_send_push_notification_logs_provider_summary(db, user, monkeypatch):
     messages = [message for message, _ in log_calls]
     assert "push_notification_dispatch_started" in messages
     assert "push_notification_dispatch_finished" in messages
+
+
+@pytest.mark.parametrize(
+    ("success_count", "failure_count", "invalid_token_count"),
+    [(2, 0, 0), (1, 1, 0), (0, 2, 1)],
+    ids=["all-accepted", "partially-accepted", "none-accepted"],
+)
+def test_push_sent_metric_requires_fcm_acceptance(
+    db, user, monkeypatch, success_count, failure_count, invalid_token_count
+):
+    DeviceToken.objects.create(user=user, token=_fcm_token("device-1"), platform="ios")
+    DeviceToken.objects.create(user=user, token=_fcm_token("device-2"), platform="android")
+    logs = []
+
+    def record(level):
+        def append_log(message, *args, **kwargs):
+            logs.append((level, message, kwargs.get("extra", {})))
+
+        return append_log
+
+    monkeypatch.setattr("core.notifications.services.logger.info", record("info"))
+    monkeypatch.setattr("core.notifications.services.logger.warning", record("warning"))
+    monkeypatch.setattr(
+        "core.notifications.services.send_fcm_notification",
+        lambda *args: {
+            "success_count": success_count,
+            "failure_count": failure_count,
+            "invalid_token_count": invalid_token_count,
+        },
+    )
+
+    send_push_notification(
+        user_id=user.id,
+        title="Test",
+        body="Push delivery",
+        data={"type": NotificationType.ADMIN_ANNOUNCEMENT},
+    )
+
+    metric = NotificationMetrics.objects.filter(
+        date=timezone.localdate(), notification_type=NotificationType.ADMIN_ANNOUNCEMENT
+    ).first()
+    if success_count:
+        assert metric is not None
+        assert metric.sent_count == 1  # Count the event once, even with two accepted tokens.
+    else:
+        assert metric is None
+
+    finished = [
+        extra for _, message, extra in logs if message == "push_notification_dispatch_finished"
+    ]
+    assert len(finished) == 1
+    assert finished[0]["token_count"] == 2
+    assert finished[0]["success_count"] == success_count
+    assert finished[0]["failure_count"] == failure_count
+    assert finished[0]["invalid_token_count"] == invalid_token_count
+
+    warnings = [extra for level, message, extra in logs if level == "warning"]
+    if success_count:
+        assert warnings == []
+    else:
+        assert len(warnings) == 1
+        assert any(message == "push_notification_dispatch_no_success" for _, message, _ in logs)
+        assert warnings[0]["token_count"] == 2
+        assert warnings[0]["success_count"] == 0
+        assert warnings[0]["failure_count"] == failure_count
+        assert warnings[0]["invalid_token_count"] == invalid_token_count
+        assert all("APA91b" not in str(extra) for _, _, extra in logs)
+
+
+def test_push_without_active_tokens_does_not_increment_sent_metric(db, user, monkeypatch):
+    monkeypatch.setattr(
+        "core.notifications.services.send_fcm_notification",
+        lambda *args: pytest.fail("FCM must not be called without tokens"),
+    )
+
+    send_push_notification(
+        user_id=user.id,
+        title="Test",
+        body="Push delivery",
+        data={"type": NotificationType.ADMIN_ANNOUNCEMENT},
+    )
+
+    assert not NotificationMetrics.objects.exists()
+
+
+@pytest.mark.parametrize(
+    "failure_kind", ["firebase-unavailable", "firebase-not-initialized", "transport-error"]
+)
+def test_push_provider_failures_do_not_increment_sent_metric(db, user, monkeypatch, failure_kind):
+    import core.notifications.firebase as firebase
+
+    DeviceToken.objects.create(user=user, token=_fcm_token("device-1"), platform="ios")
+    if failure_kind == "firebase-unavailable":
+        monkeypatch.setattr(firebase, "firebase_admin", None)
+    elif failure_kind == "firebase-not-initialized":
+        monkeypatch.setattr(firebase, "initialize_firebase", lambda: None)
+        monkeypatch.setattr(firebase, "_firebase_initialized", False)
+    else:
+        monkeypatch.setattr(firebase, "initialize_firebase", lambda: None)
+        monkeypatch.setattr(firebase, "_firebase_initialized", True)
+
+        def fail_send(message):
+            raise OSError("FCM transport unavailable")
+
+        monkeypatch.setattr(firebase.messaging, "send_each_for_multicast", fail_send)
+
+    warnings = []
+    monkeypatch.setattr(
+        "core.notifications.services.logger.warning",
+        lambda message, *args, **kwargs: warnings.append((message, kwargs.get("extra", {}))),
+    )
+
+    send_push_notification(
+        user_id=user.id,
+        title="Test",
+        body="Push delivery",
+        data={"type": NotificationType.ADMIN_ANNOUNCEMENT},
+    )
+
+    assert not NotificationMetrics.objects.exists()
+    assert warnings == [
+        (
+            "push_notification_dispatch_no_success",
+            {
+                "user_id": str(user.id),
+                "notification_type": NotificationType.ADMIN_ANNOUNCEMENT,
+                "token_count": 1,
+                "success_count": 0,
+                "failure_count": 1,
+                "invalid_token_count": 0,
+            },
+        )
+    ]
 
 
 @pytest.mark.django_db

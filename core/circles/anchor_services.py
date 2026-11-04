@@ -12,6 +12,13 @@ from django.utils import timezone
 from core.circles.models import Anchor, AnchorPage, Circle, CircleMembership
 from core.engagement.cache import EngagementCache
 from core.engagement.hidden_content import exclude_hidden_circle_content
+from core.media.thumbnails import (
+    anchor_thumbnail_candidates,
+    can_generate_anchor_thumbnail,
+    enqueue_anchor_thumbnail,
+    has_usable_anchor_thumbnail,
+    resolve_media_thumbnail_url,
+)
 from core.shared.exceptions import ZionaError
 
 # ──────────────────────────────────────────────
@@ -290,6 +297,16 @@ def create_anchor(
     if not anchor_video and anchor_type == "video" and media_url:
         anchor_video = media_url
 
+    if anchor_type in ("image", "image_text", "video"):
+        candidates = anchor_thumbnail_candidates(
+            anchor_type,
+            media_url=media_url,
+            anchor_image=anchor_image,
+            anchor_video=anchor_video,
+        )
+        if not has_usable_anchor_thumbnail(anchor_thumbnail, *candidates):
+            anchor_thumbnail = resolve_media_thumbnail_url(*candidates)
+
     # ── Create anchor ──
     anchor = Anchor.objects.create(
         circle=circle,
@@ -342,5 +359,13 @@ def create_anchor(
     else:
         # ── Invalidate cache only for anchors that are active immediately ──
         invalidate_active_anchor_cache(circle_id)
+
+    if not anchor_thumbnail and can_generate_anchor_thumbnail(
+        anchor_type,
+        media_url=media_url,
+        anchor_image=anchor_image,
+    ):
+        anchor_id = str(anchor.id)
+        transaction.on_commit(lambda: enqueue_anchor_thumbnail(anchor_id))
 
     return anchor

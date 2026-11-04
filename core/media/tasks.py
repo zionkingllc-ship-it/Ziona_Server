@@ -1,5 +1,6 @@
 """Celery tasks for staged media processing."""
 
+import hashlib
 import logging
 import os
 import subprocess
@@ -10,14 +11,22 @@ from billiard.exceptions import SoftTimeLimitExceeded
 from celery import chain, shared_task
 from django.apps import apps
 from django.conf import settings
-from django.db import DatabaseError
+from django.core.cache import cache
+from django.db import DatabaseError, transaction
 from django.utils import timezone
 from google.api_core import exceptions as gcs_exceptions
 from PIL import UnidentifiedImageError
 
 from core.media.error_codes import UPLOAD_URL_EXPIRED
 from core.media.models import MediaFile, MediaStatus, MediaType
-from core.shared.utils import normalize_url
+from core.media.thumbnails import (
+    anchor_thumbnail_candidates,
+    has_usable_anchor_thumbnail,
+    resolve_media_thumbnail_url,
+    storage_path_from_media_url,
+    sync_anchor_thumbnails,
+)
+from core.shared.utils import normalize_url, parse_uuid
 
 logger = logging.getLogger("core.media")
 
@@ -440,6 +449,7 @@ def _optimize_video_media(media_file: MediaFile) -> None:
                 "updated_at",
             ]
         )
+        _enqueue_media_anchor_sync(media_file)
 
         logger.info(
             "video_optimized_with_thumbnail",
@@ -491,6 +501,7 @@ def _generate_image_thumbnail(media_file: MediaFile) -> None:
 
         media_file.thumbnail_path = thumbnail_path
         media_file.save(update_fields=["thumbnail_path", "updated_at"])
+        _enqueue_media_anchor_sync(media_file)
 
         logger.info(
             "image_thumbnail_generated",
@@ -516,6 +527,7 @@ def _generate_video_thumbnail(media_file: MediaFile) -> None:
 
         media_file.thumbnail_path = thumbnail_path
         media_file.save(update_fields=["thumbnail_path", "updated_at"])
+        _enqueue_media_anchor_sync(media_file)
 
         logger.info(
             "thumbnail_generated",
@@ -524,6 +536,169 @@ def _generate_video_thumbnail(media_file: MediaFile) -> None:
                 "thumbnail_path": thumbnail_path,
                 "size_bytes": thumbnail_file_path.stat().st_size,
             },
+        )
+
+
+def _enqueue_media_anchor_sync(media_file: MediaFile) -> None:
+    """Keep optional anchor updates outside the upload's success path."""
+    media_id = str(media_file.id)
+
+    def enqueue() -> None:
+        try:
+            sync_media_anchor_thumbnails.apply_async(args=[media_id])
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "anchor_thumbnail_sync_enqueue_failed",
+                extra={"media_id": media_id},
+                exc_info=True,
+            )
+
+    try:
+        transaction.on_commit(enqueue)
+    except Exception:  # noqa: BLE001
+        logger.warning(
+            "anchor_thumbnail_sync_registration_failed",
+            extra={"media_id": media_id},
+            exc_info=True,
+        )
+
+
+@shared_task(
+    bind=True,
+    max_retries=3,
+    default_retry_delay=30,
+    retry_backoff=True,
+    retry_jitter=True,
+    soft_time_limit=60,
+    time_limit=90,
+)
+def sync_media_anchor_thumbnails(self, media_id: str) -> int:
+    """Retry anchor associations independently of the media processing pipeline."""
+    if parse_uuid(media_id) is None:
+        return 0
+    media_file = _get_media_file(media_id)
+    if media_file is None or not media_file.thumbnail_path:
+        return 0
+    try:
+        return sync_anchor_thumbnails(media_file)
+    except DatabaseError as exc:
+        logger.warning(
+            "anchor_thumbnail_sync_retry",
+            extra={"media_id": media_id},
+            exc_info=True,
+        )
+        raise self.retry(exc=exc) from exc
+
+
+@shared_task(
+    bind=True,
+    max_retries=2,
+    default_retry_delay=30,
+    retry_backoff=True,
+    retry_jitter=True,
+    soft_time_limit=_media_setting("MEDIA_THUMBNAIL_TASK_SOFT_TIME_LIMIT_SECONDS", 100),
+    time_limit=_media_setting("MEDIA_THUMBNAIL_TASK_TIME_LIMIT_SECONDS", 120),
+)
+def generate_anchor_thumbnail(self, anchor_id: str) -> str | None:
+    """Best-effort thumbnail generation for image anchors without one."""
+    from core.circles.models import Anchor
+
+    parsed_id = parse_uuid(anchor_id)
+    if parsed_id is None:
+        return None
+
+    anchor = Anchor.objects.filter(id=parsed_id).first()
+    if anchor is None:
+        return None
+
+    candidates = anchor_thumbnail_candidates(
+        anchor.anchor_type,
+        media_url=anchor.media_url,
+        anchor_image=anchor.anchor_image,
+        anchor_video=anchor.anchor_video,
+    )
+    if has_usable_anchor_thumbnail(anchor.anchor_thumbnail, *candidates):
+        return str(anchor.id)
+
+    original_thumbnail = anchor.anchor_thumbnail
+    # A queued job may outlive an edit to this anchor. Only the source snapshot
+    # that requested the work is allowed to publish its result.
+    current_source = Anchor.objects.filter(
+        id=anchor.id,
+        deleted_at__isnull=True,
+        anchor_thumbnail=original_thumbnail,
+        anchor_type=anchor.anchor_type,
+        media_url=anchor.media_url,
+        anchor_image=anchor.anchor_image,
+        anchor_video=anchor.anchor_video,
+    )
+    resolved = resolve_media_thumbnail_url(*candidates)
+    if resolved:
+        if current_source.update(anchor_thumbnail=resolved, updated_at=timezone.now()):
+            _invalidate_anchor_preview_cache(anchor.circle_id)
+        return str(anchor.id)
+
+    if anchor.anchor_type in ("image", "image_text"):
+        source_url = anchor.anchor_image or anchor.media_url
+    elif anchor.anchor_type == "video":
+        source_url = anchor.anchor_image
+    else:
+        return str(anchor.id)
+
+    storage_path = storage_path_from_media_url(source_url)
+    if not storage_path:
+        logger.info(
+            "anchor_thumbnail_skipped",
+            extra={"anchor_id": str(anchor.id), "reason": "unsupported_source"},
+        )
+        return str(anchor.id)
+
+    if not current_source.exists():
+        return str(anchor.id)
+
+    source_digest = hashlib.sha256(storage_path.encode("utf-8")).hexdigest()
+    thumbnail_path = f"thumbnails/anchors/{anchor.id}/{source_digest}.jpg"
+    try:
+        suffix = Path(storage_path).suffix or ".img"
+        with tempfile.TemporaryDirectory() as tmpdir:
+            source_path = Path(tmpdir) / f"source{suffix}"
+            thumbnail_file_path = Path(tmpdir) / "thumbnail.jpg"
+
+            _download_blob(storage_path, source_path)
+            _generate_image_thumbnail_file(
+                source_path,
+                thumbnail_file_path,
+                settings.MEDIA_IMAGE_THUMBNAIL_MAX_DIMENSION,
+            )
+            _upload_blob(thumbnail_path, thumbnail_file_path, "image/jpeg")
+    except TRANSIENT_MEDIA_EXCEPTIONS as exc:
+        raise self.retry(exc=exc) from exc
+    except Exception:  # noqa: BLE001
+        logger.warning(
+            "anchor_thumbnail_generation_failed",
+            extra={"anchor_id": str(anchor.id), "storage_path": storage_path},
+            exc_info=True,
+        )
+        return str(anchor.id)
+
+    thumbnail_url = _public_url(thumbnail_path)
+    if current_source.update(anchor_thumbnail=thumbnail_url, updated_at=timezone.now()):
+        _invalidate_anchor_preview_cache(anchor.circle_id)
+        logger.info(
+            "anchor_thumbnail_generated",
+            extra={"anchor_id": str(anchor.id), "thumbnail_url": thumbnail_url},
+        )
+    return str(anchor.id)
+
+
+def _invalidate_anchor_preview_cache(circle_id) -> None:
+    try:
+        cache.delete(f"active_anchor:{circle_id}")
+    except Exception:  # noqa: BLE001
+        logger.warning(
+            "anchor_thumbnail_cache_invalidation_failed",
+            extra={"circle_id": str(circle_id)},
+            exc_info=True,
         )
 
 
